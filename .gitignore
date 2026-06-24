@@ -1,0 +1,13 @@
+# IDE
+.idea
+.build
+dist/
+
+# OSX
+*.DS_Store
+
+# Rust
+target/
+
+# Node (Prettier / Commitlint installed in CI)
+node_modules/

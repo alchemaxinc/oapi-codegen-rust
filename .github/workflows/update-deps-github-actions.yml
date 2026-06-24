@@ -1,0 +1,29 @@
+name: Update GitHub Actions
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * 0" # Run every Sunday at midnight
+
+jobs:
+  update-actions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create temporary GitHub App Token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          owner: ${{ github.repository_owner }}
+          client-id: ${{ vars.HOUSEKEEPING_BOT_APP_ID }}
+          private-key: ${{ secrets.HOUSEKEEPING_BOT_PRIVATE_KEY }}
+
+      - name: Update GitHub Actions
+        uses: alchemaxinc/update-deps/actions@v2
+        with:
+          token: ${{ steps.app.outputs.token }}
+          auto-merge: "true"
+          merge-method: "squash"
+          base-branch: "develop"
+          file-glob: ".github/**/*.yml"
+          branch-prefix: "update-actions"
+          pr-title: "chore: update github actions"
+          commit-message: "chore: update github actions"

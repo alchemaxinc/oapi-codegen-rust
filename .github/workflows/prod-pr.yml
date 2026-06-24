@@ -1,0 +1,75 @@
+name: Automatic Production PR
+
+on:
+  schedule:
+    - cron: "0 0 * * 0" # Runs every Sunday at midnight UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-prod-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create temporary GitHub App Token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          owner: ${{ github.repository_owner }}
+          client-id: ${{ vars.HOUSEKEEPING_BOT_APP_ID }}
+          private-key: ${{ secrets.HOUSEKEEPING_BOT_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: develop
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Check for changes between develop and main
+        id: check_changes
+        run: |
+          git fetch origin main
+          DIFF_OUTPUT=$(git diff origin/main...origin/develop)
+
+          if [ -z "$DIFF_OUTPUT" ]; then
+            echo "No changes detected between develop and main"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected between develop and main"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.check_changes.outputs.has_changes == 'true'
+        id: create_pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          # Check if PR already exists
+          EXISTING_PR=$(gh pr list --base main --head develop --json number --jq '.[0].number')
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Pull request already exists: #$EXISTING_PR"
+            echo "pr_number=$EXISTING_PR" >> $GITHUB_OUTPUT
+          else
+            echo "Creating pull request from develop to main"
+            PR_URL=$(gh pr create \
+              --title "chore: to prod" \
+              --body "Weekly production release from develop to main" \
+              --head develop \
+              --base main)
+
+            echo "Pull request created at: $PR_URL"
+            PR_NUMBER=$(gh pr view "$PR_URL" --json number --jq .number)
+            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Enable auto-merge
+        if: steps.check_changes.outputs.has_changes == 'true'
+        uses: alchemaxinc/composite-toolbox/merge-pr@v1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          pull-request-number: ${{ steps.create_pr.outputs.pr_number }}

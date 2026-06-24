@@ -1,0 +1,195 @@
+name: Semantic Versioning and Release
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+  contents: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  semantic-release:
+    name: Semantic Versioning and Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version-release.outputs.tag }}
+
+    steps:
+      - &create-app-token
+        name: Create temporary GitHub App Token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          owner: ${{ github.repository_owner }}
+          client-id: ${{ vars.HOUSEKEEPING_BOT_APP_ID }}
+          private-key: ${{ secrets.HOUSEKEEPING_BOT_PRIVATE_KEY }}
+
+      - name: Checkout and setup
+        uses: alchemaxinc/composite-toolbox/checkout-and-setup@v1
+        with:
+          shallow: false
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Version and release
+        id: version-release
+        uses: alchemaxinc/composite-toolbox/semantic-release@v1
+        with:
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Check for Cargo.toml changes
+        id: check_changes
+        uses: alchemaxinc/composite-toolbox/check-changes@v1
+        with:
+          files: "Cargo.toml"
+
+      - name: Create Pull Request for version bump
+        id: open-pr
+        if: steps.check_changes.outputs.has_changes == 'true'
+        uses: alchemaxinc/composite-toolbox/create-pr@v1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          base-branch: "main"
+          branch-prefix: "chore/auto/semantic-release"
+          files: "Cargo.toml"
+          commit-message: "chore(semantic-release): bump version in Cargo.toml"
+          pr-title: "chore: semantic release version bump"
+          pr-body: |
+            This PR updates the version in Cargo.toml after semantic-release created a new release.
+
+            This is an automated PR created by the semantic release workflow.
+
+      - name: Auto-merge Pull Request
+        if: steps.open-pr.outcome == 'success'
+        uses: alchemaxinc/composite-toolbox/merge-pr@v1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          merge-method: "merge"
+          pull-request-number: ${{ steps.open-pr.outputs.pr_number }}
+
+  build-and-upload:
+    name: Build ${{ matrix.target }}
+    needs: semantic-release
+    if: needs.semantic-release.outputs.tag != ''
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-13
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+    env:
+      # Force ANSI colour in cargo/rustc output so GitHub Actions renders
+      # release-build logs in colour.
+      CARGO_TERM_COLOR: always
+      # Incremental compilation is a net loss in CI: extra small files bloat
+      # the cache while CI never reuses incremental state across runs.
+      CARGO_INCREMENTAL: "0"
+      # Retry transient registry / network failures up to 10 times before
+      # failing the release build (default is 3).
+      CARGO_NET_RETRY: "10"
+      # Same retry-budget rationale but for `rustup` itself, invoked
+      # indirectly by dtolnay/rust-toolchain.
+      RUSTUP_MAX_RETRIES: "10"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Read Rust toolchain version
+        id: rust-version
+        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-version.outputs.version }}
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+          key: ${{ matrix.target }}
+
+      - name: Build binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Rename binary and generate checksum
+        run: |
+          cd target/${{ matrix.target }}/release
+          mv oapi-codegen oapi-codegen-${{ matrix.target }}
+          # macOS runners ship `shasum` rather than GNU `sha256sum`.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum oapi-codegen-${{ matrix.target }} > oapi-codegen-${{ matrix.target }}.sha256
+          else
+            shasum -a 256 oapi-codegen-${{ matrix.target }} > oapi-codegen-${{ matrix.target }}.sha256
+          fi
+
+      - *create-app-token
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TAG: ${{ needs.semantic-release.outputs.tag }}
+        run: |
+          gh release upload "$TAG" \
+            "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}" \
+            "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}.sha256"
+
+  publish:
+    name: Publish release
+    needs: [semantic-release, build-and-upload]
+    runs-on: ubuntu-latest
+
+    steps:
+      - *create-app-token
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TAG: ${{ needs.semantic-release.outputs.tag }}
+        run: gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false
+
+      - name: Checkout and configure identity for backmerge
+        if: github.ref == 'refs/heads/main'
+        uses: alchemaxinc/composite-toolbox/checkout-and-setup@v1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          shallow: "false"
+
+      - name: Backmerge main into develop
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -e
+          git fetch origin develop
+          git checkout develop
+
+          if git merge main --no-edit; then
+            git push origin develop
+          else
+            echo "Merge conflict detected, creating PR instead"
+            git merge --abort
+            gh pr create \
+              --title "chore: backmerge main into develop" \
+              --body "Automatic backmerge from main into develop failed due to conflicts. Please resolve manually." \
+              --head main \
+              --base develop || echo "PR already exists"
+          fi

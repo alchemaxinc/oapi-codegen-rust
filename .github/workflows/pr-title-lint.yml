@@ -1,0 +1,41 @@
+name: PR Title Lint
+
+# Lints the PR title against Conventional Commits.
+#
+# Kept in its own workflow (separate from ci.yml) so title edits re-trigger
+# only this ~10-second check rather than the entire CI matrix. The default
+# `pull_request` trigger types (opened, synchronize, reopened) do NOT fire
+# on title edits — `edited` is required.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMMITLINT_CLI_VERSION: "20.5.0"
+
+jobs:
+  lint-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code (shallow)
+        uses: actions/checkout@v6
+
+      - name: Cache Commitlint
+        id: cache-commitlint
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: v1-commitlint-${{ env.COMMITLINT_CLI_VERSION }}
+
+      - name: Install Commitlint
+        if: steps.cache-commitlint.outputs.cache-hit != 'true'
+        run: npm i -D @commitlint/cli@${{ env.COMMITLINT_CLI_VERSION }} @commitlint/config-conventional @commitlint/types
+
+      - name: Lint PR title (conventional commit)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: echo "$PR_TITLE" | npx commitlint --verbose

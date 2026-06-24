@@ -1,0 +1,13 @@
+[package]
+name = "oapi-codegen"
+description = "Generate client and server boilerplate from OpenAPI 3 specifications"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "oapi-codegen"
+path = "src/main.rs"
+
+[lints]
+workspace = true

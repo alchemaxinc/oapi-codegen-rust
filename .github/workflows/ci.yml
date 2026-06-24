@@ -1,0 +1,204 @@
+name: CI
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned Prettier version — kept in env so the install + cache key stay in
+  # sync. Bump together with any prettier-config changes.
+  PRETTIER_VERSION: "3.3.3"
+
+  # Pinned linker / test-runner versions for the manual installs below.
+  # Pinning avoids surprise breakage from upstream releases and lets the
+  # Swatinem cache stay valid (RUSTFLAGS is part of the cache key).
+  MOLD_VERSION: "2.41.0"
+  NEXTEST_VERSION: "0.9.133"
+
+  # Force ANSI colour in cargo/rustc output so GitHub Actions renders the
+  # terminal output in colour rather than as a wall of plain text.
+  CARGO_TERM_COLOR: always
+
+  # Incremental compilation is a net loss in CI: it produces a lot of small
+  # `target/incremental/*` files that bloat the cache and slow down both the
+  # save and restore steps, while CI never benefits from the cross-run reuse
+  # incremental was designed for (each run starts from a restored cache, not
+  # from a previous incremental state).
+  CARGO_INCREMENTAL: "0"
+
+  # Retry transient crates.io / docker.io / GitHub fetch failures up to 10
+  # times before failing the build, instead of the default 3. CI networking
+  # is flaky often enough that this avoids spurious red runs.
+  CARGO_NET_RETRY: "10"
+
+  # Sparse registry protocol is already Cargo's default on 1.70+, but pinning
+  # it explicitly keeps the cache key deterministic if Cargo ever flips the
+  # default back and avoids the much slower git-based index protocol.
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+  # Strip full DWARF debuginfo from dev and test builds; keep just enough
+  # (line tables) for panic backtraces to show the failing line. Saves
+  # roughly 20-30% on compile + link time and shrinks `target/` substantially,
+  # which in turn makes the rust-cache save/restore much faster. We don't
+  # debug binaries on CI, so the lost detail is irrelevant here.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+
+  # Same retry-budget rationale as CARGO_NET_RETRY but for `rustup` itself,
+  # which is invoked indirectly by dtolnay/rust-toolchain.
+  RUSTUP_MAX_RETRIES: "10"
+
+  # `short` backtraces keep test/clippy failure logs scannable: full
+  # backtraces include every libcore frame and dominate the failure output.
+  RUST_BACKTRACE: short
+
+jobs:
+  install-prettier:
+    runs-on: ubuntu-latest
+    steps:
+      - &checkout-code
+        name: Checkout code (shallow)
+        uses: actions/checkout@v6
+
+      - &cache-prettier
+        name: Cache Prettier
+        id: cache-prettier
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: v1-prettier-${{ env.PRETTIER_VERSION }}
+
+      - name: Install Prettier
+        if: steps.cache-prettier.outputs.cache-hit != 'true'
+        run: npm i -D prettier@${{ env.PRETTIER_VERSION }}
+
+  rust-checks:
+    name: rust-checks
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout-code
+
+      - &read-rust-version
+        name: Read Rust toolchain version
+        id: rust-version
+        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+
+      - &install-rust
+        name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-version.outputs.version }}
+          components: clippy, rustfmt
+
+      # mold is a drop-in linker that links Rust binaries roughly an order of
+      # magnitude faster than ld; significant win on a workspace with three
+      # binaries that all link openssl/rusqlite/etc. Installed manually into
+      # ~/.local/mold (rather than /usr/local) so the install tree can be
+      # cached as a single directory keyed on MOLD_VERSION — same pattern as
+      # the Prettier cache above.
+      - &cache-mold
+        name: Cache mold linker
+        id: cache-mold
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/mold
+          key: v1-mold-${{ env.MOLD_VERSION }}-x86_64-linux
+
+      - &install-mold
+        name: Install mold linker
+        env:
+          # Tells rustc to use mold instead of the default linker. Picked up
+          # by Swatinem/rust-cache as part of the cache key, so swapping
+          # linkers will correctly invalidate the cargo cache.
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: |
+          set -euo pipefail
+          if [ ! -x "$HOME/.local/mold/bin/mold" ]; then
+            mkdir -p "$HOME/.local/mold"
+            curl -fsSL "https://github.com/rui314/mold/releases/download/v${MOLD_VERSION}/mold-${MOLD_VERSION}-x86_64-linux.tar.gz" \
+              | tar -xz -C "$HOME/.local/mold" --strip-components=1
+          fi
+          echo "$HOME/.local/mold/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/mold/bin/mold" --version
+          echo "RUSTFLAGS=${RUSTFLAGS}" >> "$GITHUB_ENV"
+
+      # Swatinem/rust-cache is purpose-built for cargo: it scopes the cache to
+      # `target/` artifacts that survived the run, prunes stale rlibs, keys on
+      # Cargo.lock + rustc version automatically, and only saves on changes —
+      # all things the raw actions/cache wrapping above did poorly.
+      - &cache-cargo
+        name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-checks
+          # Keep target/ pruned so cache stays small and restore stays fast.
+          cache-targets: "true"
+          cache-all-crates: "true"
+
+      # cargo-nextest is shipped as a single static binary from
+      # get.nexte.st. We cache the resolved binary by version so subsequent
+      # CI runs skip the download entirely (~2s saved per run, but more
+      # importantly removes a network dependency from the hot path).
+      - name: Cache cargo-nextest
+        id: cache-nextest
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: v1-cargo-nextest-${{ env.NEXTEST_VERSION }}-x86_64-linux
+
+      - name: Install cargo-nextest
+        if: steps.cache-nextest.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cargo/bin"
+          curl -fsSL "https://get.nexte.st/${NEXTEST_VERSION}/linux" \
+            | tar -xz -C "$HOME/.cargo/bin"
+
+      - name: Verify cargo-nextest
+        run: cargo nextest --version
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --workspace --locked -- -D warnings
+
+      - name: Run unit tests
+        if: ${{ !startsWith(github.event.pull_request.title, 'chore:') }}
+        # nextest is faster than `cargo test` (parallel process model, smarter
+        # scheduling) and reuses the artifacts clippy just produced because
+        # both invocations target the same `target/` directory.
+        run: cargo nextest run --workspace --all-targets --locked --no-fail-fast
+
+  lint-prettier:
+    runs-on: ubuntu-latest
+    needs: install-prettier
+    steps:
+      - *checkout-code
+      - *cache-prettier
+
+      - name: Run Prettier
+        run: npx prettier --check .
+
+  ci-passed:
+    name: CI Passed
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [rust-checks, lint-prettier]
+    steps:
+      - name: Verify all jobs passed or were skipped
+        run: |
+          results=(
+            "${{ needs.rust-checks.result }}"
+            "${{ needs.lint-prettier.result }}"
+          )
+          for result in "${results[@]}"; do
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "Job failed or was cancelled: $result"
+              exit 1
+            fi
+          done
+          echo "All jobs passed or were skipped"
