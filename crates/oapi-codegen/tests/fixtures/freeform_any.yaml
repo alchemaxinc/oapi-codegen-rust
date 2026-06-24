@@ -1,0 +1,13 @@
+openapi: "3.0.3"
+info:
+  title: Free-form schema
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Anything: {}
+    Envelope:
+      type: object
+      required: [payload]
+      properties:
+        payload: {}

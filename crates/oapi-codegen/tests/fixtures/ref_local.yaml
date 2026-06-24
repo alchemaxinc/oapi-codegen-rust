@@ -1,0 +1,21 @@
+openapi: "3.0.3"
+info:
+  title: Local references
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Inner:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+    Outer:
+      type: object
+      required: [inner]
+      properties:
+        inner:
+          $ref: "#/components/schemas/Inner"
+    InnerAlias:
+      $ref: "#/components/schemas/Inner"

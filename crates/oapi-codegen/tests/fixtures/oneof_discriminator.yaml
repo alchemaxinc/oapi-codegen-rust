@@ -1,0 +1,28 @@
+openapi: "3.0.3"
+info:
+  title: oneOf with discriminator mapping
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Card:
+      type: object
+      required: [number]
+      properties:
+        number:
+          type: string
+    Bank:
+      type: object
+      required: [iban]
+      properties:
+        iban:
+          type: string
+    Payment:
+      oneOf:
+        - $ref: "#/components/schemas/Card"
+        - $ref: "#/components/schemas/Bank"
+      discriminator:
+        propertyName: kind
+        mapping:
+          card: "#/components/schemas/Card"
+          bank: "#/components/schemas/Bank"

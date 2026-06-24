@@ -1,0 +1,34 @@
+openapi: "3.0.3"
+info:
+  title: String formats
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    StringFormats:
+      type: object
+      required: [plain, date, date_time, byte, binary, password, uuid, email]
+      properties:
+        plain:
+          type: string
+        date:
+          type: string
+          format: date
+        date_time:
+          type: string
+          format: date-time
+        byte:
+          type: string
+          format: byte
+        binary:
+          type: string
+          format: binary
+        password:
+          type: string
+          format: password
+        uuid:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email

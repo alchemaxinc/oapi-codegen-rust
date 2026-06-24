@@ -1,0 +1,19 @@
+openapi: "3.0.3"
+info:
+  title: Primitive scalar types
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Primitives:
+      type: object
+      required: [label, count, ratio, flag]
+      properties:
+        label:
+          type: string
+        count:
+          type: integer
+        ratio:
+          type: number
+        flag:
+          type: boolean

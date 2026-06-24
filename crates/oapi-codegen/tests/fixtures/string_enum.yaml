@@ -1,0 +1,14 @@
+openapi: "3.0.3"
+info:
+  title: String enum
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Color:
+      type: string
+      description: A colour choice.
+      enum:
+        - red
+        - green
+        - blue

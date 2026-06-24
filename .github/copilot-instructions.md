@@ -76,6 +76,8 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 ## Code Style and Formatting
 
 - Follow the Rust Style Guide and use `rustfmt` for automatic formatting.
+- Always separate item definitions (functions, structs, enums, impls, modules) with a single blank line; never place two `fn`
+  definitions on adjacent lines without a blank line between them.
 - Place function and struct documentation immediately before the item using `///`.
 - Use `cargo clippy` to catch common mistakes and enforce best practices.
 - Only use comments for functions that are not overtly self-explanatory or for complex logic. Otherwise, prefer clear
