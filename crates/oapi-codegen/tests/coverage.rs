@@ -339,39 +339,85 @@ fn fixtures_with(status: Status) -> BTreeSet<&'static str> {
         .collect();
 }
 
-/// Supported fixtures must regenerate to their checked-in golden file.
+/// Regenerate `stem`'s golden output and assert it matches the checked-in file.
 ///
-/// Refresh after an intentional change with:
-/// `UPDATE_GOLDEN=1 cargo test -p oapi-codegen --test coverage`.
-#[test]
-fn goldens_match_generated_output() {
+/// Refresh goldens after an intentional change with `make update-golden`
+/// (`UPDATE_GOLDEN=1 cargo test -p oapi-codegen --test coverage`).
+fn assert_golden_matches(stem: &str) {
     let dir = tests_dir();
-    let update = std::env::var_os("UPDATE_GOLDEN").is_some();
+    let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+    let golden = dir.join("golden").join(format!("{stem}.rs"));
 
-    for stem in fixtures_with(Status::Supported) {
-        let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
-        let golden = dir.join("golden").join(format!("{stem}.rs"));
+    let generated = oapi_codegen::generate_models_string(&fixture).unwrap_or_else(|err| {
+        panic!("generating `{stem}` failed: {err}");
+    });
 
-        let generated = oapi_codegen::generate_models_string(&fixture).unwrap_or_else(|err| {
-            panic!("generating `{stem}` failed: {err}");
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        std::fs::write(&golden, &generated).unwrap_or_else(|err| {
+            panic!("writing golden `{stem}` failed: {err}");
         });
-
-        if update {
-            std::fs::write(&golden, &generated).unwrap_or_else(|err| {
-                panic!("writing golden `{stem}` failed: {err}");
-            });
-            continue;
-        }
-
-        let expected = std::fs::read_to_string(&golden).unwrap_or_else(|err| {
-            panic!("reading golden `{stem}` failed (run with UPDATE_GOLDEN=1): {err}");
-        });
-        assert_eq!(
-            generated, expected,
-            "generated output for `{stem}` drifted from tests/golden/{stem}.rs; \
-             re-run with UPDATE_GOLDEN=1 if this change is intentional",
-        );
+        return;
     }
+
+    let expected = std::fs::read_to_string(&golden).unwrap_or_else(|err| {
+        panic!("reading golden `{stem}` failed (run `make update-golden`): {err}");
+    });
+    assert_eq!(
+        generated, expected,
+        "generated output for `{stem}` drifted from tests/golden/{stem}.rs; \
+         run `make update-golden` if this change is intentional",
+    );
+}
+
+/// Emit one `#[test]` per supported fixture (so each shows in the test output)
+/// plus a `GOLDEN_TEST_STEMS` catalogue used to guard against drift. The stem
+/// list must match the supported fixtures in [`TEST_TABLE`] — enforced by
+/// [`golden_tests_cover_supported_fixtures`].
+macro_rules! golden_tests {
+    ($($stem:ident),+ $(,)?) => {
+        $(
+            #[test]
+            fn $stem() {
+                assert_golden_matches(stringify!($stem));
+            }
+        )+
+
+        const GOLDEN_TEST_STEMS: &[&str] = &[$(stringify!($stem)),+];
+    };
+}
+
+golden_tests!(
+    allof_merge,
+    anyof_untagged,
+    array_types,
+    ext_x_rust_type,
+    freeform_any,
+    integer_formats,
+    map_alias,
+    metadata_docs,
+    nullable,
+    number_formats,
+    object_additional_properties,
+    object_nested_inline,
+    object_optional_required,
+    oneof_discriminator,
+    oneof_untagged,
+    primitive_scalars,
+    ref_local,
+    string_enum,
+    string_formats,
+);
+
+/// The generated golden tests must cover exactly the supported fixtures, so a
+/// new supported fixture cannot be added without its own `#[test]`.
+#[test]
+fn golden_tests_cover_supported_fixtures() {
+    let generated: BTreeSet<&str> = GOLDEN_TEST_STEMS.iter().copied().collect();
+    assert_eq!(
+        generated,
+        fixtures_with(Status::Supported),
+        "the `golden_tests!` list is out of sync with the supported fixtures in TEST_TABLE",
+    );
 }
 
 /// Every supported golden must be `include!`d by `tests/generated_compiles.rs`

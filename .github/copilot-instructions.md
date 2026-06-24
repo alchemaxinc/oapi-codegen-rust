@@ -83,7 +83,10 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 - Only use comments for functions that are not overtly self-explanatory or for complex logic. Otherwise, prefer clear
   and descriptive code.
 - Do not ever use comments to separate sections of code. Instead, use functions, modules, or other organizational
-  structures to create clear boundaries.
+  structures to create clear boundaries. In particular, never write banner or divider comments such as
+  `// ---- Schema kinds ----` or `// === Helpers ===`.
+- Place global constants and statics (module-level `const` / `static` items) at the top of the file, immediately after
+  the imports and before any other item definitions.
 - Avoid side-effect / impure functions in favor of pure functions that take inputs and return outputs without modifying
   external state. Unless it would severely impact performance or usability, in which case side effects should be clearly
   documented.

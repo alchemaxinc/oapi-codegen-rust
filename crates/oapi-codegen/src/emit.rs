@@ -236,8 +236,8 @@ fn emit_type(ty: &RustType) -> Result<TokenStream> {
         RustType::Verbatim(text) => {
             let parsed: TokenStream = text.parse().map_err(|_| {
                 return Error::UnsupportedSchema {
-                    path: text.clone(),
-                    reason: "`x-rust-type` is not a valid Rust type expression".to_owned(),
+                    path: "x-rust-type".to_owned(),
+                    reason: format!("value `{text}` is not a valid Rust type expression"),
                 };
             })?;
             parsed
