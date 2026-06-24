@@ -1,0 +1,28 @@
+openapi: "3.0.3"
+info:
+  title: allOf composition
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Base:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+    Timestamped:
+      type: object
+      properties:
+        created_at:
+          type: string
+          format: date-time
+    Entity:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - $ref: "#/components/schemas/Timestamped"
+        - type: object
+          required: [name]
+          properties:
+            name:
+              type: string

@@ -1,0 +1,17 @@
+openapi: "3.0.3"
+info:
+  title: x-rust-type extension
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    UserId:
+      type: string
+      x-rust-type: uuid::Uuid
+    Account:
+      type: object
+      required: [owner]
+      properties:
+        owner:
+          type: string
+          x-rust-type: uuid::Uuid

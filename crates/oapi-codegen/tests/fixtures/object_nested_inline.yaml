@@ -1,0 +1,19 @@
+openapi: "3.0.3"
+info:
+  title: Inline nested object
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Order:
+      type: object
+      required: [shipping]
+      properties:
+        shipping:
+          type: object
+          required: [street]
+          properties:
+            street:
+              type: string
+            note:
+              type: string

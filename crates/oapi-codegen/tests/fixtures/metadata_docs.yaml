@@ -1,0 +1,15 @@
+openapi: "3.0.3"
+info:
+  title: Description and title metadata
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Documented:
+      type: object
+      description: A documented type.
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: The display name.

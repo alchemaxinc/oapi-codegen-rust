@@ -1,4 +1,4 @@
-name: PR Title Lint
+name: PR
 
 # Lints the PR title against Conventional Commits.
 #
@@ -18,7 +18,7 @@ env:
   COMMITLINT_CLI_VERSION: "20.5.0"
 
 jobs:
-  lint-pr-title:
+  lint-title:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code (shallow)
