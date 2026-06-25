@@ -331,20 +331,30 @@ fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream
         let variant = case.variant.to_token();
         let code = proc_macro2::Literal::u16_unsuffixed(case.status);
         let doc = doc_attr(&case.doc);
+        let status = quote! {
+            const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(#code) {
+                Ok(status) => status,
+                Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+            };
+        };
         match &case.body {
             Some(body) => {
                 let ty = emit_type(body)?;
                 variants.push(quote! { #doc #variant(#ty) });
                 arms.push(quote! {
                     #name::#variant(body) => {
-                        (axum::http::StatusCode::from_u16(#code).unwrap(), axum::Json(body)).into_response()
+                        #status
+                        (STATUS, axum::Json(body)).into_response()
                     }
                 });
             }
             None => {
                 variants.push(quote! { #doc #variant });
                 arms.push(quote! {
-                    #name::#variant => axum::http::StatusCode::from_u16(#code).unwrap().into_response(),
+                    #name::#variant => {
+                        #status
+                        STATUS.into_response()
+                    }
                 });
             }
         }

@@ -65,7 +65,7 @@ fn lower_operation(
     let handler = to_ident(&format!("{}_handler", name.logical()), Case::Snake);
     let response_enum = to_ident(&format!("{}_response", name.logical()), Case::Pascal);
 
-    let path_params = lower_path_params(path, operation, shared_params)?;
+    let path_params = lower_path_params(path, method, operation, shared_params)?;
     let body = lower_request_body(path, method, operation)?;
     let responses = lower_responses(path, method, operation)?;
 
@@ -86,9 +86,20 @@ fn lower_operation(
 /// order axum extracts a `Path<(..)>` tuple in.
 fn lower_path_params(
     path: &str,
+    method: &str,
     operation: &OasOperation,
     shared_params: &[ReferenceOr<Parameter>],
 ) -> Result<Vec<Param>> {
+    for parameter in operation.parameters.iter().chain(shared_params) {
+        if matches!(parameter, ReferenceOr::Reference { .. }) {
+            return Err(Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: "component parameter `$ref`s are not supported".to_owned(),
+            });
+        }
+    }
+
     let mut params = Vec::new();
     for name in path_param_names(path) {
         let declared = find_path_param(&name, operation, shared_params);
@@ -368,7 +379,10 @@ mod tests {
     #[test]
     fn response_variants_are_named_after_the_status_reason() {
         let variant = |code| {
-            let reason = HttpStatus::from_u16(code).unwrap().canonical_reason().unwrap();
+            let reason = HttpStatus::from_u16(code)
+                .expect("test status code is a valid HTTP status")
+                .canonical_reason()
+                .expect("status code has a canonical reason phrase");
             return to_ident(reason, Case::Pascal).logical().to_owned();
         };
         assert_eq!(variant(200), "Ok");

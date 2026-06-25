@@ -77,8 +77,9 @@ Setting `generate.std-http-server` emits an [`axum`] interface alongside the
 models. The output is typed-only — the generator never decides how a request is
 handled, it only describes the contract:
 
-- a `trait Api` with one `async fn` per operation (native `async fn` in traits,
-  no `async-trait` dependency), whose arguments are the path parameters and the
+- a `trait Api` with one method per operation returning an
+  `impl Future<Output = ...> + Send` (native async-in-traits / RPITIT, no
+  `async-trait` dependency), whose arguments are the path parameters and the
   decoded JSON body;
 - a response `enum` per operation, with one variant per documented status code,
   implementing `axum::response::IntoResponse`;

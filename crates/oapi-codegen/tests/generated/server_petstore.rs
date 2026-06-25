@@ -51,8 +51,13 @@ impl axum::response::IntoResponse for ListPetsResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
             ListPetsResponse::Ok(body) => {
-                (axum::http::StatusCode::from_u16(200).unwrap(), axum::Json(body))
-                    .into_response()
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    200,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
             }
         }
     }
@@ -70,12 +75,22 @@ impl axum::response::IntoResponse for CreatePetResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
             CreatePetResponse::Created(body) => {
-                (axum::http::StatusCode::from_u16(201).unwrap(), axum::Json(body))
-                    .into_response()
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    201,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
             }
             CreatePetResponse::BadRequest(body) => {
-                (axum::http::StatusCode::from_u16(400).unwrap(), axum::Json(body))
-                    .into_response()
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    400,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
             }
         }
     }
@@ -93,12 +108,22 @@ impl axum::response::IntoResponse for GetPetResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
             GetPetResponse::Ok(body) => {
-                (axum::http::StatusCode::from_u16(200).unwrap(), axum::Json(body))
-                    .into_response()
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    200,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
             }
             GetPetResponse::NotFound(body) => {
-                (axum::http::StatusCode::from_u16(404).unwrap(), axum::Json(body))
-                    .into_response()
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    404,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
             }
         }
     }
@@ -114,7 +139,13 @@ impl axum::response::IntoResponse for DeletePetResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
             DeletePetResponse::NoContent => {
-                axum::http::StatusCode::from_u16(204).unwrap().into_response()
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    204,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                STATUS.into_response()
             }
         }
     }
