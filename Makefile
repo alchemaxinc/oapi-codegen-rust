@@ -43,9 +43,9 @@ test-unit: ## Run unit tests
 test-integration: ## Run integration tests
 	cargo test --features integration --test '*_integration' -- --nocapture
 
-.PHONY: update-golden
-update-golden: ## Refresh generated golden files from the coverage fixtures
-	UPDATE_GOLDEN=1 cargo test -p oapi-codegen --test coverage
+.PHONY: update-generated
+update-generated: ## Refresh generated files from the coverage fixtures
+	UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage
 
 .PHONY: docs
 docs: ## Generate and open Rust documentation
