@@ -333,7 +333,11 @@ const SERVER_FIXTURES: &[&str] = &["server_petstore", "server_refs"];
 
 /// Server fixtures whose generation must fail with a documented error, covering
 /// the slice's deliberate limitations (e.g. `default`/range responses).
-const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &["server_unsupported_default_response", "server_unsupported_ref_param"];
+const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
+    "server_unsupported_default_response",
+    "server_unsupported_ref_param",
+    "server_unsupported_xfile_response_ref",
+];
 
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {

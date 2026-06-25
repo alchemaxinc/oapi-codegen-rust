@@ -80,6 +80,12 @@ impl Spec {
     pub fn resolve_response(&self, reference: &str) -> Result<&Response> {
         let mut current = reference.to_owned();
         for _ in 0..MAX_REF_DEPTH {
+            if ref_file_part(&current).is_some() {
+                return Err(Error::UnsupportedRef {
+                    reference: current.clone(),
+                    reason: "cross-file component response `$ref`s are not supported".to_owned(),
+                });
+            }
             let name = ref_component_name(&current, "responses").ok_or_else(|| {
                 return Error::UnsupportedRef {
                     reference: current.clone(),
@@ -134,20 +140,31 @@ impl Spec {
     }
 }
 
-/// Extract the trailing schema name from a (possibly cross-file) `$ref`.
+/// Extract the trailing schema name from a *same-document* `$ref`
+/// (`#/components/schemas/Foo` -> `Foo`).
 ///
-/// `#/components/schemas/Foo` and `schemas/x.yaml#/components/schemas/Foo` both
-/// yield `Foo`.
+/// Cross-file references (e.g. `schemas/x.yaml#/components/schemas/Foo`) yield
+/// `None`: the models pipeline and the same-document `$ref` resolver only handle
+/// in-document schemas, so accepting a cross-file name here would risk emitting a
+/// local `Named` type for what is actually external. The server generator reads
+/// cross-file names via [`ref_component_name`] paired with [`ref_file_part`].
 pub fn ref_target_name(reference: &str) -> Option<&str> {
+    if ref_file_part(reference).is_some() {
+        return None;
+    }
     return ref_component_name(reference, "schemas");
 }
 
-/// Extract the trailing component name of the given `kind` (e.g. `schemas`,
+/// Extract the trailing component name of the given `kind` (`schemas` or
 /// `responses`) from a (possibly cross-file) `$ref`.
 pub fn ref_component_name<'a>(reference: &'a str, kind: &str) -> Option<&'a str> {
     let fragment = reference.split('#').nth(1).unwrap_or(reference);
-    let prefix = format!("/components/{kind}/");
-    let name = fragment.strip_prefix(&prefix)?;
+    let prefix = match kind {
+        "schemas" => "/components/schemas/",
+        "responses" => "/components/responses/",
+        _ => return None,
+    };
+    let name = fragment.strip_prefix(prefix)?;
     if name.is_empty() || name.contains('/') {
         return None;
     }
@@ -168,11 +185,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extracts_local_and_cross_file_ref_names() {
+    fn ref_target_name_is_same_document_schemas_only() {
         assert_eq!(ref_target_name("#/components/schemas/Foo"), Some("Foo"));
+        // Cross-file schema refs are rejected here; the server path resolves
+        // them via `ref_component_name` + `ref_file_part` instead.
         assert_eq!(
             ref_target_name("schemas/common.yaml#/components/schemas/ErrorResponse"),
-            Some("ErrorResponse"),
+            None
         );
         assert_eq!(ref_target_name("#/components/responses/Bar"), None);
     }

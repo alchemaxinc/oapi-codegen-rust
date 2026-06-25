@@ -27,8 +27,8 @@ use crate::ir::ResponseCase;
 use crate::ir::RustType;
 use crate::ir::Service;
 use crate::loader::Spec;
+use crate::loader::ref_component_name;
 use crate::loader::ref_file_part;
-use crate::loader::ref_target_name;
 use crate::naming::Case;
 use crate::naming::to_ident;
 use crate::schema::integer_format_type;
@@ -125,7 +125,7 @@ impl Lowerer<'_> {
         for name in path_param_names(path) {
             let declared = find_path_param(&name, operation, shared_params);
             let ty = match declared {
-                Some(format) => self.param_type(path, &name, format)?,
+                Some(format) => self.param_type(path, method, &name, format)?,
                 None => RustType::String,
             };
             params.push(Param {
@@ -166,19 +166,19 @@ fn path_param_schema<'a>(name: &str, parameters: &'a [ReferenceOr<Parameter>]) -
 
 /// Map a path parameter's schema to a scalar Rust type.
 impl Lowerer<'_> {
-    fn param_type(&self, path: &str, name: &str, format: &ParameterSchemaOrContent) -> Result<RustType> {
+    fn param_type(&self, path: &str, method: &str, name: &str, format: &ParameterSchemaOrContent) -> Result<RustType> {
         let schema = match format {
             ParameterSchemaOrContent::Schema(schema) => schema,
             ParameterSchemaOrContent::Content(_) => {
                 return Err(Error::UnsupportedOperation {
-                    method: "*".to_owned(),
+                    method: method.to_owned(),
                     path: path.to_owned(),
                     reason: format!("path parameter `{name}` uses `content`, which is not supported"),
                 });
             }
         };
         let schema = match schema {
-            ReferenceOr::Reference { reference } => return self.named_from_ref(path, reference),
+            ReferenceOr::Reference { reference } => return self.named_from_ref(path, method, reference),
             ReferenceOr::Item(schema) => schema,
         };
         let ty = match &schema.schema_kind {
@@ -188,7 +188,7 @@ impl Lowerer<'_> {
             SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
             _ => {
                 return Err(Error::UnsupportedOperation {
-                    method: "*".to_owned(),
+                    method: method.to_owned(),
                     path: path.to_owned(),
                     reason: format!("path parameter `{name}` must be a scalar type"),
                 });
@@ -291,7 +291,7 @@ impl Lowerer<'_> {
     /// their emission.
     fn body_type(&self, path: &str, method: &str, schema: &ReferenceOr<Schema>) -> Result<RustType> {
         match schema {
-            ReferenceOr::Reference { reference } => return self.named_from_ref(path, reference),
+            ReferenceOr::Reference { reference } => return self.named_from_ref(path, method, reference),
             ReferenceOr::Item(schema) => return self.inline_body_type(path, method, schema),
         }
     }
@@ -305,7 +305,7 @@ impl Lowerer<'_> {
             SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
             SchemaKind::Type(Type::Array(at)) => {
                 let element = match &at.items {
-                    Some(ReferenceOr::Reference { reference }) => self.named_from_ref(path, reference)?,
+                    Some(ReferenceOr::Reference { reference }) => self.named_from_ref(path, method, reference)?,
                     Some(ReferenceOr::Item(item)) => self.inline_body_type(path, method, item)?,
                     None => RustType::Value,
                 };
@@ -326,10 +326,10 @@ impl Lowerer<'_> {
     /// Resolve a `$ref` string to a named type. Same-document references become
     /// a local [`RustType::Named`]; cross-file references are routed through the
     /// `import-mapping` to a [`RustType::External`].
-    fn named_from_ref(&self, path: &str, reference: &str) -> Result<RustType> {
-        let target = ref_target_name(reference).ok_or_else(|| {
+    fn named_from_ref(&self, path: &str, method: &str, reference: &str) -> Result<RustType> {
+        let target = ref_component_name(reference, "schemas").ok_or_else(|| {
             return Error::UnsupportedOperation {
-                method: "*".to_owned(),
+                method: method.to_owned(),
                 path: path.to_owned(),
                 reason: format!("reference `{reference}` must point at a component schema"),
             };
@@ -339,7 +339,7 @@ impl Lowerer<'_> {
         };
         let module = self.import_mapping.get(file).ok_or_else(|| {
             return Error::UnsupportedOperation {
-                method: "*".to_owned(),
+                method: method.to_owned(),
                 path: path.to_owned(),
                 reason: format!("cross-file reference `{reference}` needs an `import-mapping` entry for `{file}`"),
             };

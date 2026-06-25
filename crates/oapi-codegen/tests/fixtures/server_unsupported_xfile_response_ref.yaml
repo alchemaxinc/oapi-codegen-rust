@@ -1,0 +1,12 @@
+openapi: 3.0.3
+info:
+  title: Cross-file response ref server
+  version: 1.0.0
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      summary: List widgets.
+      responses:
+        "401":
+          $ref: "schemas/common.yaml#/components/responses/Unauthorized"

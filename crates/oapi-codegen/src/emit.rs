@@ -258,7 +258,7 @@ fn emit_type(ty: &RustType) -> Result<TokenStream> {
             quote! { #ident }
         }
         RustType::External { module, name } => {
-            let path: TokenStream = module.parse().map_err(|_| {
+            let path: syn::Path = syn::parse_str(module).map_err(|_| {
                 return Error::UnsupportedSchema {
                     path: "import-mapping".to_owned(),
                     reason: format!("module path `{module}` is not a valid Rust path expression"),
