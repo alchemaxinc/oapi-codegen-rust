@@ -1,7 +1,8 @@
 //! `oapi-codegen` — generate idiomatic Rust from OpenAPI 3 specifications.
 //!
 //! The pipeline is: load a spec ([`loader`]), lower its component schemas into
-//! an intermediate representation ([`schema`] → [`ir`]), and emit formatted Rust
+//! an intermediate representation ([`schema`] → [`ir`]) and, for the server
+//! generator, its operations ([`paths`] → [`ir`]), then emit formatted Rust
 //! source ([`emit`]). [`Config`] mirrors `oapi-codegen`'s YAML configuration.
 
 pub mod config;
@@ -10,14 +11,44 @@ pub mod error;
 pub mod ir;
 pub mod loader;
 pub mod naming;
+pub mod paths;
 pub mod schema;
+pub mod status;
 
 use std::path::Path;
 
 pub use crate::config::Config;
 pub use crate::error::Error;
 pub use crate::error::Result;
+use crate::ir::Module;
 use crate::loader::Spec;
+
+/// Generate Rust from a spec file according to `config`, returning the source.
+///
+/// Models are emitted when `generate.models` is set, or implicitly when the
+/// server is generated (so referenced types are in scope). The axum server
+/// interface is appended when `generate.std-http-server` is set.
+pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
+    let spec = Spec::load(spec_path)?;
+    let want_server = config.generate.std_http_server;
+    let module = if config.generate.models || want_server {
+        schema::generate_models(&spec)?
+    } else {
+        Module::default()
+    };
+    if want_server {
+        let service = paths::generate_service(&spec)?;
+        return emit::emit_with_service(&module, &service);
+    }
+    return emit::emit_module(&module);
+}
+
+/// Generate Rust from a spec file according to `config` and write it to
+/// `output_path`, creating parent directories as needed.
+pub fn generate_to_file(spec_path: &Path, config: &Config, output_path: &Path) -> Result<()> {
+    let code = generate(spec_path, config)?;
+    return write_output(output_path, &code);
+}
 
 /// Generate Rust models from a spec file and return the formatted source.
 pub fn generate_models_string(spec_path: &Path) -> Result<String> {
@@ -31,6 +62,11 @@ pub fn generate_models_string(spec_path: &Path) -> Result<String> {
 /// creating parent directories as needed.
 pub fn generate_models_to_file(spec_path: &Path, output_path: &Path) -> Result<()> {
     let code = generate_models_string(spec_path)?;
+    return write_output(output_path, &code);
+}
+
+/// Write generated source to `output_path`, creating parent directories.
+fn write_output(output_path: &Path, code: &str) -> Result<()> {
     if let Some(parent) = output_path.parent()
         && !parent.as_os_str().is_empty()
     {

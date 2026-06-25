@@ -3,10 +3,13 @@
 //!
 //! Each `mod` `include!`s a generated golden so the test crate fails to build
 //! if any emitted code stops compiling against its real dependencies (serde,
-//! chrono, uuid, serde_json). The set of modules below is kept in lock-step
-//! with the coverage matrix by `supported_goldens_are_compile_checked` in
-//! `tests/coverage.rs`.
+//! chrono, uuid, serde_json, axum). The set of modules below is kept in
+//! lock-step with the coverage matrix by `supported_goldens_are_compile_checked`
+//! in `tests/coverage.rs`.
 #![allow(dead_code)]
+// Generated code is idiomatic (tail expressions); this workspace's bespoke
+// `implicit_return` lint does not apply to it.
+#![allow(clippy::implicit_return)]
 
 mod allof_merge {
     include!("golden/allof_merge.rs");
@@ -66,6 +69,10 @@ mod string_formats {
     include!("golden/string_formats.rs");
 }
 
+mod server_petstore {
+    include!("golden/server_petstore.rs");
+}
+
 #[test]
 fn untagged_enum_round_trips_through_serde() {
     let payment = oneof_discriminator::Payment::Card(oneof_discriminator::Card {
@@ -84,4 +91,47 @@ fn optional_field_is_skipped_when_none() {
     };
     let json = serde_json::to_string(&profile).expect("serialize");
     assert_eq!(json, r#"{"id":"u1"}"#);
+}
+
+#[test]
+fn generated_server_trait_implements_and_routes() {
+    use server_petstore::Api;
+    use server_petstore::CreatePetResponse;
+    use server_petstore::DeletePetResponse;
+    use server_petstore::Error;
+    use server_petstore::GetPetResponse;
+    use server_petstore::ListPetsResponse;
+    use server_petstore::NewPet;
+    use server_petstore::Pet;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn list_pets(&self) -> ListPetsResponse {
+            ListPetsResponse::Ok(Vec::new())
+        }
+
+        async fn create_pet(&self, body: NewPet) -> CreatePetResponse {
+            CreatePetResponse::Created(Pet {
+                id: 1,
+                name: body.name,
+                tag: body.tag,
+            })
+        }
+
+        async fn get_pet(&self, id: i64) -> GetPetResponse {
+            GetPetResponse::NotFound(Error {
+                message: format!("no pet {id}"),
+            })
+        }
+
+        async fn delete_pet(&self, _id: i64) -> DeletePetResponse {
+            DeletePetResponse::NoContent
+        }
+    }
+
+    // Building the router proves the native `async fn` trait, the response
+    // enums' `IntoResponse`, and the handler wiring all type-check together.
+    let _router: axum::Router = server_petstore::router(Service);
 }

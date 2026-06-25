@@ -69,6 +69,11 @@ impl Spec {
         return schemas;
     }
 
+    /// The paths (operations) declared in the document, in document order.
+    pub fn paths(&self) -> &openapiv3::Paths {
+        return &self.inner.paths;
+    }
+
     /// Resolve a `$ref` string to the concrete schema it names, following
     /// chains of references within this document.
     pub fn resolve(&self, reference: &str) -> Result<&Schema> {

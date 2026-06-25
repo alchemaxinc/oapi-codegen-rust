@@ -65,6 +65,16 @@ pub enum Error {
         reason: String,
     },
 
+    /// An operation used a feature the server generator does not support yet.
+    UnsupportedOperation {
+        /// HTTP method of the offending operation.
+        method: String,
+        /// Templated request path of the offending operation.
+        path: String,
+        /// Why it is unsupported.
+        reason: String,
+    },
+
     /// The generated token stream was not valid Rust (internal bug).
     InvalidGeneratedCode {
         /// Underlying syn parse error.
@@ -102,6 +112,9 @@ impl std::fmt::Display for Error {
             Error::UnsupportedSchema { path, reason } => {
                 return write!(f, "unsupported schema at `{path}`: {reason}");
             }
+            Error::UnsupportedOperation { method, path, reason } => {
+                return write!(f, "unsupported operation `{method} {path}`: {reason}");
+            }
             Error::InvalidGeneratedCode { source } => {
                 return write!(f, "generated code was not valid Rust: {source}");
             }
@@ -121,7 +134,8 @@ impl std::error::Error for Error {
             Error::Unimplemented(_)
             | Error::UnresolvedRef(_)
             | Error::UnsupportedRef { .. }
-            | Error::UnsupportedSchema { .. } => return None,
+            | Error::UnsupportedSchema { .. }
+            | Error::UnsupportedOperation { .. } => return None,
         }
     }
 }

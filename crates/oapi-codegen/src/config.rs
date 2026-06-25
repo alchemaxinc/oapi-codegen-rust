@@ -38,7 +38,7 @@ pub struct Generate {
     /// Generate data models (structs/enums) from component schemas.
     #[serde(default)]
     pub models: bool,
-    /// Generate an axum server (not yet implemented).
+    /// Generate an axum server interface from the spec's paths.
     #[serde(default)]
     pub std_http_server: bool,
     /// Embed the spec into the generated code (not yet implemented).
