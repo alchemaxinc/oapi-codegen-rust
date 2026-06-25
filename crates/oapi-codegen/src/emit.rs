@@ -257,6 +257,16 @@ fn emit_type(ty: &RustType) -> Result<TokenStream> {
             let ident = to_ident(name, Case::Pascal).to_token();
             quote! { #ident }
         }
+        RustType::External { module, name } => {
+            let path: TokenStream = module.parse().map_err(|_| {
+                return Error::UnsupportedSchema {
+                    path: "import-mapping".to_owned(),
+                    reason: format!("module path `{module}` is not a valid Rust path expression"),
+                };
+            })?;
+            let ident = to_ident(name, Case::Pascal).to_token();
+            quote! { #path::#ident }
+        }
         RustType::Verbatim(text) => {
             let parsed: TokenStream = text.parse().map_err(|_| {
                 return Error::UnsupportedSchema {

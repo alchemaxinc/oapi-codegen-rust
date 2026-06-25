@@ -154,6 +154,8 @@ pub enum RustType {
     Option(Box<RustType>),
     /// A reference to a named (generated or external) type.
     Named(String),
+    /// A reference to a type from an import-mapped module: `module::Name`.
+    External { module: String, name: String },
     /// A verbatim type expression from an `x-rust-type` extension.
     Verbatim(String),
 }

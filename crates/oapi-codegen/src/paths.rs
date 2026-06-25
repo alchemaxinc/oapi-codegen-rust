@@ -1,9 +1,13 @@
 //! Lowering OpenAPI paths/operations into the server [`crate::ir::Service`].
 //!
 //! The current slice covers typed path parameters, a JSON request body, and
-//! explicit-status responses. Query/header/cookie parameters, `default`/range
-//! responses, and component-level `$ref`s for parameters, request bodies and
-//! responses are intentionally not handled yet and are rejected explicitly.
+//! explicit-status responses. Component `$ref` responses are resolved against
+//! the document and cross-file schema `$ref`s are routed through the
+//! `import-mapping`. Query/header/cookie parameters, `default`/range responses,
+//! and component-level `$ref`s for parameters and request bodies are
+//! intentionally not handled yet and are rejected explicitly.
+
+use std::collections::BTreeMap;
 
 use http::StatusCode as HttpStatus;
 use openapiv3::Operation as OasOperation;
@@ -23,6 +27,7 @@ use crate::ir::ResponseCase;
 use crate::ir::RustType;
 use crate::ir::Service;
 use crate::loader::Spec;
+use crate::loader::ref_file_part;
 use crate::loader::ref_target_name;
 use crate::naming::Case;
 use crate::naming::to_ident;
@@ -32,87 +37,104 @@ use crate::schema::string_format_type;
 /// The JSON media type the slice reads request and response bodies from.
 const JSON_MEDIA_TYPE: &str = "application/json";
 
-/// Lower every operation in `spec` into the server IR.
-pub fn generate_service(spec: &Spec) -> Result<Service> {
-    let mut operations = Vec::new();
-    for (path, entry) in spec.paths().iter() {
-        let item = match entry {
-            ReferenceOr::Item(item) => item,
-            ReferenceOr::Reference { .. } => {
-                return Err(Error::UnsupportedOperation {
-                    method: "*".to_owned(),
-                    path: path.clone(),
-                    reason: "path-item `$ref`s are not supported".to_owned(),
-                });
+/// Lower every operation in `spec` into the server IR, resolving cross-file
+/// schema references through `import_mapping`.
+pub fn generate_service(spec: &Spec, import_mapping: &BTreeMap<String, String>) -> Result<Service> {
+    let lowerer = Lowerer { spec, import_mapping };
+    return lowerer.lower();
+}
+
+/// Carries the document and its import mapping through operation lowering.
+struct Lowerer<'a> {
+    spec: &'a Spec,
+    import_mapping: &'a BTreeMap<String, String>,
+}
+
+impl Lowerer<'_> {
+    /// Lower every operation in the document into the server IR.
+    fn lower(&self) -> Result<Service> {
+        let mut operations = Vec::new();
+        for (path, entry) in self.spec.paths().iter() {
+            let item = match entry {
+                ReferenceOr::Item(item) => item,
+                ReferenceOr::Reference { .. } => {
+                    return Err(Error::UnsupportedOperation {
+                        method: "*".to_owned(),
+                        path: path.clone(),
+                        reason: "path-item `$ref`s are not supported".to_owned(),
+                    });
+                }
+            };
+            for (method, operation) in item.iter() {
+                let lowered = self.lower_operation(path, method, operation, &item.parameters)?;
+                operations.push(lowered);
             }
-        };
-        for (method, operation) in item.iter() {
-            let lowered = lower_operation(path, method, operation, &item.parameters)?;
-            operations.push(lowered);
         }
-    }
-    return Ok(Service { operations });
-}
-
-/// Lower a single operation, given its path, method and path-item parameters.
-fn lower_operation(
-    path: &str,
-    method: &str,
-    operation: &OasOperation,
-    shared_params: &[ReferenceOr<Parameter>],
-) -> Result<Operation> {
-    let name = operation_name(path, method, operation);
-    let handler = to_ident(&format!("{}_handler", name.logical()), Case::Snake);
-    let response_enum = to_ident(&format!("{}_response", name.logical()), Case::Pascal);
-
-    let path_params = lower_path_params(path, method, operation, shared_params)?;
-    let body = lower_request_body(path, method, operation)?;
-    let responses = lower_responses(path, method, operation)?;
-
-    return Ok(Operation {
-        name,
-        handler,
-        response_enum,
-        doc: operation_doc(operation),
-        method: method.to_owned(),
-        path: path.to_owned(),
-        path_params,
-        body,
-        responses,
-    });
-}
-
-/// Resolve the typed path parameters in their path-template order, which is the
-/// order axum extracts a `Path<(..)>` tuple in.
-fn lower_path_params(
-    path: &str,
-    method: &str,
-    operation: &OasOperation,
-    shared_params: &[ReferenceOr<Parameter>],
-) -> Result<Vec<Param>> {
-    for parameter in operation.parameters.iter().chain(shared_params) {
-        if matches!(parameter, ReferenceOr::Reference { .. }) {
-            return Err(Error::UnsupportedOperation {
-                method: method.to_owned(),
-                path: path.to_owned(),
-                reason: "component parameter `$ref`s are not supported".to_owned(),
-            });
-        }
+        return Ok(Service { operations });
     }
 
-    let mut params = Vec::new();
-    for name in path_param_names(path) {
-        let declared = find_path_param(&name, operation, shared_params);
-        let ty = match declared {
-            Some(format) => param_type(path, &name, format)?,
-            None => RustType::String,
-        };
-        params.push(Param {
-            name: to_ident(&name, Case::Snake),
-            ty,
+    /// Lower a single operation, given its path, method and path-item parameters.
+    fn lower_operation(
+        &self,
+        path: &str,
+        method: &str,
+        operation: &OasOperation,
+        shared_params: &[ReferenceOr<Parameter>],
+    ) -> Result<Operation> {
+        let name = operation_name(path, method, operation);
+        let handler = to_ident(&format!("{}_handler", name.logical()), Case::Snake);
+        let response_enum = to_ident(&format!("{}_response", name.logical()), Case::Pascal);
+
+        let path_params = self.lower_path_params(path, method, operation, shared_params)?;
+        let body = self.lower_request_body(path, method, operation)?;
+        let responses = self.lower_responses(path, method, operation)?;
+
+        return Ok(Operation {
+            name,
+            handler,
+            response_enum,
+            doc: operation_doc(operation),
+            method: method.to_owned(),
+            path: path.to_owned(),
+            path_params,
+            body,
+            responses,
         });
     }
-    return Ok(params);
+
+    /// Resolve the typed path parameters in their path-template order, which is
+    /// the order axum extracts a `Path<(..)>` tuple in.
+    fn lower_path_params(
+        &self,
+        path: &str,
+        method: &str,
+        operation: &OasOperation,
+        shared_params: &[ReferenceOr<Parameter>],
+    ) -> Result<Vec<Param>> {
+        for parameter in operation.parameters.iter().chain(shared_params) {
+            if matches!(parameter, ReferenceOr::Reference { .. }) {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: "component parameter `$ref`s are not supported".to_owned(),
+                });
+            }
+        }
+
+        let mut params = Vec::new();
+        for name in path_param_names(path) {
+            let declared = find_path_param(&name, operation, shared_params);
+            let ty = match declared {
+                Some(format) => self.param_type(path, &name, format)?,
+                None => RustType::String,
+            };
+            params.push(Param {
+                name: to_ident(&name, Case::Snake),
+                ty,
+            });
+        }
+        return Ok(params);
+    }
 }
 
 /// Find a declared path parameter's schema by name, preferring the operation's
@@ -143,177 +165,190 @@ fn path_param_schema<'a>(name: &str, parameters: &'a [ReferenceOr<Parameter>]) -
 }
 
 /// Map a path parameter's schema to a scalar Rust type.
-fn param_type(path: &str, name: &str, format: &ParameterSchemaOrContent) -> Result<RustType> {
-    let schema = match format {
-        ParameterSchemaOrContent::Schema(schema) => schema,
-        ParameterSchemaOrContent::Content(_) => {
-            return Err(Error::UnsupportedOperation {
-                method: "*".to_owned(),
-                path: path.to_owned(),
-                reason: format!("path parameter `{name}` uses `content`, which is not supported"),
-            });
-        }
-    };
-    let schema = match schema {
-        ReferenceOr::Reference { reference } => return named_from_ref(path, reference),
-        ReferenceOr::Item(schema) => schema,
-    };
-    let ty = match &schema.schema_kind {
-        SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
-        SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
-        SchemaKind::Type(Type::Number(_)) => RustType::F64,
-        SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
-        _ => {
-            return Err(Error::UnsupportedOperation {
-                method: "*".to_owned(),
-                path: path.to_owned(),
-                reason: format!("path parameter `{name}` must be a scalar type"),
-            });
-        }
-    };
-    return Ok(ty);
-}
-
-/// Lower an operation's JSON request body, if it declares one.
-fn lower_request_body(path: &str, method: &str, operation: &OasOperation) -> Result<Option<RustType>> {
-    let body = match &operation.request_body {
-        Some(body) => body,
-        None => return Ok(None),
-    };
-    let body = match body {
-        ReferenceOr::Item(body) => body,
-        ReferenceOr::Reference { .. } => {
-            return Err(Error::UnsupportedOperation {
-                method: method.to_owned(),
-                path: path.to_owned(),
-                reason: "component request-body `$ref`s are not supported".to_owned(),
-            });
-        }
-    };
-    let media = match body.content.get(JSON_MEDIA_TYPE) {
-        Some(media) => media,
-        None => return Ok(None),
-    };
-    let schema = match &media.schema {
-        Some(schema) => schema,
-        None => return Ok(None),
-    };
-    let ty = body_type(path, method, schema)?;
-    return Ok(Some(ty));
-}
-
-/// Lower an operation's responses into typed enum variants.
-fn lower_responses(path: &str, method: &str, operation: &OasOperation) -> Result<Vec<ResponseCase>> {
-    if operation.responses.default.is_some() {
-        return Err(Error::UnsupportedOperation {
-            method: method.to_owned(),
-            path: path.to_owned(),
-            reason: "`default` responses are not supported yet".to_owned(),
-        });
-    }
-
-    let mut cases = Vec::new();
-    for (status_code, response) in &operation.responses.responses {
-        let code = match status_code {
-            StatusCode::Code(code) => *code,
-            StatusCode::Range(range) => {
+impl Lowerer<'_> {
+    fn param_type(&self, path: &str, name: &str, format: &ParameterSchemaOrContent) -> Result<RustType> {
+        let schema = match format {
+            ParameterSchemaOrContent::Schema(schema) => schema,
+            ParameterSchemaOrContent::Content(_) => {
                 return Err(Error::UnsupportedOperation {
-                    method: method.to_owned(),
+                    method: "*".to_owned(),
                     path: path.to_owned(),
-                    reason: format!("range response `{range}XX` is not supported yet"),
+                    reason: format!("path parameter `{name}` uses `content`, which is not supported"),
                 });
             }
         };
-        let reason = HttpStatus::from_u16(code).ok().and_then(|status| {
-            return status.canonical_reason();
-        });
-        let reason = reason.ok_or_else(|| {
-            return Error::UnsupportedOperation {
-                method: method.to_owned(),
-                path: path.to_owned(),
-                reason: format!("status code `{code}` is not a recognised HTTP status"),
-            };
-        })?;
-        let response = match response {
-            ReferenceOr::Item(response) => response,
+        let schema = match schema {
+            ReferenceOr::Reference { reference } => return self.named_from_ref(path, reference),
+            ReferenceOr::Item(schema) => schema,
+        };
+        let ty = match &schema.schema_kind {
+            SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
+            SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
+            SchemaKind::Type(Type::Number(_)) => RustType::F64,
+            SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
+            _ => {
+                return Err(Error::UnsupportedOperation {
+                    method: "*".to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("path parameter `{name}` must be a scalar type"),
+                });
+            }
+        };
+        return Ok(ty);
+    }
+
+    /// Lower an operation's JSON request body, if it declares one.
+    fn lower_request_body(&self, path: &str, method: &str, operation: &OasOperation) -> Result<Option<RustType>> {
+        let body = match &operation.request_body {
+            Some(body) => body,
+            None => return Ok(None),
+        };
+        let body = match body {
+            ReferenceOr::Item(body) => body,
             ReferenceOr::Reference { .. } => {
                 return Err(Error::UnsupportedOperation {
                     method: method.to_owned(),
                     path: path.to_owned(),
-                    reason: "component response `$ref`s are not supported".to_owned(),
+                    reason: "component request-body `$ref`s are not supported".to_owned(),
                 });
             }
         };
-        let body = match response.content.get(JSON_MEDIA_TYPE).and_then(|media| {
-            return media.schema.as_ref();
-        }) {
-            Some(schema) => Some(body_type(path, method, schema)?),
-            None => None,
+        let media = match body.content.get(JSON_MEDIA_TYPE) {
+            Some(media) => media,
+            None => return Ok(None),
         };
-        cases.push(ResponseCase {
-            variant: to_ident(reason, Case::Pascal),
-            status: code,
-            body,
-            doc: trimmed(&response.description),
-        });
+        let schema = match &media.schema {
+            Some(schema) => schema,
+            None => return Ok(None),
+        };
+        let ty = self.body_type(path, method, schema)?;
+        return Ok(Some(ty));
     }
 
-    if cases.is_empty() {
-        return Err(Error::UnsupportedOperation {
-            method: method.to_owned(),
-            path: path.to_owned(),
-            reason: "operation declares no responses".to_owned(),
-        });
-    }
-    return Ok(cases);
-}
-
-/// Map a request/response body schema to a Rust type. Composite inline schemas
-/// must be referenced by name (`$ref`) so the models pass owns their emission.
-fn body_type(path: &str, method: &str, schema: &ReferenceOr<Schema>) -> Result<RustType> {
-    match schema {
-        ReferenceOr::Reference { reference } => return named_from_ref(path, reference),
-        ReferenceOr::Item(schema) => return inline_body_type(path, method, schema),
-    }
-}
-
-/// Map an inline (non-`$ref`) body schema to a Rust type.
-fn inline_body_type(path: &str, method: &str, schema: &Schema) -> Result<RustType> {
-    let ty = match &schema.schema_kind {
-        SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
-        SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
-        SchemaKind::Type(Type::Number(_)) => RustType::F64,
-        SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
-        SchemaKind::Type(Type::Array(at)) => {
-            let element = match &at.items {
-                Some(ReferenceOr::Reference { reference }) => named_from_ref(path, reference)?,
-                Some(ReferenceOr::Item(item)) => inline_body_type(path, method, item)?,
-                None => RustType::Value,
-            };
-            RustType::Vec(Box::new(element))
-        }
-        SchemaKind::Any(_) => RustType::Value,
-        _ => {
+    /// Lower an operation's responses into typed enum variants, resolving
+    /// component `$ref` responses against the document.
+    fn lower_responses(&self, path: &str, method: &str, operation: &OasOperation) -> Result<Vec<ResponseCase>> {
+        if operation.responses.default.is_some() {
             return Err(Error::UnsupportedOperation {
                 method: method.to_owned(),
                 path: path.to_owned(),
-                reason: "composite request/response bodies must reference a named schema (`$ref`)".to_owned(),
+                reason: "`default` responses are not supported yet".to_owned(),
             });
         }
-    };
-    return Ok(ty);
-}
 
-/// Resolve a `$ref` string to a named type, erroring if it is not a schema ref.
-fn named_from_ref(path: &str, reference: &str) -> Result<RustType> {
-    let target = ref_target_name(reference).ok_or_else(|| {
-        return Error::UnsupportedOperation {
-            method: "*".to_owned(),
-            path: path.to_owned(),
-            reason: format!("reference `{reference}` must point at a component schema"),
+        let mut cases = Vec::new();
+        for (status_code, response) in &operation.responses.responses {
+            let code = match status_code {
+                StatusCode::Code(code) => *code,
+                StatusCode::Range(range) => {
+                    return Err(Error::UnsupportedOperation {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        reason: format!("range response `{range}XX` is not supported yet"),
+                    });
+                }
+            };
+            let reason = HttpStatus::from_u16(code).ok().and_then(|status| {
+                return status.canonical_reason();
+            });
+            let reason = reason.ok_or_else(|| {
+                return Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("status code `{code}` is not a recognised HTTP status"),
+                };
+            })?;
+            let response = match response {
+                ReferenceOr::Item(response) => response,
+                ReferenceOr::Reference { reference } => self.spec.resolve_response(reference)?,
+            };
+            let body = match response.content.get(JSON_MEDIA_TYPE).and_then(|media| {
+                return media.schema.as_ref();
+            }) {
+                Some(schema) => Some(self.body_type(path, method, schema)?),
+                None => None,
+            };
+            cases.push(ResponseCase {
+                variant: to_ident(reason, Case::Pascal),
+                status: code,
+                body,
+                doc: trimmed(&response.description),
+            });
+        }
+
+        if cases.is_empty() {
+            return Err(Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: "operation declares no responses".to_owned(),
+            });
+        }
+        return Ok(cases);
+    }
+
+    /// Map a request/response body schema to a Rust type. Composite inline
+    /// schemas must be referenced by name (`$ref`) so the models pass owns
+    /// their emission.
+    fn body_type(&self, path: &str, method: &str, schema: &ReferenceOr<Schema>) -> Result<RustType> {
+        match schema {
+            ReferenceOr::Reference { reference } => return self.named_from_ref(path, reference),
+            ReferenceOr::Item(schema) => return self.inline_body_type(path, method, schema),
+        }
+    }
+
+    /// Map an inline (non-`$ref`) body schema to a Rust type.
+    fn inline_body_type(&self, path: &str, method: &str, schema: &Schema) -> Result<RustType> {
+        let ty = match &schema.schema_kind {
+            SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
+            SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
+            SchemaKind::Type(Type::Number(_)) => RustType::F64,
+            SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
+            SchemaKind::Type(Type::Array(at)) => {
+                let element = match &at.items {
+                    Some(ReferenceOr::Reference { reference }) => self.named_from_ref(path, reference)?,
+                    Some(ReferenceOr::Item(item)) => self.inline_body_type(path, method, item)?,
+                    None => RustType::Value,
+                };
+                RustType::Vec(Box::new(element))
+            }
+            SchemaKind::Any(_) => RustType::Value,
+            _ => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: "composite request/response bodies must reference a named schema (`$ref`)".to_owned(),
+                });
+            }
         };
-    })?;
-    return Ok(RustType::Named(target.to_owned()));
+        return Ok(ty);
+    }
+
+    /// Resolve a `$ref` string to a named type. Same-document references become
+    /// a local [`RustType::Named`]; cross-file references are routed through the
+    /// `import-mapping` to a [`RustType::External`].
+    fn named_from_ref(&self, path: &str, reference: &str) -> Result<RustType> {
+        let target = ref_target_name(reference).ok_or_else(|| {
+            return Error::UnsupportedOperation {
+                method: "*".to_owned(),
+                path: path.to_owned(),
+                reason: format!("reference `{reference}` must point at a component schema"),
+            };
+        })?;
+        let Some(file) = ref_file_part(reference) else {
+            return Ok(RustType::Named(target.to_owned()));
+        };
+        let module = self.import_mapping.get(file).ok_or_else(|| {
+            return Error::UnsupportedOperation {
+                method: "*".to_owned(),
+                path: path.to_owned(),
+                reason: format!("cross-file reference `{reference}` needs an `import-mapping` entry for `{file}`"),
+            };
+        })?;
+        return Ok(RustType::External {
+            module: module.clone(),
+            name: target.to_owned(),
+        });
+    }
 }
 
 /// Derive the trait method name: the `operationId` if present, else a name
