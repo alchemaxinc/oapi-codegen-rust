@@ -9,8 +9,8 @@
 //! Two mechanisms enforce this:
 //!  1. [`TEST_TABLE`] catalogues every feature and links the testable ones to a
 //!     minimal fixture under `tests/fixtures/`. The tests below assert that each
-//!     supported fixture matches its golden, each unsupported fixture is
-//!     rejected, and no fixture is left uncatalogued.
+//!     supported fixture matches its generated output, each unsupported fixture
+//!     is rejected, and no fixture is left uncatalogued.
 //!  2. The [`anchor`] module matches every `openapiv3` schema enum without a
 //!     wildcard, so adding a variant upstream fails to compile until it is
 //!     handled and catalogued here.
@@ -22,7 +22,7 @@ use std::path::PathBuf;
 /// How the generator treats an OpenAPI construct.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Status {
-    /// Generated to Rust; exercised by a fixture and golden file.
+    /// Generated to Rust; exercised by a fixture and generated file.
     Supported,
     /// Deliberately rejected with an error; exercised by a fixture.
     Unsupported,
@@ -38,8 +38,8 @@ struct Feature {
     element: &'static str,
     /// How the generator handles it.
     status: Status,
-    /// Fixture stem under `tests/fixtures` (and golden under `tests/golden`)
-    /// that exercises this feature, when one applies.
+    /// Fixture stem under `tests/fixtures` (and generated output under
+    /// `tests/generated`) that exercises this feature, when one applies.
     fixture: Option<&'static str>,
 }
 
@@ -278,7 +278,9 @@ const TEST_TABLE: &[Feature] = &[
         status: Status::Ignored,
         fixture: None,
     },
-    // Document-level (server/client generation)
+    // Document-level (server/client generation). The axum server generator now
+    // covers a slice of paths/parameters/requestBody/responses; that slice is
+    // validated separately by `SERVER_FIXTURES`. The rest remains deferred.
     Feature {
         element: "doc.paths",
         status: Status::Planned,
@@ -321,6 +323,18 @@ const TEST_TABLE: &[Feature] = &[
     },
 ];
 
+/// Server fixtures whose generated axum interface is compile-checked against a
+/// committed file.
+///
+/// These exercise the server generator (a different axis from the schema
+/// [`TEST_TABLE`]): path parameters, JSON request bodies, and typed responses.
+/// Each must have a `#[test]` via [`server_generated_tests!`].
+const SERVER_FIXTURES: &[&str] = &["server_petstore"];
+
+/// Server fixtures whose generation must fail with a documented error, covering
+/// the slice's deliberate limitations (e.g. `default`/range responses).
+const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &["server_unsupported_default_response", "server_unsupported_ref_param"];
+
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {
     return Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -339,54 +353,55 @@ fn fixtures_with(status: Status) -> BTreeSet<&'static str> {
         .collect();
 }
 
-/// Regenerate `stem`'s golden output and assert it matches the checked-in file.
+/// Regenerate `stem`'s output and assert it matches the committed file.
 ///
-/// Refresh goldens after an intentional change with `make update-golden`
-/// (`UPDATE_GOLDEN=1 cargo test -p oapi-codegen --test coverage`).
-fn assert_golden_matches(stem: &str) {
+/// Refresh the committed files after an intentional change with
+/// `make update-generated`
+/// (`UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage`).
+fn assert_generated_matches(stem: &str) {
     let dir = tests_dir();
     let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
-    let golden = dir.join("golden").join(format!("{stem}.rs"));
+    let generated_file = dir.join("generated").join(format!("{stem}.rs"));
 
     let generated = oapi_codegen::generate_models_string(&fixture).unwrap_or_else(|err| {
         panic!("generating `{stem}` failed: {err}");
     });
 
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        std::fs::write(&golden, &generated).unwrap_or_else(|err| {
-            panic!("writing golden `{stem}` failed: {err}");
+    if std::env::var_os("UPDATE_GENERATED").is_some() {
+        std::fs::write(&generated_file, &generated).unwrap_or_else(|err| {
+            panic!("writing `{stem}` failed: {err}");
         });
         return;
     }
 
-    let expected = std::fs::read_to_string(&golden).unwrap_or_else(|err| {
-        panic!("reading golden `{stem}` failed (run `make update-golden`): {err}");
+    let expected = std::fs::read_to_string(&generated_file).unwrap_or_else(|err| {
+        panic!("reading `{stem}` failed (run `make update-generated`): {err}");
     });
     assert_eq!(
         generated, expected,
-        "generated output for `{stem}` drifted from tests/golden/{stem}.rs; \
-         run `make update-golden` if this change is intentional",
+        "generated output for `{stem}` drifted from tests/generated/{stem}.rs; \
+         run `make update-generated` if this change is intentional",
     );
 }
 
 /// Emit one `#[test]` per supported fixture (so each shows in the test output)
-/// plus a `GOLDEN_TEST_STEMS` catalogue used to guard against drift. The stem
+/// plus a `GENERATED_TEST_STEMS` catalogue used to guard against drift. The stem
 /// list must match the supported fixtures in [`TEST_TABLE`] — enforced by
-/// [`golden_tests_cover_supported_fixtures`].
-macro_rules! golden_tests {
+/// [`generated_tests_cover_supported_fixtures`].
+macro_rules! generated_tests {
     ($($stem:ident),+ $(,)?) => {
         $(
             #[test]
             fn $stem() {
-                assert_golden_matches(stringify!($stem));
+                assert_generated_matches(stringify!($stem));
             }
         )+
 
-        const GOLDEN_TEST_STEMS: &[&str] = &[$(stringify!($stem)),+];
+        const GENERATED_TEST_STEMS: &[&str] = &[$(stringify!($stem)),+];
     };
 }
 
-golden_tests!(
+generated_tests!(
     allof_merge,
     anyof_untagged,
     array_types,
@@ -408,29 +423,120 @@ golden_tests!(
     string_formats,
 );
 
-/// The generated golden tests must cover exactly the supported fixtures, so a
-/// new supported fixture cannot be added without its own `#[test]`.
+/// The generated `#[test]`s must cover exactly the supported fixtures, so a new
+/// supported fixture cannot be added without its own `#[test]`.
 #[test]
-fn golden_tests_cover_supported_fixtures() {
-    let generated: BTreeSet<&str> = GOLDEN_TEST_STEMS.iter().copied().collect();
+fn generated_tests_cover_supported_fixtures() {
+    let covered: BTreeSet<&str> = GENERATED_TEST_STEMS.iter().copied().collect();
     assert_eq!(
-        generated,
+        covered,
         fixtures_with(Status::Supported),
-        "the `golden_tests!` list is out of sync with the supported fixtures in TEST_TABLE",
+        "the `generated_tests!` list is out of sync with the supported fixtures in TEST_TABLE",
     );
 }
 
-/// Every supported golden must be `include!`d by `tests/generated_compiles.rs`
-/// so its emitted code is type-checked against real serde/chrono/uuid.
+/// Configuration that enables the axum server generator.
+fn server_config() -> oapi_codegen::Config {
+    return oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            std_http_server: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+}
+
+/// Regenerate `stem`'s server output and assert it matches the committed file.
+///
+/// Refresh the committed files after an intentional change with
+/// `make update-generated`
+/// (`UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage`).
+fn assert_server_generated_matches(stem: &str) {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+    let generated_file = dir.join("generated").join(format!("{stem}.rs"));
+
+    let generated = oapi_codegen::generate(&fixture, &server_config()).unwrap_or_else(|err| {
+        panic!("generating server `{stem}` failed: {err}");
+    });
+
+    if std::env::var_os("UPDATE_GENERATED").is_some() {
+        std::fs::write(&generated_file, &generated).unwrap_or_else(|err| {
+            panic!("writing `{stem}` failed: {err}");
+        });
+        return;
+    }
+
+    let expected = std::fs::read_to_string(&generated_file).unwrap_or_else(|err| {
+        panic!("reading `{stem}` failed (run `make update-generated`): {err}");
+    });
+    assert_eq!(
+        generated, expected,
+        "generated server output for `{stem}` drifted from tests/generated/{stem}.rs; \
+         run `make update-generated` if this change is intentional",
+    );
+}
+
+/// Emit one `#[test]` per server fixture (so each shows in the test output) plus
+/// a `SERVER_GENERATED_TEST_STEMS` catalogue used to guard against drift. The
+/// stem list must match [`SERVER_FIXTURES`] — enforced by
+/// [`server_generated_tests_cover_server_fixtures`].
+macro_rules! server_generated_tests {
+    ($($stem:ident),+ $(,)?) => {
+        $(
+            #[test]
+            fn $stem() {
+                assert_server_generated_matches(stringify!($stem));
+            }
+        )+
+
+        const SERVER_GENERATED_TEST_STEMS: &[&str] = &[$(stringify!($stem)),+];
+    };
+}
+
+server_generated_tests!(server_petstore);
+
+/// The server `#[test]`s must cover exactly the supported server fixtures.
 #[test]
-fn supported_goldens_are_compile_checked() {
+fn server_generated_tests_cover_server_fixtures() {
+    let covered: BTreeSet<&str> = SERVER_GENERATED_TEST_STEMS.iter().copied().collect();
+    let expected: BTreeSet<&str> = SERVER_FIXTURES.iter().copied().collect();
+    assert_eq!(
+        covered, expected,
+        "the `server_generated_tests!` list is out of sync with SERVER_FIXTURES",
+    );
+}
+
+/// Unsupported server fixtures must be rejected with an error, never silently
+/// mishandled — covering the slice's documented limitations.
+#[test]
+fn server_unsupported_features_are_rejected() {
+    let dir = tests_dir();
+    for stem in SERVER_UNSUPPORTED_FIXTURES {
+        let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+        let result = oapi_codegen::generate(&fixture, &server_config());
+        assert!(
+            result.is_err(),
+            "`{stem}` is catalogued as unsupported but server generation succeeded",
+        );
+    }
+}
+
+/// Every supported generated file must be `include!`d by
+/// `tests/generated_compiles.rs` so its emitted code is type-checked against
+/// real serde/chrono/uuid.
+#[test]
+fn generated_outputs_are_compile_checked() {
     let source = include_str!("generated_compiles.rs");
-    for stem in fixtures_with(Status::Supported) {
-        let needle = format!("include!(\"golden/{stem}.rs\")");
+    let stems = fixtures_with(Status::Supported)
+        .into_iter()
+        .chain(SERVER_FIXTURES.iter().copied());
+    for stem in stems {
+        let needle = format!("include!(\"generated/{stem}.rs\")");
         assert!(
             source.contains(&needle),
-            "tests/generated_compiles.rs does not compile-check golden `{stem}`; \
-             add a `mod {stem} {{ {needle}; }}`",
+            "tests/generated_compiles.rs does not compile-check `{stem}`; \
+             add a `pub mod {stem} {{ {needle}; }}`",
         );
     }
 }
@@ -462,6 +568,8 @@ fn fixtures_and_test_table_agree() {
         .filter_map(|feature| {
             return feature.fixture;
         })
+        .chain(SERVER_FIXTURES.iter().copied())
+        .chain(SERVER_UNSUPPORTED_FIXTURES.iter().copied())
         .collect();
 
     for stem in &referenced {

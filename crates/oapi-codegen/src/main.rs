@@ -7,6 +7,7 @@ use clap::Parser;
 use oapi_codegen::Config;
 use oapi_codegen::Error;
 use oapi_codegen::Result;
+use oapi_codegen::config::Generate;
 
 /// Generate idiomatic Rust from an OpenAPI 3 specification.
 #[derive(Debug, Parser)]
@@ -41,22 +42,20 @@ fn main() -> ExitCode {
 fn run(cli: &Cli) -> Result<()> {
     let config = match &cli.config {
         Some(path) => Config::load(path)?,
-        None => Config::default(),
+        None => Config {
+            generate: Generate {
+                models: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     };
 
-    if config.generate.std_http_server {
-        return Err(Error::Unimplemented("std-http-server".to_owned()));
-    }
     if config.generate.embedded_spec {
         return Err(Error::Unimplemented("embedded-spec".to_owned()));
     }
-
-    let want_models = match &cli.config {
-        Some(_) => config.generate.models,
-        None => true,
-    };
-    if !want_models {
-        eprintln!("nothing to generate: config does not request `models`");
+    if !config.generate.models && !config.generate.std_http_server {
+        eprintln!("nothing to generate: enable `models` or `std-http-server` in the config");
         return Ok(());
     }
 
@@ -65,12 +64,12 @@ fn run(cli: &Cli) -> Result<()> {
     });
     match output {
         Some(path) => {
-            oapi_codegen::generate_models_to_file(&cli.spec, &path)?;
+            oapi_codegen::generate_to_file(&cli.spec, &config, &path)?;
             eprintln!("wrote {}", path.display());
             return Ok(());
         }
         None => {
-            let code = oapi_codegen::generate_models_string(&cli.spec)?;
+            let code = oapi_codegen::generate(&cli.spec, &config)?;
             print!("{code}");
             return Ok(());
         }

@@ -459,7 +459,7 @@ impl MergedObject {
 }
 
 /// Map a string `format` to a Rust type.
-fn string_format_type(format: &VariantOrUnknownOrEmpty<StringFormat>) -> RustType {
+pub(crate) fn string_format_type(format: &VariantOrUnknownOrEmpty<StringFormat>) -> RustType {
     let ty = match format {
         VariantOrUnknownOrEmpty::Item(StringFormat::Date) => RustType::Date,
         VariantOrUnknownOrEmpty::Item(StringFormat::DateTime) => RustType::DateTime,
@@ -474,7 +474,7 @@ fn string_format_type(format: &VariantOrUnknownOrEmpty<StringFormat>) -> RustTyp
 }
 
 /// Map an integer `format` to a Rust type.
-fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat>) -> RustType {
+pub(crate) fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat>) -> RustType {
     let ty = match format {
         VariantOrUnknownOrEmpty::Item(IntegerFormat::Int32) => RustType::I32,
         VariantOrUnknownOrEmpty::Item(IntegerFormat::Int64) => RustType::I64,

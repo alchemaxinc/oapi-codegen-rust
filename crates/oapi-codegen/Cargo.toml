@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
+http = "1"
 indexmap = "2.14.0"
 openapiv3 = "2"
 prettyplease = "0.2.37"
@@ -24,9 +25,11 @@ serde_yaml = "0.9"
 syn = { version = "2.0.118", features = ["full"] }
 
 [dev-dependencies]
-# chrono/uuid only type-check the generated golden outputs (which reference
-# them); openapiv3 backs the coverage-matrix anchor in tests/coverage.rs. None
-# are needed by the generator itself.
+# chrono/uuid only type-check the generated model outputs (which reference
+# them); axum type-checks the generated server output; openapiv3 backs the
+# coverage-matrix anchor in tests/coverage.rs. None are needed by the generator
+# itself.
+axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 openapiv3 = "2"
 serde = { version = "1.0.228", features = ["derive"] }

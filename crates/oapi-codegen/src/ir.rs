@@ -171,3 +171,58 @@ impl RustType {
         return nullable;
     }
 }
+
+/// A generated axum server interface: the `Api` trait plus the operations that
+/// back its `Router`.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Service {
+    /// Operations in deterministic (document) order.
+    pub operations: Vec<Operation>,
+}
+
+/// A single HTTP operation lowered for code generation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Operation {
+    /// `Api` trait method name (`snake_case`).
+    pub name: RustIdent,
+    /// Internal handler function name (`<name>_handler`).
+    pub handler: RustIdent,
+    /// Per-operation response enum name (`<Name>Response`).
+    pub response_enum: RustIdent,
+    /// Doc comment derived from the operation `summary`/`description`.
+    pub doc: Option<String>,
+    /// Lowercase HTTP method verb (`get`, `post`, …), which is also the
+    /// `axum::routing` helper name.
+    pub method: String,
+    /// Request path template, reused verbatim as the axum route (axum 0.8 and
+    /// OpenAPI share the `/{name}` path-parameter syntax).
+    pub path: String,
+    /// Typed path parameters, in path order.
+    pub path_params: Vec<Param>,
+    /// JSON request body type, when the operation declares one.
+    pub body: Option<RustType>,
+    /// Response variants, in declaration order.
+    pub responses: Vec<ResponseCase>,
+}
+
+/// A typed operation parameter (path parameter in the current slice).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Param {
+    /// Rust argument identifier.
+    pub name: RustIdent,
+    /// Parameter type.
+    pub ty: RustType,
+}
+
+/// One arm of an operation's response enum.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResponseCase {
+    /// Variant identifier, named after the status reason phrase.
+    pub variant: RustIdent,
+    /// Numeric HTTP status code, emitted as `StatusCode::from_u16(..)`.
+    pub status: u16,
+    /// JSON response body type, when the response declares content.
+    pub body: Option<RustType>,
+    /// Doc comment derived from the response `description`.
+    pub doc: Option<String>,
+}

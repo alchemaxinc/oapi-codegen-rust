@@ -23,6 +23,7 @@ package: apimodel # informational
 output: models.rs # output path (overridden by -o)
 generate:
   models: true
+  std-http-server: true # also emit an axum server interface
 ```
 
 Unknown keys (e.g. `output-options`, `import-mapping`) are accepted and ignored
@@ -70,6 +71,31 @@ type:
 | `integer` (none / `int64`)           | `i64`                           |
 | `number` (none / `float` / `double`) | `f64`                           |
 
+## Server generation
+
+Setting `generate.std-http-server` emits an [`axum`] interface alongside the
+models. The output is typed-only — the generator never decides how a request is
+handled, it only describes the contract:
+
+- a `trait Api` with one method per operation returning an
+  `impl Future<Output = ...> + Send` (native async-in-traits / RPITIT, no
+  `async-trait` dependency), whose arguments are the path parameters and the
+  decoded JSON body;
+- a response `enum` per operation, with one variant per documented status code,
+  implementing `axum::response::IntoResponse`;
+- a `router<T: Api>(api: T) -> axum::Router` builder that wires each operation to
+  its route, reusing the OpenAPI path template verbatim (axum 0.8 uses the same
+  `/{id}` syntax).
+
+You implement `Api` for your own type and pass it to `router`; the generated
+code owns extraction, status codes, and JSON (de)serialization.
+
+This is a deliberate first slice. Currently supported: path parameters, JSON
+request bodies (a `$ref` or a scalar), and responses keyed by explicit status
+codes. Query, header, and cookie parameters are **ignored**. A `default` or
+range (`5XX`) response, a component-level `$ref` parameter/body/response, or a
+non-scalar path parameter is **rejected** with an error rather than mis-generated.
+
 ## Coverage
 
 Every OpenAPI 3 schema element is deliberately catalogued — supported, ignored,
@@ -82,10 +108,13 @@ the unknown.
   `deprecated`, `readOnly`, `writeOnly`, `example`, `externalDocs`,
   `additionalProperties: false`, and `x-go-*` extensions.
 - **Unsupported** (rejected with an error rather than mis-generated): `not`.
-- **Planned** (the server/client generators): `paths`, `parameters`,
-  `requestBody`, `responses`, `securitySchemes`, `servers`, `callbacks`, and
-  `links`.
+- **Partly supported** (the axum server generator, see above): `paths`,
+  `parameters` (path only), `requestBody` (JSON), and `responses` (explicit
+  status codes).
+- **Planned** (the remaining server/client surface): `securitySchemes`,
+  `servers`, `callbacks`, and `links`.
 
+[`axum`]: https://crates.io/crates/axum
 [`openapiv3`]: https://crates.io/crates/openapiv3
 [`quote`]: https://crates.io/crates/quote
 [`syn`]: https://crates.io/crates/syn
