@@ -191,8 +191,9 @@ pub struct Operation {
     pub response_enum: RustIdent,
     /// Doc comment derived from the operation `summary`/`description`.
     pub doc: Option<String>,
-    /// HTTP method, used to pick the axum routing helper.
-    pub method: Method,
+    /// Lowercase HTTP method verb (`get`, `post`, …), which is also the
+    /// `axum::routing` helper name.
+    pub method: String,
     /// Request path template, reused verbatim as the axum route (axum 0.8 and
     /// OpenAPI share the `/{name}` path-parameter syntax).
     pub path: String,
@@ -218,48 +219,10 @@ pub struct Param {
 pub struct ResponseCase {
     /// Variant identifier, named after the status reason phrase.
     pub variant: RustIdent,
-    /// `axum::http::StatusCode` associated-constant name (e.g. `NOT_FOUND`).
-    pub status_const: String,
+    /// Numeric HTTP status code, emitted as `StatusCode::from_u16(..)`.
+    pub status: u16,
     /// JSON response body type, when the response declares content.
     pub body: Option<RustType>,
     /// Doc comment derived from the response `description`.
     pub doc: Option<String>,
-}
-
-/// An HTTP method the generator can route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Method {
-    /// `GET`.
-    Get,
-    /// `PUT`.
-    Put,
-    /// `POST`.
-    Post,
-    /// `DELETE`.
-    Delete,
-    /// `OPTIONS`.
-    Options,
-    /// `HEAD`.
-    Head,
-    /// `PATCH`.
-    Patch,
-    /// `TRACE`.
-    Trace,
-}
-
-impl Method {
-    /// The `axum::routing` helper function name for this method.
-    pub fn routing_fn(self) -> &'static str {
-        let name = match self {
-            Method::Get => "get",
-            Method::Put => "put",
-            Method::Post => "post",
-            Method::Delete => "delete",
-            Method::Options => "options",
-            Method::Head => "head",
-            Method::Patch => "patch",
-            Method::Trace => "trace",
-        };
-        return name;
-    }
 }

@@ -5,6 +5,7 @@
 //! responses, and component-level `$ref`s for parameters, request bodies and
 //! responses are intentionally not handled yet and are rejected explicitly.
 
+use http::StatusCode as HttpStatus;
 use openapiv3::Operation as OasOperation;
 use openapiv3::Parameter;
 use openapiv3::ParameterSchemaOrContent;
@@ -16,7 +17,6 @@ use openapiv3::Type;
 
 use crate::error::Error;
 use crate::error::Result;
-use crate::ir::Method;
 use crate::ir::Operation;
 use crate::ir::Param;
 use crate::ir::ResponseCase;
@@ -28,7 +28,6 @@ use crate::naming::Case;
 use crate::naming::to_ident;
 use crate::schema::integer_format_type;
 use crate::schema::string_format_type;
-use crate::status;
 
 /// The JSON media type the slice reads request and response bodies from.
 const JSON_MEDIA_TYPE: &str = "application/json";
@@ -47,8 +46,7 @@ pub fn generate_service(spec: &Spec) -> Result<Service> {
                 });
             }
         };
-        for (method_name, operation) in item.iter() {
-            let method = method_from_str(method_name);
+        for (method, operation) in item.iter() {
             let lowered = lower_operation(path, method, operation, &item.parameters)?;
             operations.push(lowered);
         }
@@ -59,7 +57,7 @@ pub fn generate_service(spec: &Spec) -> Result<Service> {
 /// Lower a single operation, given its path, method and path-item parameters.
 fn lower_operation(
     path: &str,
-    method: Method,
+    method: &str,
     operation: &OasOperation,
     shared_params: &[ReferenceOr<Parameter>],
 ) -> Result<Operation> {
@@ -76,7 +74,7 @@ fn lower_operation(
         handler,
         response_enum,
         doc: operation_doc(operation),
-        method,
+        method: method.to_owned(),
         path: path.to_owned(),
         path_params,
         body,
@@ -166,7 +164,7 @@ fn param_type(path: &str, name: &str, format: &ParameterSchemaOrContent) -> Resu
 }
 
 /// Lower an operation's JSON request body, if it declares one.
-fn lower_request_body(path: &str, method: Method, operation: &OasOperation) -> Result<Option<RustType>> {
+fn lower_request_body(path: &str, method: &str, operation: &OasOperation) -> Result<Option<RustType>> {
     let body = match &operation.request_body {
         Some(body) => body,
         None => return Ok(None),
@@ -175,7 +173,7 @@ fn lower_request_body(path: &str, method: Method, operation: &OasOperation) -> R
         ReferenceOr::Item(body) => body,
         ReferenceOr::Reference { .. } => {
             return Err(Error::UnsupportedOperation {
-                method: method.routing_fn().to_owned(),
+                method: method.to_owned(),
                 path: path.to_owned(),
                 reason: "component request-body `$ref`s are not supported".to_owned(),
             });
@@ -194,10 +192,10 @@ fn lower_request_body(path: &str, method: Method, operation: &OasOperation) -> R
 }
 
 /// Lower an operation's responses into typed enum variants.
-fn lower_responses(path: &str, method: Method, operation: &OasOperation) -> Result<Vec<ResponseCase>> {
+fn lower_responses(path: &str, method: &str, operation: &OasOperation) -> Result<Vec<ResponseCase>> {
     if operation.responses.default.is_some() {
         return Err(Error::UnsupportedOperation {
-            method: method.routing_fn().to_owned(),
+            method: method.to_owned(),
             path: path.to_owned(),
             reason: "`default` responses are not supported yet".to_owned(),
         });
@@ -209,15 +207,18 @@ fn lower_responses(path: &str, method: Method, operation: &OasOperation) -> Resu
             StatusCode::Code(code) => *code,
             StatusCode::Range(range) => {
                 return Err(Error::UnsupportedOperation {
-                    method: method.routing_fn().to_owned(),
+                    method: method.to_owned(),
                     path: path.to_owned(),
                     reason: format!("range response `{range}XX` is not supported yet"),
                 });
             }
         };
-        let const_name = status::const_name(code).ok_or_else(|| {
+        let reason = HttpStatus::from_u16(code).ok().and_then(|status| {
+            return status.canonical_reason();
+        });
+        let reason = reason.ok_or_else(|| {
             return Error::UnsupportedOperation {
-                method: method.routing_fn().to_owned(),
+                method: method.to_owned(),
                 path: path.to_owned(),
                 reason: format!("status code `{code}` is not a recognised HTTP status"),
             };
@@ -226,7 +227,7 @@ fn lower_responses(path: &str, method: Method, operation: &OasOperation) -> Resu
             ReferenceOr::Item(response) => response,
             ReferenceOr::Reference { .. } => {
                 return Err(Error::UnsupportedOperation {
-                    method: method.routing_fn().to_owned(),
+                    method: method.to_owned(),
                     path: path.to_owned(),
                     reason: "component response `$ref`s are not supported".to_owned(),
                 });
@@ -239,8 +240,8 @@ fn lower_responses(path: &str, method: Method, operation: &OasOperation) -> Resu
             None => None,
         };
         cases.push(ResponseCase {
-            variant: to_ident(const_name, Case::Pascal),
-            status_const: const_name.to_owned(),
+            variant: to_ident(reason, Case::Pascal),
+            status: code,
             body,
             doc: trimmed(&response.description),
         });
@@ -248,7 +249,7 @@ fn lower_responses(path: &str, method: Method, operation: &OasOperation) -> Resu
 
     if cases.is_empty() {
         return Err(Error::UnsupportedOperation {
-            method: method.routing_fn().to_owned(),
+            method: method.to_owned(),
             path: path.to_owned(),
             reason: "operation declares no responses".to_owned(),
         });
@@ -258,7 +259,7 @@ fn lower_responses(path: &str, method: Method, operation: &OasOperation) -> Resu
 
 /// Map a request/response body schema to a Rust type. Composite inline schemas
 /// must be referenced by name (`$ref`) so the models pass owns their emission.
-fn body_type(path: &str, method: Method, schema: &ReferenceOr<Schema>) -> Result<RustType> {
+fn body_type(path: &str, method: &str, schema: &ReferenceOr<Schema>) -> Result<RustType> {
     match schema {
         ReferenceOr::Reference { reference } => return named_from_ref(path, reference),
         ReferenceOr::Item(schema) => return inline_body_type(path, method, schema),
@@ -266,7 +267,7 @@ fn body_type(path: &str, method: Method, schema: &ReferenceOr<Schema>) -> Result
 }
 
 /// Map an inline (non-`$ref`) body schema to a Rust type.
-fn inline_body_type(path: &str, method: Method, schema: &Schema) -> Result<RustType> {
+fn inline_body_type(path: &str, method: &str, schema: &Schema) -> Result<RustType> {
     let ty = match &schema.schema_kind {
         SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
         SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
@@ -283,7 +284,7 @@ fn inline_body_type(path: &str, method: Method, schema: &Schema) -> Result<RustT
         SchemaKind::Any(_) => RustType::Value,
         _ => {
             return Err(Error::UnsupportedOperation {
-                method: method.routing_fn().to_owned(),
+                method: method.to_owned(),
                 path: path.to_owned(),
                 reason: "composite request/response bodies must reference a named schema (`$ref`)".to_owned(),
             });
@@ -305,12 +306,12 @@ fn named_from_ref(path: &str, reference: &str) -> Result<RustType> {
 }
 
 /// Derive the trait method name: the `operationId` if present, else a name
-/// synthesised from the method and path (e.g. `GET /v1/widgets` -> `get_v1_widgets`).
-fn operation_name(path: &str, method: Method, operation: &OasOperation) -> crate::naming::RustIdent {
+/// synthesised from the method and path (e.g. `get /v1/widgets` -> `get_v1_widgets`).
+fn operation_name(path: &str, method: &str, operation: &OasOperation) -> crate::naming::RustIdent {
     if let Some(id) = &operation.operation_id {
         return to_ident(id, Case::Snake);
     }
-    let synthesised = format!("{} {path}", method.routing_fn());
+    let synthesised = format!("{method} {path}");
     return to_ident(&synthesised, Case::Snake);
 }
 
@@ -341,21 +342,6 @@ fn path_param_names(path: &str) -> Vec<String> {
     return names;
 }
 
-/// Map openapiv3's lowercase method string to the IR [`Method`].
-fn method_from_str(method: &str) -> Method {
-    let mapped = match method {
-        "put" => Method::Put,
-        "post" => Method::Post,
-        "delete" => Method::Delete,
-        "options" => Method::Options,
-        "head" => Method::Head,
-        "patch" => Method::Patch,
-        "trace" => Method::Trace,
-        _ => Method::Get,
-    };
-    return mapped;
-}
-
 /// Trim a string and return `None` when it is empty.
 fn trimmed(text: &str) -> Option<String> {
     let trimmed = text.trim();
@@ -380,9 +366,14 @@ mod tests {
     }
 
     #[test]
-    fn maps_known_methods() {
-        assert_eq!(method_from_str("post"), Method::Post);
-        assert_eq!(method_from_str("delete"), Method::Delete);
-        assert_eq!(method_from_str("get"), Method::Get);
+    fn response_variants_are_named_after_the_status_reason() {
+        let variant = |code| {
+            let reason = HttpStatus::from_u16(code).unwrap().canonical_reason().unwrap();
+            return to_ident(reason, Case::Pascal).logical().to_owned();
+        };
+        assert_eq!(variant(200), "Ok");
+        assert_eq!(variant(204), "NoContent");
+        assert_eq!(variant(404), "NotFound");
+        assert_eq!(variant(500), "InternalServerError");
     }
 }

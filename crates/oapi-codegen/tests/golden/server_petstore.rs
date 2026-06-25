@@ -51,7 +51,8 @@ impl axum::response::IntoResponse for ListPetsResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
             ListPetsResponse::Ok(body) => {
-                (axum::http::StatusCode::OK, axum::Json(body)).into_response()
+                (axum::http::StatusCode::from_u16(200).unwrap(), axum::Json(body))
+                    .into_response()
             }
         }
     }
@@ -69,10 +70,12 @@ impl axum::response::IntoResponse for CreatePetResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
             CreatePetResponse::Created(body) => {
-                (axum::http::StatusCode::CREATED, axum::Json(body)).into_response()
+                (axum::http::StatusCode::from_u16(201).unwrap(), axum::Json(body))
+                    .into_response()
             }
             CreatePetResponse::BadRequest(body) => {
-                (axum::http::StatusCode::BAD_REQUEST, axum::Json(body)).into_response()
+                (axum::http::StatusCode::from_u16(400).unwrap(), axum::Json(body))
+                    .into_response()
             }
         }
     }
@@ -90,10 +93,12 @@ impl axum::response::IntoResponse for GetPetResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
             GetPetResponse::Ok(body) => {
-                (axum::http::StatusCode::OK, axum::Json(body)).into_response()
+                (axum::http::StatusCode::from_u16(200).unwrap(), axum::Json(body))
+                    .into_response()
             }
             GetPetResponse::NotFound(body) => {
-                (axum::http::StatusCode::NOT_FOUND, axum::Json(body)).into_response()
+                (axum::http::StatusCode::from_u16(404).unwrap(), axum::Json(body))
+                    .into_response()
             }
         }
     }
@@ -109,7 +114,7 @@ impl axum::response::IntoResponse for DeletePetResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
             DeletePetResponse::NoContent => {
-                axum::http::StatusCode::NO_CONTENT.into_response()
+                axum::http::StatusCode::from_u16(204).unwrap().into_response()
             }
         }
     }

@@ -329,7 +329,7 @@ fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream
     let mut arms = Vec::with_capacity(operation.responses.len());
     for case in &operation.responses {
         let variant = case.variant.to_token();
-        let status = format_ident!("{}", case.status_const);
+        let code = proc_macro2::Literal::u16_unsuffixed(case.status);
         let doc = doc_attr(&case.doc);
         match &case.body {
             Some(body) => {
@@ -337,14 +337,14 @@ fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream
                 variants.push(quote! { #doc #variant(#ty) });
                 arms.push(quote! {
                     #name::#variant(body) => {
-                        (axum::http::StatusCode::#status, axum::Json(body)).into_response()
+                        (axum::http::StatusCode::from_u16(#code).unwrap(), axum::Json(body)).into_response()
                     }
                 });
             }
             None => {
                 variants.push(quote! { #doc #variant });
                 arms.push(quote! {
-                    #name::#variant => axum::http::StatusCode::#status.into_response(),
+                    #name::#variant => axum::http::StatusCode::from_u16(#code).unwrap().into_response(),
                 });
             }
         }
@@ -379,7 +379,7 @@ fn emit_router(service: &Service) -> TokenStream {
         let mut first = true;
         while index < service.operations.len() && service.operations[index].path == *path {
             let operation = &service.operations[index];
-            let routing = format_ident!("{}", operation.method.routing_fn());
+            let routing = format_ident!("{}", operation.method);
             let handler = operation.handler.to_token();
             if first {
                 method_router = quote! { axum::routing::#routing(#handler::<T>) };

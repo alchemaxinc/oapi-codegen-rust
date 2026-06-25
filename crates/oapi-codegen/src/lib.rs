@@ -13,7 +13,6 @@ pub mod loader;
 pub mod naming;
 pub mod paths;
 pub mod schema;
-pub mod status;
 
 use std::path::Path;
 

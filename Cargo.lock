@@ -481,6 +481,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
+ "http",
  "indexmap",
  "openapiv3",
  "prettyplease",

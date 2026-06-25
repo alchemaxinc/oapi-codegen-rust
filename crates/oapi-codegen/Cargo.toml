@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
+http = "1"
 indexmap = "2.14.0"
 openapiv3 = "2"
 prettyplease = "0.2.37"
