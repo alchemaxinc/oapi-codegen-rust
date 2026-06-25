@@ -1,0 +1,32 @@
+openapi: 3.0.3
+info:
+  title: Object-ref path param server
+  version: 1.0.0
+paths:
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      summary: Fetch a widget by a structured key.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/WidgetKey"
+      responses:
+        "200":
+          description: The requested widget identifier, echoed back.
+          content:
+            application/json:
+              schema:
+                type: string
+components:
+  schemas:
+    WidgetKey:
+      type: object
+      required: [tenant, id]
+      properties:
+        tenant:
+          type: string
+        id:
+          type: string

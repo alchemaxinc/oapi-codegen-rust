@@ -26,8 +26,11 @@ generate:
   std-http-server: true # also emit an axum server interface
 ```
 
-Unknown keys (e.g. `output-options`, `import-mapping`) are accepted and ignored
-so existing `oapi-codegen` configs can be reused.
+`import-mapping` maps a referenced spec file to the Rust module its schemas are
+emitted into, so cross-file `$ref`s in the server interface resolve to
+`that_module::TypeName` (see the server section below). Other unknown keys (e.g.
+`output-options`) are accepted and ignored so existing `oapi-codegen` configs can
+be reused.
 
 ## How it works
 
@@ -90,11 +93,16 @@ handled, it only describes the contract:
 You implement `Api` for your own type and pass it to `router`; the generated
 code owns extraction, status codes, and JSON (de)serialization.
 
-This is a deliberate first slice. Currently supported: path parameters, JSON
-request bodies (a `$ref` or a scalar), and responses keyed by explicit status
-codes. Query, header, and cookie parameters are **ignored**. A `default` or
-range (`5XX`) response, a component-level `$ref` parameter/body/response, or a
-non-scalar path parameter is **rejected** with an error rather than mis-generated.
+This is a deliberate first slice. Currently supported: path parameters (inline
+scalars, or a same-document `$ref` that resolves to a scalar), JSON request
+bodies (a `$ref` or a scalar), and responses keyed by explicit status codes —
+including component `$ref` responses (`#/components/responses/...`) resolved
+against the document. Cross-file schema `$ref`s in bodies and responses are
+routed through `import-mapping` to an external module type (e.g.
+`crate::apimodel::Widget`). Query, header, and cookie parameters are **ignored**.
+A `default` or range (`5XX`) response, a component-level `$ref` _parameter_ or
+_request body_, a cross-file component-_response_ `$ref`, or a non-scalar path
+parameter is **rejected** with an error rather than mis-generated.
 
 ## Coverage
 

@@ -329,11 +329,16 @@ const TEST_TABLE: &[Feature] = &[
 /// These exercise the server generator (a different axis from the schema
 /// [`TEST_TABLE`]): path parameters, JSON request bodies, and typed responses.
 /// Each must have a `#[test]` via [`server_generated_tests!`].
-const SERVER_FIXTURES: &[&str] = &["server_petstore"];
+const SERVER_FIXTURES: &[&str] = &["server_petstore", "server_refs"];
 
 /// Server fixtures whose generation must fail with a documented error, covering
 /// the slice's deliberate limitations (e.g. `default`/range responses).
-const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &["server_unsupported_default_response", "server_unsupported_ref_param"];
+const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
+    "server_unsupported_default_response",
+    "server_unsupported_ref_param",
+    "server_unsupported_xfile_response_ref",
+    "server_unsupported_object_path_param",
+];
 
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {
@@ -437,11 +442,14 @@ fn generated_tests_cover_supported_fixtures() {
 
 /// Configuration that enables the axum server generator.
 fn server_config() -> oapi_codegen::Config {
+    let mut import_mapping = std::collections::BTreeMap::new();
+    import_mapping.insert("schemas/widgets.yaml".to_owned(), "crate::apimodel".to_owned());
     return oapi_codegen::Config {
         generate: oapi_codegen::config::Generate {
             std_http_server: true,
             ..Default::default()
         },
+        import_mapping,
         ..Default::default()
     };
 }
@@ -494,7 +502,7 @@ macro_rules! server_generated_tests {
     };
 }
 
-server_generated_tests!(server_petstore);
+server_generated_tests!(server_petstore, server_refs);
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.
 #[test]

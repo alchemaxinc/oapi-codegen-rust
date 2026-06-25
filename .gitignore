@@ -8,6 +8,7 @@ dist/
 
 # Rust
 target/
+output/
 
 # Node (Prettier / Commitlint installed in CI)
 node_modules/

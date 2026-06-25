@@ -36,7 +36,7 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         Module::default()
     };
     if want_server {
-        let service = paths::generate_service(&spec)?;
+        let service = paths::generate_service(&spec, &config.import_mapping)?;
         return emit::emit_with_service(&module, &service);
     }
     return emit::emit_module(&module);

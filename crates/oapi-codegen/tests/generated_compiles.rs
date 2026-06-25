@@ -75,6 +75,22 @@ mod generated {
     pub mod server_petstore {
         include!("generated/server_petstore.rs");
     }
+    pub mod server_refs {
+        include!("generated/server_refs.rs");
+    }
+}
+
+/// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
+/// points its cross-file `$ref` bodies at (`crate::apimodel`). Real projects
+/// generate this module from the referenced schema file; here a minimal struct
+/// proves the emitted `crate::apimodel::CreateWidget` path resolves and that the
+/// generated handler can decode it as a JSON body.
+#[allow(dead_code)]
+mod apimodel {
+    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+    pub struct CreateWidget {
+        pub name: String,
+    }
 }
 
 #[test]
@@ -143,4 +159,40 @@ fn generated_server_trait_implements_and_routes() {
     // Building the router proves the native `async fn` trait, the response
     // enums' `IntoResponse`, and the handler wiring all type-check together.
     let _router: axum::Router = server_petstore::router(Service);
+}
+
+#[test]
+fn generated_server_resolves_refs_and_import_mapping() {
+    use generated::server_refs;
+    use server_refs::Api;
+    use server_refs::CreateWidgetResponse;
+    use server_refs::ErrorBody;
+    use server_refs::GetWidgetRawResponse;
+    use server_refs::Widget;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn create_widget(&self, body: apimodel::CreateWidget) -> CreateWidgetResponse {
+            if body.name.is_empty() {
+                return CreateWidgetResponse::Unauthorized(ErrorBody {
+                    message: "anonymous widgets are not allowed".to_owned(),
+                });
+            }
+            return CreateWidgetResponse::Created(Widget {
+                id: "w1".to_owned(),
+                name: body.name,
+            });
+        }
+
+        async fn get_widget_raw(&self, id: String) -> GetWidgetRawResponse {
+            return GetWidgetRawResponse::Ok(serde_json::json!({ "id": id }));
+        }
+    }
+
+    // The router builds only if the component-`$ref` response (`Unauthorized`),
+    // the import-mapped body type (`crate::apimodel::CreateWidget`), and the
+    // free-form `serde_json::Value` response all resolve and type-check.
+    let _router: axum::Router = server_refs::router(Service);
 }

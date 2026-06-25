@@ -128,7 +128,7 @@ mod tests {
             ("ErrorResponse", "ErrorResponse", false),
             ("payment_form", "PaymentForm", false),
             ("da", "Da", false),
-            ("MACHSIKE_SIGNUP_REQUEST", "MachsikeSignupRequest", false),
+            ("PET_SHOP_SIGNUP_REQUEST", "PetShopSignupRequest", false),
         ];
         for (input, expected, raw) in cases {
             let ident = to_ident(input, Case::Pascal);
