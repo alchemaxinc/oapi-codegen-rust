@@ -337,6 +337,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_default_response",
     "server_unsupported_ref_param",
     "server_unsupported_xfile_response_ref",
+    "server_unsupported_object_path_param",
 ];
 
 /// Absolute path to the crate's `tests` directory.

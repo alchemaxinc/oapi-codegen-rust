@@ -164,8 +164,8 @@ fn path_param_schema<'a>(name: &str, parameters: &'a [ReferenceOr<Parameter>]) -
     return None;
 }
 
-/// Map a path parameter's schema to a scalar Rust type.
 impl Lowerer<'_> {
+    /// Map a path parameter's schema to a scalar Rust type.
     fn param_type(&self, path: &str, method: &str, name: &str, format: &ParameterSchemaOrContent) -> Result<RustType> {
         let schema = match format {
             ParameterSchemaOrContent::Schema(schema) => schema,
@@ -178,7 +178,12 @@ impl Lowerer<'_> {
             }
         };
         let schema = match schema {
-            ReferenceOr::Reference { reference } => return self.named_from_ref(path, method, reference),
+            // Cross-file parameter refs route through import-mapping; same-document
+            // refs are resolved here so the scalar-only rule below still applies.
+            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
+                return self.named_from_ref(path, method, reference);
+            }
+            ReferenceOr::Reference { reference } => self.spec.resolve(reference)?,
             ReferenceOr::Item(schema) => schema,
         };
         let ty = match &schema.schema_kind {
