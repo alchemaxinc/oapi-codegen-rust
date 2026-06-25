@@ -1,0 +1,26 @@
+openapi: "3.0.3"
+info:
+  title: Bookstore - Common Schemas
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: A short, stable machine-readable error code.
+        message:
+          type: string
+          description: A human-readable description of the error.
+
+    HealthStatus:
+      type: string
+      description: Coarse service health.
+      enum:
+        - ok
+        - degraded

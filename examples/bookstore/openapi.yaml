@@ -1,0 +1,67 @@
+openapi: "3.0.3"
+info:
+  title: Bookstore API
+  description: >-
+    A small, multi-file OpenAPI spec used to demonstrate generating an idiomatic
+    Rust project with oapi-codegen-rust: per-schema model modules plus an axum
+    server whose cross-file `$ref`s resolve through `import-mapping`.
+  version: "1.0.0"
+components:
+  responses:
+    BadRequest:
+      description: The request was malformed.
+      content:
+        application/json:
+          schema:
+            $ref: "schemas/common.yaml#/components/schemas/ErrorResponse"
+    NotFound:
+      description: No resource matched the request.
+paths:
+  /books:
+    post:
+      operationId: createBook
+      summary: Add a book to the catalog.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "schemas/catalog.yaml#/components/schemas/NewBook"
+      responses:
+        "201":
+          description: The book was created.
+          content:
+            application/json:
+              schema:
+                $ref: "schemas/catalog.yaml#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /books/{id}:
+    get:
+      operationId: getBook
+      summary: Fetch a single book by id.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The requested book.
+          content:
+            application/json:
+              schema:
+                $ref: "schemas/catalog.yaml#/components/schemas/Book"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness probe returning a free-form document.
+      responses:
+        "200":
+          description: An opaque service-health document.
+          content:
+            application/json:
+              schema: {}

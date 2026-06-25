@@ -93,6 +93,13 @@ handled, it only describes the contract:
 You implement `Api` for your own type and pass it to `router`; the generated
 code owns extraction, status codes, and JSON (de)serialization.
 
+A complete, runnable demonstration lives in [`examples/bookstore`](examples/bookstore):
+a multi-file spec (`schemas/common.yaml`, `schemas/catalog.yaml`, `openapi.yaml`)
+generates one model module per schema file plus an axum server whose cross-file
+`$ref`s resolve to those modules via `import-mapping`. The whole thing compiles
+as a single crate, and `tests/smoke.rs` builds a `router` from a hand-written
+`Api` impl. Regenerate it with `make generate-example`.
+
 This is a deliberate first slice. Currently supported: path parameters (inline
 scalars, or a same-document `$ref` that resolves to a scalar), JSON request
 bodies (a `$ref` or a scalar), and responses keyed by explicit status codes —

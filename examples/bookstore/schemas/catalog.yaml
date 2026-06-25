@@ -1,0 +1,48 @@
+openapi: "3.0.3"
+info:
+  title: Bookstore - Catalog Schemas
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Book:
+      type: object
+      required:
+        - id
+        - title
+        - author
+        - price_cents
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        author:
+          type: string
+        price_cents:
+          type: integer
+          format: int64
+          description: Price in minor currency units (e.g. cents).
+        tags:
+          type: array
+          items:
+            type: string
+
+    NewBook:
+      type: object
+      required:
+        - title
+        - author
+        - price_cents
+      properties:
+        title:
+          type: string
+        author:
+          type: string
+        price_cents:
+          type: integer
+          format: int64
+        tags:
+          type: array
+          items:
+            type: string
