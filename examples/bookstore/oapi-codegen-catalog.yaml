@@ -1,0 +1,4 @@
+package: apimodel
+output: generated/apimodel/catalog.rs
+generate:
+  models: true

@@ -1,0 +1,4 @@
+package: apimodel
+output: generated/apimodel/common.rs
+generate:
+  models: true

@@ -47,6 +47,13 @@ test-integration: ## Run integration tests
 update-generated: ## Refresh generated files from the coverage fixtures
 	UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage
 
+.PHONY: generate-example
+generate-example: ## Regenerate the composed bookstore example from its OpenAPI spec
+	cd examples/bookstore && \
+		cargo run -q -p oapi-codegen -- schemas/common.yaml --config oapi-codegen-common.yaml && \
+		cargo run -q -p oapi-codegen -- schemas/catalog.yaml --config oapi-codegen-catalog.yaml && \
+		cargo run -q -p oapi-codegen -- openapi.yaml --config oapi-codegen-server.yaml
+
 .PHONY: docs
 docs: ## Generate and open Rust documentation
 	cargo doc --no-deps --open
