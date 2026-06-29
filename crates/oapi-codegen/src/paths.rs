@@ -149,8 +149,11 @@ impl Lowerer<'_> {
 
     /// Lower an operation's query parameters into a generated `Deserialize`
     /// struct, returning `None` when the operation declares none. Component
-    /// parameter `$ref`s are already rejected by [`Self::lower_path_params`],
-    /// so only inline `Parameter::Query` entries are considered here.
+    /// parameter `$ref`s are already rejected by [`Self::lower_path_params`], so
+    /// only inline `Parameter::Query` entries are considered here. Per OpenAPI's
+    /// override rule, an operation-level parameter takes precedence over a
+    /// path-item one with the same name, so duplicates are de-duplicated keeping
+    /// the first (operation-level) definition.
     fn lower_query_params(
         &self,
         path: &str,
@@ -160,10 +163,15 @@ impl Lowerer<'_> {
         operation_name: &RustIdent,
     ) -> Result<Option<Struct>> {
         let mut fields = Vec::new();
+        let mut seen: Vec<&str> = Vec::new();
         for parameter in operation.parameters.iter().chain(shared_params) {
             let ReferenceOr::Item(Parameter::Query { parameter_data, .. }) = parameter else {
                 continue;
             };
+            if seen.contains(&parameter_data.name.as_str()) {
+                continue;
+            }
+            seen.push(&parameter_data.name);
             fields.push(self.query_field(path, method, parameter_data)?);
         }
         if fields.is_empty() {
@@ -220,13 +228,16 @@ impl Lowerer<'_> {
         if let SchemaKind::Type(Type::Array(array)) = &schema.schema_kind {
             let item = match &array.items {
                 Some(ReferenceOr::Item(item)) => item.as_ref(),
-                Some(ReferenceOr::Reference { .. }) => {
+                Some(ReferenceOr::Reference { reference }) if ref_file_part(reference).is_some() => {
                     return Err(Error::UnsupportedOperation {
                         method: method.to_owned(),
                         path: path.to_owned(),
-                        reason: format!("query parameter `{name}` uses array items via `$ref`, which is not supported"),
+                        reason: format!(
+                            "query parameter `{name}` uses array items via a cross-file `$ref`, which is not supported"
+                        ),
                     });
                 }
+                Some(ReferenceOr::Reference { reference }) => self.spec.resolve(reference)?,
                 None => {
                     return Err(Error::UnsupportedOperation {
                         method: method.to_owned(),
