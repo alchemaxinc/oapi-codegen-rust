@@ -18,6 +18,39 @@ components:
       description: No resource matched the request.
 paths:
   /books:
+    get:
+      operationId: listBooks
+      summary: List books, optionally filtered.
+      parameters:
+        - name: author
+          in: query
+          required: false
+          description: Restrict the listing to a single author.
+          schema:
+            type: string
+        - name: tag
+          in: query
+          required: false
+          description: Only return books carrying every given tag.
+          schema:
+            type: array
+            items:
+              type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+      responses:
+        "200":
+          description: The matching books.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "schemas/catalog.yaml#/components/schemas/Book"
     post:
       operationId: createBook
       summary: Add a book to the catalog.

@@ -15,11 +15,29 @@ use bookstore_example::restapi::Api;
 use bookstore_example::restapi::CreateBookResponse;
 use bookstore_example::restapi::GetBookResponse;
 use bookstore_example::restapi::GetHealthResponse;
+use bookstore_example::restapi::ListBooksQuery;
+use bookstore_example::restapi::ListBooksResponse;
 
 #[derive(Clone)]
 struct Service;
 
 impl Api for Service {
+    async fn list_books(&self, query: ListBooksQuery) -> ListBooksResponse {
+        let author = match query.author {
+            Some(author) => author,
+            None => "Klabnik & Nichols".to_owned(),
+        };
+        let book = Book {
+            id: "book-1".to_owned(),
+            title: "The Rust Programming Language".to_owned(),
+            author,
+            price_cents: 3999,
+            tags: query.tag,
+        };
+
+        return ListBooksResponse::Ok(vec![book]);
+    }
+
     async fn create_book(&self, body: NewBook) -> CreateBookResponse {
         if body.title.is_empty() {
             return CreateBookResponse::BadRequest(ErrorResponse {

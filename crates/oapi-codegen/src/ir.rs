@@ -201,6 +201,10 @@ pub struct Operation {
     pub path: String,
     /// Typed path parameters, in path order.
     pub path_params: Vec<Param>,
+    /// Generated query-parameter struct, when the operation declares query
+    /// parameters. Its name doubles as the `axum_extra::extract::Query<..>`
+    /// type and the `Api` method's `query` argument type.
+    pub query: Option<Struct>,
     /// JSON request body type, when the operation declares one.
     pub body: Option<RustType>,
     /// Response variants, in declaration order.

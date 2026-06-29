@@ -78,6 +78,9 @@ mod generated {
     pub mod server_refs {
         include!("generated/server_refs.rs");
     }
+    pub mod server_query_params {
+        include!("generated/server_query_params.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -195,4 +198,38 @@ fn generated_server_resolves_refs_and_import_mapping() {
     // the import-mapped body type (`crate::apimodel::CreateWidget`), and the
     // free-form `serde_json::Value` response all resolve and type-check.
     let _router: axum::Router = server_refs::router(Service);
+}
+
+#[test]
+fn generated_server_accepts_query_params() {
+    use generated::server_query_params;
+    use server_query_params::Api;
+    use server_query_params::Book;
+    use server_query_params::ListBooksQuery;
+    use server_query_params::ListBooksResponse;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn list_books(&self, query: ListBooksQuery) -> ListBooksResponse {
+            let mut books = Vec::new();
+            if query.available {
+                let title = match query.author {
+                    Some(author) => author,
+                    None => "anon".to_owned(),
+                };
+                books.push(Book {
+                    id: "b1".to_owned(),
+                    title,
+                });
+            }
+            return ListBooksResponse::Ok(books);
+        }
+    }
+
+    // The query struct is read field-by-field above (required `available`,
+    // optional `author`), and the router builds only if the generated
+    // `axum_extra::extract::Query<ListBooksQuery>` extractor type-checks.
+    let _router: axum::Router = server_query_params::router(Service);
 }
