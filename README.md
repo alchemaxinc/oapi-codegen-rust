@@ -111,12 +111,15 @@ keyed by explicit status codes — including component `$ref` responses
 module type (e.g. `crate::apimodel::Widget`). Query parameters are deserialized
 through [`axum-extra`]'s `Query` extractor (it supports repeated keys for
 arrays), so a generated server that uses them needs
-`axum-extra = { version = "0.10", features = ["query"] }` as a dependency. Header
+`axum-extra = { version = "0.10", features = ["query"] }` as a dependency; array
+query parameters must use OpenAPI's default `style: form`, `explode: true`
+encoding (repeated keys, e.g. `?tag=a&tag=b`). Header
 and cookie parameters are still **ignored**. A `default` or range (`5XX`)
 response, a component-level `$ref` _parameter_ or _request body_, a cross-file
-component-_response_ `$ref`, an object/non-scalar path or query parameter, or a
-cross-file `$ref` query parameter is **rejected** with an error rather than
-mis-generated.
+component-_response_ `$ref`, an object/non-scalar path or query parameter, an
+array query parameter using a non-default encoding (e.g. `explode: false` or
+`spaceDelimited`), or a cross-file `$ref` query parameter is **rejected** with an
+error rather than mis-generated.
 
 ## Coverage
 
@@ -131,7 +134,7 @@ the unknown.
   `additionalProperties: false`, and `x-go-*` extensions.
 - **Unsupported** (rejected with an error rather than mis-generated): `not`.
 - **Partly supported** (the axum server generator, see above): `paths`,
-  `parameters` (path only), `requestBody` (JSON), and `responses` (explicit
+  `parameters` (path and query), `requestBody` (JSON), and `responses` (explicit
   status codes).
 - **Planned** (the remaining server/client surface): `securitySchemes`,
   `servers`, `callbacks`, and `links`.

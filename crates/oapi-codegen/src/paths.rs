@@ -6,11 +6,13 @@
 //! responses. Component `$ref` responses are resolved against the document and
 //! cross-file schema `$ref`s are routed through the `import-mapping`. Query
 //! parameters accept scalars and arrays of scalars (required ones stay bare,
-//! optional ones become `Option<..>`); object/non-scalar query shapes,
-//! `content` parameters, and cross-file `$ref` query parameters are rejected.
-//! Header/cookie parameters, `default`/range responses, and component-level
-//! `$ref`s for parameters and request bodies are intentionally not handled yet
-//! and are rejected explicitly.
+//! optional ones become `Option<..>`); array parameters must use OpenAPI's
+//! default `form`/`explode: true` encoding (repeated keys). Object/non-scalar
+//! query shapes, non-default array encodings, `content` parameters, and
+//! cross-file `$ref` query parameters are rejected. Header/cookie parameters,
+//! `default`/range responses, and component-level `$ref`s for parameters and
+//! request bodies are intentionally not handled yet and are rejected
+//! explicitly.
 
 use std::collections::BTreeMap;
 
@@ -19,6 +21,7 @@ use openapiv3::Operation as OasOperation;
 use openapiv3::Parameter;
 use openapiv3::ParameterData;
 use openapiv3::ParameterSchemaOrContent;
+use openapiv3::QueryStyle;
 use openapiv3::ReferenceOr;
 use openapiv3::Schema;
 use openapiv3::SchemaKind;
@@ -165,14 +168,17 @@ impl Lowerer<'_> {
         let mut fields = Vec::new();
         let mut seen: Vec<&str> = Vec::new();
         for parameter in operation.parameters.iter().chain(shared_params) {
-            let ReferenceOr::Item(Parameter::Query { parameter_data, .. }) = parameter else {
+            let ReferenceOr::Item(Parameter::Query {
+                parameter_data, style, ..
+            }) = parameter
+            else {
                 continue;
             };
             if seen.contains(&parameter_data.name.as_str()) {
                 continue;
             }
             seen.push(&parameter_data.name);
-            fields.push(self.query_field(path, method, parameter_data)?);
+            fields.push(self.query_field(path, method, parameter_data, style)?);
         }
         if fields.is_empty() {
             return Ok(None);
@@ -188,8 +194,8 @@ impl Lowerer<'_> {
 
     /// Build a query struct field from a single query parameter's metadata,
     /// wrapping optional parameters in `Option<..>`.
-    fn query_field(&self, path: &str, method: &str, data: &ParameterData) -> Result<Field> {
-        let mut ty = self.query_param_type(path, method, &data.name, &data.format)?;
+    fn query_field(&self, path: &str, method: &str, data: &ParameterData, style: &QueryStyle) -> Result<Field> {
+        let mut ty = self.query_param_type(path, method, &data.name, &data.format, style, data.explode)?;
         if !data.required {
             ty = ty.optional();
         }
@@ -206,13 +212,18 @@ impl Lowerer<'_> {
 
     /// Map a query parameter's schema to a scalar Rust type, or a `Vec<T>` of
     /// scalars. Cross-file `$ref`s, `content`, and non-scalar shapes (including
-    /// arrays of non-scalars) are rejected.
+    /// arrays of non-scalars) are rejected. Array parameters must use OpenAPI's
+    /// default `form`/`explode: true` encoding (repeated keys), since the
+    /// generated server reads them through `axum-extra`'s `Query` extractor;
+    /// other array encodings are rejected rather than silently mis-parsed.
     fn query_param_type(
         &self,
         path: &str,
         method: &str,
         name: &str,
         format: &ParameterSchemaOrContent,
+        style: &QueryStyle,
+        explode: Option<bool>,
     ) -> Result<RustType> {
         let schema = match format {
             ParameterSchemaOrContent::Schema(schema) => schema,
@@ -226,6 +237,15 @@ impl Lowerer<'_> {
         };
         let schema = self.resolve_param_schema(path, method, name, schema)?;
         if let SchemaKind::Type(Type::Array(array)) = &schema.schema_kind {
+            if !matches!(style, QueryStyle::Form) || explode == Some(false) {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!(
+                        "query parameter `{name}` uses a non-default array encoding; only `style: form` with `explode: true` (repeated keys) is supported"
+                    ),
+                });
+            }
             let item = match &array.items {
                 Some(ReferenceOr::Item(item)) => item.as_ref(),
                 Some(ReferenceOr::Reference { reference }) if ref_file_part(reference).is_some() => {
