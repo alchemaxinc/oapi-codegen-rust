@@ -54,6 +54,13 @@ paths:
     post:
       operationId: createBook
       summary: Add a book to the catalog.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Unique key so a retried create is not duplicated.
+          schema:
+            type: string
       requestBody:
         required: true
         content:

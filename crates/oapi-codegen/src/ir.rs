@@ -205,6 +205,10 @@ pub struct Operation {
     /// parameters. Its name doubles as the `axum_extra::extract::Query<..>`
     /// type and the `Api` method's `query` argument type.
     pub query: Option<Struct>,
+    /// Generated header-parameter struct, when the operation declares header
+    /// parameters. Its name doubles as the generated `FromRequestParts`
+    /// extractor type and the `Api` method's `headers` argument type.
+    pub headers: Option<Headers>,
     /// JSON request body type, when the operation declares one.
     pub body: Option<RustType>,
     /// Response variants, in declaration order.
@@ -218,6 +222,36 @@ pub struct Param {
     pub name: RustIdent,
     /// Parameter type.
     pub ty: RustType,
+}
+
+/// A generated per-operation header struct, extracted via a hand-written
+/// `axum::extract::FromRequestParts` implementation rather than serde, since
+/// header values are read and parsed individually from the request parts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Headers {
+    /// Struct name (`<Op>Headers`), doubling as the extractor type and the
+    /// `Api` method's `headers` argument type.
+    pub name: RustIdent,
+    /// Header fields, in declaration order.
+    pub params: Vec<HeaderParam>,
+}
+
+/// A single header parameter within a [`Headers`] struct.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeaderParam {
+    /// Rust field identifier (`snake_case`).
+    pub name: RustIdent,
+    /// The exact OpenAPI header name, used for the case-insensitive lookup in
+    /// the generated extractor (e.g. `X-Request-Id`).
+    pub header_name: String,
+    /// The parsed scalar type. Unlike [`Field`], this is the bare element type
+    /// even when the header is optional; the emitter adds the `Option<..>`
+    /// wrapper for absent headers.
+    pub ty: RustType,
+    /// Whether the header is required. A missing required header is a `400`.
+    pub required: bool,
+    /// Doc comment derived from the parameter `description`.
+    pub doc: Option<String>,
 }
 
 /// One arm of an operation's response enum.

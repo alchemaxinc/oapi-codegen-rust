@@ -14,6 +14,8 @@ use crate::ir::Alias;
 use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
+use crate::ir::HeaderParam;
+use crate::ir::Headers;
 use crate::ir::Item;
 use crate::ir::Module;
 use crate::ir::Operation;
@@ -288,6 +290,9 @@ fn service_items(service: &Service) -> Result<Vec<TokenStream>> {
         if let Some(query) = &operation.query {
             items.push(emit_struct(query)?);
         }
+        if let Some(headers) = &operation.headers {
+            items.extend(emit_headers(headers)?);
+        }
     }
     items.push(emit_trait(service)?);
     for operation in &service.operations {
@@ -323,8 +328,8 @@ fn emit_trait(service: &Service) -> Result<TokenStream> {
     });
 }
 
-/// The typed arguments (path parameters, query struct, then JSON body) of an
-/// operation method.
+/// The typed arguments (path parameters, query struct, header struct, then JSON
+/// body) of an operation method.
 fn emit_method_args(operation: &Operation) -> Result<Vec<TokenStream>> {
     let mut args = Vec::new();
     for param in &operation.path_params {
@@ -335,6 +340,10 @@ fn emit_method_args(operation: &Operation) -> Result<Vec<TokenStream>> {
     if let Some(query) = &operation.query {
         let ty = query.name.to_token();
         args.push(quote! { query: #ty });
+    }
+    if let Some(headers) = &operation.headers {
+        let ty = headers.name.to_token();
+        args.push(quote! { headers: #ty });
     }
     if let Some(body) = &operation.body {
         let ty = emit_type(body)?;
@@ -471,6 +480,11 @@ fn emit_handler(operation: &Operation) -> Result<TokenStream> {
         extractors.push(quote! { axum_extra::extract::Query(query): axum_extra::extract::Query<#ty> });
         call_args.push(quote! { query });
     }
+    if let Some(headers) = &operation.headers {
+        let ty = headers.name.to_token();
+        extractors.push(quote! { headers: #ty });
+        call_args.push(quote! { headers });
+    }
     if let Some(body) = &operation.body {
         let ty = emit_type(body)?;
         extractors.push(quote! { axum::Json(body): axum::Json<#ty> });
@@ -481,5 +495,110 @@ fn emit_handler(operation: &Operation) -> Result<TokenStream> {
         async fn #handler<T: Api>(#(#extractors),*) -> #response {
             api.#method(#(#call_args),*).await
         }
+    });
+}
+
+/// Emit a header struct and its hand-written `FromRequestParts` implementation.
+///
+/// Header values are read and parsed individually from the request parts, so
+/// the struct cannot derive `serde::Deserialize` the way the query struct does.
+/// A missing required header, a non-text value, or a value that fails to parse
+/// yields a `400 Bad Request` carrying a short plaintext reason.
+fn emit_headers(headers: &Headers) -> Result<Vec<TokenStream>> {
+    let name = headers.name.to_token();
+
+    let mut field_defs = Vec::with_capacity(headers.params.len());
+    let mut bindings = Vec::with_capacity(headers.params.len());
+    let mut idents = Vec::with_capacity(headers.params.len());
+    for param in &headers.params {
+        let ident = param.name.to_token();
+        let doc = doc_attr(&param.doc);
+        let mut ty = emit_type(&param.ty)?;
+        if !param.required {
+            ty = quote! { Option<#ty> };
+        }
+        field_defs.push(quote! {
+            #doc
+            pub #ident: #ty,
+        });
+        bindings.push(emit_header_binding(param)?);
+        idents.push(ident);
+    }
+
+    let struct_def = quote! {
+        #[derive(Debug, Clone)]
+        pub struct #name {
+            #(#field_defs)*
+        }
+    };
+
+    let extractor = quote! {
+        impl<S> axum::extract::FromRequestParts<S> for #name
+        where
+            S: Send + Sync,
+        {
+            type Rejection = (axum::http::StatusCode, String);
+
+            async fn from_request_parts(
+                parts: &mut axum::http::request::Parts,
+                _state: &S,
+            ) -> Result<Self, Self::Rejection> {
+                #(#bindings)*
+                return Ok(Self { #(#idents),* });
+            }
+        }
+    };
+
+    return Ok(vec![struct_def, extractor]);
+}
+
+/// Emit the `let <field> = ...;` binding that reads and parses one header,
+/// returning a `400` on a missing required header or an unparseable value.
+///
+/// String headers are taken verbatim; other scalars are `trim()`-ed before
+/// parsing, since HTTP permits optional surrounding whitespace (OWS) that
+/// `FromStr` would otherwise reject.
+fn emit_header_binding(param: &HeaderParam) -> Result<TokenStream> {
+    let ident = param.name.to_token();
+    let header_name = &param.header_name;
+    let missing_msg = format!("missing required header `{header_name}`");
+    let not_text_msg = format!("header `{header_name}` is not valid text");
+
+    let value_expr = if matches!(param.ty, RustType::String) {
+        quote! { text.to_owned() }
+    } else {
+        let ty = emit_type(&param.ty)?;
+        let invalid_msg = format!("header `{header_name}` has an invalid value");
+        quote! {
+            match text.trim().parse::<#ty>() {
+                Ok(parsed) => parsed,
+                Err(_) => return Err((axum::http::StatusCode::BAD_REQUEST, #invalid_msg.to_owned())),
+            }
+        }
+    };
+
+    let present = if param.required {
+        value_expr
+    } else {
+        quote! { Some(#value_expr) }
+    };
+
+    let absent = if param.required {
+        quote! { return Err((axum::http::StatusCode::BAD_REQUEST, #missing_msg.to_owned())) }
+    } else {
+        quote! { None }
+    };
+
+    return Ok(quote! {
+        let #ident = match parts.headers.get(#header_name) {
+            Some(value) => {
+                let text = match value.to_str() {
+                    Ok(text) => text,
+                    Err(_) => return Err((axum::http::StatusCode::BAD_REQUEST, #not_text_msg.to_owned())),
+                };
+                #present
+            }
+            None => #absent,
+        };
     });
 }

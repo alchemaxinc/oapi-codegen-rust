@@ -83,7 +83,8 @@ handled, it only describes the contract:
 - a `trait Api` with one method per operation returning an
   `impl Future<Output = ...> + Send` (native async-in-traits / RPITIT, no
   `async-trait` dependency), whose arguments are the path parameters, a generated
-  query-parameter struct (when the operation declares query parameters), and the
+  query-parameter struct (when the operation declares query parameters), a
+  generated header-parameter struct (when it declares header parameters), and the
   decoded JSON body;
 - a response `enum` per operation, with one variant per documented status code,
   implementing `axum::response::IntoResponse`;
@@ -104,22 +105,27 @@ as a single crate, and `tests/smoke.rs` builds a `router` from a hand-written
 This is a deliberate first slice. Currently supported: path parameters (inline
 scalars, or a same-document `$ref` that resolves to a scalar), query parameters
 (scalars and arrays of scalars; required parameters stay bare, optional ones
-become `Option<..>`), JSON request bodies (a `$ref` or a scalar), and responses
-keyed by explicit status codes — including component `$ref` responses
-(`#/components/responses/...`) resolved against the document. Cross-file schema
-`$ref`s in bodies and responses are routed through `import-mapping` to an external
-module type (e.g. `crate::apimodel::Widget`). Query parameters are deserialized
-through [`axum-extra`]'s `Query` extractor (it supports repeated keys for
-arrays), so a generated server that uses them needs
+become `Option<..>`), header parameters (scalars only), JSON request bodies (a
+`$ref` or a scalar), and responses keyed by explicit status codes — including
+component `$ref` responses (`#/components/responses/...`) resolved against the
+document. Cross-file schema `$ref`s in bodies and responses are routed through
+`import-mapping` to an external module type (e.g. `crate::apimodel::Widget`).
+Query parameters are deserialized through [`axum-extra`]'s `Query` extractor (it
+supports repeated keys for arrays), so a generated server that uses them needs
 `axum-extra = { version = "0.10", features = ["query"] }` as a dependency; array
 query parameters must use OpenAPI's default `style: form`, `explode: true`
-encoding (repeated keys, e.g. `?tag=a&tag=b`). Header
-and cookie parameters are still **ignored**. A `default` or range (`5XX`)
-response, a component-level `$ref` _parameter_ or _request body_, a cross-file
-component-_response_ `$ref`, an object/non-scalar path or query parameter, an
-array query parameter using a non-default encoding (e.g. `explode: false` or
-`spaceDelimited`), or a cross-file `$ref` query parameter is **rejected** with an
-error rather than mis-generated.
+encoding (repeated keys, e.g. `?tag=a&tag=b`). Header parameters are read by a
+generated `axum::extract::FromRequestParts` implementation that parses each value
+with `FromStr`; a missing required header or an unparseable value yields a
+`400 Bad Request` with a short plaintext reason. The reserved `Accept`,
+`Content-Type`, and `Authorization` headers are ignored, per the OpenAPI
+specification. Cookie parameters are still **ignored**. A `default` or range
+(`5XX`) response, a component-level `$ref` _parameter_ or _request body_, a
+cross-file component-_response_ `$ref`, an object/non-scalar path, query, or
+header parameter, an array query parameter using a non-default encoding (e.g.
+`explode: false` or `spaceDelimited`), an array header parameter, a `byte`/
+`binary` header parameter, or a cross-file `$ref` query or header parameter is
+**rejected** with an error rather than mis-generated.
 
 ## Coverage
 
@@ -134,8 +140,8 @@ the unknown.
   `additionalProperties: false`, and `x-go-*` extensions.
 - **Unsupported** (rejected with an error rather than mis-generated): `not`.
 - **Partly supported** (the axum server generator, see above): `paths`,
-  `parameters` (path and query), `requestBody` (JSON), and `responses` (explicit
-  status codes).
+  `parameters` (path, query, and header), `requestBody` (JSON), and `responses`
+  (explicit status codes).
 - **Planned** (the remaining server/client surface): `securitySchemes`,
   `servers`, `callbacks`, and `links`.
 

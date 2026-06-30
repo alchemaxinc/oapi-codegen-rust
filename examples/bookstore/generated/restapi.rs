@@ -12,6 +12,45 @@ pub struct ListBooksQuery {
     pub limit: Option<i32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CreateBookHeaders {
+    /// Unique key so a retried create is not duplicated.
+    pub idempotency_key: String,
+}
+
+impl<S> axum::extract::FromRequestParts<S> for CreateBookHeaders
+where
+    S: Send + Sync,
+{
+    type Rejection = (axum::http::StatusCode, String);
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let idempotency_key = match parts.headers.get("Idempotency-Key") {
+            Some(value) => {
+                let text = match value.to_str() {
+                    Ok(text) => text,
+                    Err(_) => {
+                        return Err((
+                            axum::http::StatusCode::BAD_REQUEST,
+                            "header `Idempotency-Key` is not valid text".to_owned(),
+                        ));
+                    }
+                };
+                text.to_owned()
+            }
+            None => {
+                return Err((
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "missing required header `Idempotency-Key`".to_owned(),
+                ));
+            }
+        };
+        return Ok(Self { idempotency_key });
+    }
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// List books, optionally filtered.
@@ -22,6 +61,7 @@ pub trait Api: Clone + Send + Sync + 'static {
     /// Add a book to the catalog.
     fn create_book(
         &self,
+        headers: CreateBookHeaders,
         body: crate::apimodel::catalog::NewBook,
     ) -> impl std::future::Future<Output = CreateBookResponse> + Send;
     /// Fetch a single book by id.
@@ -164,9 +204,10 @@ async fn list_books_handler<T: Api>(
 
 async fn create_book_handler<T: Api>(
     axum::extract::State(api): axum::extract::State<T>,
+    headers: CreateBookHeaders,
     axum::Json(body): axum::Json<crate::apimodel::catalog::NewBook>,
 ) -> CreateBookResponse {
-    api.create_book(body).await
+    api.create_book(headers, body).await
 }
 
 async fn get_book_handler<T: Api>(

@@ -81,6 +81,9 @@ mod generated {
     pub mod server_query_params {
         include!("generated/server_query_params.rs");
     }
+    pub mod server_header_params {
+        include!("generated/server_header_params.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -232,4 +235,32 @@ fn generated_server_accepts_query_params() {
     // optional `author`), and the router builds only if the generated
     // `axum_extra::extract::Query<ListBooksQuery>` extractor type-checks.
     let _router: axum::Router = server_query_params::router(Service);
+}
+
+#[test]
+fn generated_server_accepts_header_params() {
+    use generated::server_header_params;
+    use server_header_params::Api;
+    use server_header_params::GetWidgetsHeaders;
+    use server_header_params::GetWidgetsResponse;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn get_widgets(&self, headers: GetWidgetsHeaders) -> GetWidgetsResponse {
+            // Required headers are bare; optional ones are `Option<..>`. The
+            // reserved `Authorization` header is absent from the struct.
+            let _tenant: String = headers.x_tenant;
+            let _request_id: String = headers.x_request_id;
+            let _max_items: Option<i32> = headers.x_max_items;
+            let _debug: Option<bool> = headers.x_debug;
+            let _locale: Option<String> = headers.x_locale;
+            return GetWidgetsResponse::Ok;
+        }
+    }
+
+    // Building the router only type-checks if the generated `GetWidgetsHeaders`
+    // satisfies axum's `FromRequestParts`, which is how the handler consumes it.
+    let _router: axum::Router = server_header_params::router(Service);
 }
