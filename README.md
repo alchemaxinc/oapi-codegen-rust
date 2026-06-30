@@ -106,12 +106,17 @@ This is a deliberate first slice. Currently supported: path parameters (inline
 scalars, or a same-document `$ref` that resolves to a scalar), query parameters
 (scalars and arrays of scalars; required parameters stay bare, optional ones
 become `Option<..>`), header parameters (scalars only), JSON request bodies (a
-`$ref` or a scalar), and responses keyed by explicit status codes — including
-component `$ref` responses (`#/components/responses/...`) resolved against the
-document. Cross-file schema `$ref`s in bodies and responses are routed through
-`import-mapping` to an external module type (e.g. `crate::apimodel::Widget`).
-Query parameters are deserialized through [`axum-extra`]'s `Query` extractor (it
-supports repeated keys for arrays), so a generated server that uses them needs
+`$ref` or a scalar), and responses keyed by an explicit status code, the
+`default` catch-all, or a status-code range (`5XX`) — including component `$ref`
+responses (`#/components/responses/...`) resolved against the document. A fixed
+status code is emitted as a constant; a `default` or range response instead
+carries an `axum::http::StatusCode` the handler supplies (e.g.
+`GetBookResponse::Default(StatusCode::BAD_REQUEST, error)`), mirroring how
+oapi-codegen's strict server lets the handler set the code. Cross-file schema
+`$ref`s in bodies and responses are routed through `import-mapping` to an
+external module type (e.g. `crate::apimodel::Widget`). Query parameters are
+deserialized through [`axum-extra`]'s `Query` extractor (it supports repeated
+keys for arrays), so a generated server that uses them needs
 `axum-extra = { version = "0.10", features = ["query"] }` as a dependency; array
 query parameters must use OpenAPI's default `style: form`, `explode: true`
 encoding (repeated keys, e.g. `?tag=a&tag=b`). Header parameters are read by a
@@ -119,11 +124,11 @@ generated `axum::extract::FromRequestParts` implementation that parses each valu
 with `FromStr`; a missing required header or an unparseable value yields a
 `400 Bad Request` with a short plaintext reason. The reserved `Accept`,
 `Content-Type`, and `Authorization` headers are ignored, per the OpenAPI
-specification. Cookie parameters are still **ignored**. A `default` or range
-(`5XX`) response, a component-level `$ref` _parameter_ or _request body_, a
-cross-file component-_response_ `$ref`, an object/non-scalar path, query, or
-header parameter, an array query parameter using a non-default encoding (e.g.
-`explode: false` or `spaceDelimited`), an array header parameter, a `byte`/
+specification. Cookie parameters are still **ignored**. A response keyed by an
+unrecognised HTTP status code, a component-level `$ref` _parameter_ or _request
+body_, a cross-file component-_response_ `$ref`, an object/non-scalar path,
+query, or header parameter, an array query parameter using a non-default encoding
+(e.g. `explode: false` or `spaceDelimited`), an array header parameter, a `byte`/
 `binary` header parameter, or a cross-file `$ref` query or header parameter is
 **rejected** with an error rather than mis-generated.
 
@@ -141,7 +146,7 @@ the unknown.
 - **Unsupported** (rejected with an error rather than mis-generated): `not`.
 - **Partly supported** (the axum server generator, see above): `paths`,
   `parameters` (path, query, and header), `requestBody` (JSON), and `responses`
-  (explicit status codes).
+  (explicit status codes, the `default` catch-all, and ranges such as `5XX`).
 - **Planned** (the remaining server/client surface): `securitySchemes`,
   `servers`, `callbacks`, and `links`.
 

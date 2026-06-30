@@ -334,12 +334,13 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_refs",
     "server_query_params",
     "server_header_params",
+    "server_default_range_responses",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
-/// the slice's deliberate limitations (e.g. `default`/range responses).
+/// the slice's deliberate limitations (e.g. an unrecognised HTTP status code).
 const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
-    "server_unsupported_default_response",
+    "server_unsupported_unknown_status",
     "server_unsupported_ref_param",
     "server_unsupported_xfile_response_ref",
     "server_unsupported_object_path_param",
@@ -510,7 +511,13 @@ macro_rules! server_generated_tests {
     };
 }
 
-server_generated_tests!(server_petstore, server_refs, server_query_params, server_header_params);
+server_generated_tests!(
+    server_petstore,
+    server_refs,
+    server_query_params,
+    server_header_params,
+    server_default_range_responses,
+);
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.
 #[test]

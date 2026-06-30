@@ -2,19 +2,20 @@
 //!
 //! The current slice covers typed path parameters, query parameters (lowered
 //! into a per-operation `Deserialize` struct extracted via
-//! `axum_extra::extract::Query`), a JSON request body, and explicit-status
-//! responses. Component `$ref` responses are resolved against the document and
-//! cross-file schema `$ref`s are routed through the `import-mapping`. Query
-//! parameters accept scalars and arrays of scalars (required ones stay bare,
-//! optional ones become `Option<..>`); array parameters must use OpenAPI's
-//! default `form`/`explode: true` encoding (repeated keys). Object/non-scalar
-//! query shapes, non-default array encodings, `content` parameters, and
-//! cross-file `$ref` query parameters are rejected. Header parameters are
-//! lowered into a per-operation struct extracted via a generated
-//! `FromRequestParts` impl (scalars only; arrays/objects, `content`, cross-file
-//! `$ref`s, and `byte`/`binary` formats are rejected, and the reserved
-//! `Accept`/`Content-Type`/`Authorization` headers are ignored). Cookie
-//! parameters, `default`/range responses, and component-level `$ref`s for
+//! `axum_extra::extract::Query`), a JSON request body, and typed responses.
+//! Responses keyed by an explicit status code, the `default` catch-all, and
+//! status-code ranges (`5XX`) are all supported; component `$ref` responses are
+//! resolved against the document and cross-file schema `$ref`s are routed
+//! through the `import-mapping`. Query parameters accept scalars and arrays of
+//! scalars (required ones stay bare, optional ones become `Option<..>`); array
+//! parameters must use OpenAPI's default `form`/`explode: true` encoding
+//! (repeated keys). Object/non-scalar query shapes, non-default array
+//! encodings, `content` parameters, and cross-file `$ref` query parameters are
+//! rejected. Header parameters are lowered into a per-operation struct
+//! extracted via a generated `FromRequestParts` impl (scalars only;
+//! arrays/objects, `content`, cross-file `$ref`s, and `byte`/`binary` formats
+//! are rejected, and the reserved `Accept`/`Content-Type`/`Authorization`
+//! headers are ignored). Cookie parameters and component-level `$ref`s for
 //! parameters and request bodies are intentionally not handled yet and are
 //! rejected explicitly.
 
@@ -27,6 +28,7 @@ use openapiv3::ParameterData;
 use openapiv3::ParameterSchemaOrContent;
 use openapiv3::QueryStyle;
 use openapiv3::ReferenceOr;
+use openapiv3::Response as OasResponse;
 use openapiv3::Schema;
 use openapiv3::SchemaKind;
 use openapiv3::StatusCode;
@@ -40,6 +42,7 @@ use crate::ir::Headers;
 use crate::ir::Operation;
 use crate::ir::Param;
 use crate::ir::ResponseCase;
+use crate::ir::ResponseStatus;
 use crate::ir::RustType;
 use crate::ir::Service;
 use crate::ir::Struct;
@@ -423,6 +426,20 @@ impl Lowerer<'_> {
     }
 }
 
+/// Map a response range's leading digit to its HTTP status-class reason phrase,
+/// used to name the generated `default`/range response variants.
+fn range_class_name(range: u16) -> Option<&'static str> {
+    let class = match range {
+        1 => "informational",
+        2 => "success",
+        3 => "redirection",
+        4 => "client error",
+        5 => "server error",
+        _ => return None,
+    };
+    return Some(class);
+}
+
 /// Find a declared path parameter's schema by name, preferring the operation's
 /// own parameters over the shared path-item parameters.
 fn find_path_param<'a>(
@@ -524,51 +541,54 @@ impl Lowerer<'_> {
     }
 
     /// Lower an operation's responses into typed enum variants, resolving
-    /// component `$ref` responses against the document.
+    /// component `$ref` responses against the document. Fixed status codes
+    /// become reason-named variants with a compile-time status constant; a
+    /// `default` response or a range (`5XX`) becomes a variant that carries the
+    /// `axum::http::StatusCode` the handler supplies at runtime.
     fn lower_responses(&self, path: &str, method: &str, operation: &OasOperation) -> Result<Vec<ResponseCase>> {
-        if operation.responses.default.is_some() {
-            return Err(Error::UnsupportedOperation {
-                method: method.to_owned(),
-                path: path.to_owned(),
-                reason: "`default` responses are not supported yet".to_owned(),
+        let mut cases = Vec::new();
+        for (status_code, response) in &operation.responses.responses {
+            let (status, variant) = match status_code {
+                StatusCode::Code(code) => {
+                    let reason = HttpStatus::from_u16(*code).ok().and_then(|status| {
+                        return status.canonical_reason();
+                    });
+                    let reason = reason.ok_or_else(|| {
+                        return Error::UnsupportedOperation {
+                            method: method.to_owned(),
+                            path: path.to_owned(),
+                            reason: format!("status code `{code}` is not a recognised HTTP status"),
+                        };
+                    })?;
+                    (ResponseStatus::Fixed(*code), to_ident(reason, Case::Pascal))
+                }
+                StatusCode::Range(range) => {
+                    let class = range_class_name(*range).ok_or_else(|| {
+                        return Error::UnsupportedOperation {
+                            method: method.to_owned(),
+                            path: path.to_owned(),
+                            reason: format!("response range `{range}XX` is not a valid HTTP status class"),
+                        };
+                    })?;
+                    (ResponseStatus::Range(*range as u8), to_ident(class, Case::Pascal))
+                }
+            };
+            let response = self.resolve_response_ref(response)?;
+            let body = self.response_body(path, method, response)?;
+            cases.push(ResponseCase {
+                variant,
+                status,
+                body,
+                doc: trimmed(&response.description),
             });
         }
 
-        let mut cases = Vec::new();
-        for (status_code, response) in &operation.responses.responses {
-            let code = match status_code {
-                StatusCode::Code(code) => *code,
-                StatusCode::Range(range) => {
-                    return Err(Error::UnsupportedOperation {
-                        method: method.to_owned(),
-                        path: path.to_owned(),
-                        reason: format!("range response `{range}XX` is not supported yet"),
-                    });
-                }
-            };
-            let reason = HttpStatus::from_u16(code).ok().and_then(|status| {
-                return status.canonical_reason();
-            });
-            let reason = reason.ok_or_else(|| {
-                return Error::UnsupportedOperation {
-                    method: method.to_owned(),
-                    path: path.to_owned(),
-                    reason: format!("status code `{code}` is not a recognised HTTP status"),
-                };
-            })?;
-            let response = match response {
-                ReferenceOr::Item(response) => response,
-                ReferenceOr::Reference { reference } => self.spec.resolve_response(reference)?,
-            };
-            let body = match response.content.get(JSON_MEDIA_TYPE).and_then(|media| {
-                return media.schema.as_ref();
-            }) {
-                Some(schema) => Some(self.body_type(path, method, schema)?),
-                None => None,
-            };
+        if let Some(default) = &operation.responses.default {
+            let response = self.resolve_response_ref(default)?;
+            let body = self.response_body(path, method, response)?;
             cases.push(ResponseCase {
-                variant: to_ident(reason, Case::Pascal),
-                status: code,
+                variant: to_ident("default", Case::Pascal),
+                status: ResponseStatus::Default,
                 body,
                 doc: trimmed(&response.description),
             });
@@ -582,6 +602,26 @@ impl Lowerer<'_> {
             });
         }
         return Ok(cases);
+    }
+
+    /// Resolve a possibly-referenced response to a concrete [`OasResponse`].
+    fn resolve_response_ref<'r>(&'r self, response: &'r ReferenceOr<OasResponse>) -> Result<&'r OasResponse> {
+        match response {
+            ReferenceOr::Item(response) => return Ok(response),
+            ReferenceOr::Reference { reference } => return self.spec.resolve_response(reference),
+        }
+    }
+
+    /// Extract a response's JSON body type, if it declares `application/json`
+    /// content.
+    fn response_body(&self, path: &str, method: &str, response: &OasResponse) -> Result<Option<RustType>> {
+        let schema = response.content.get(JSON_MEDIA_TYPE).and_then(|media| {
+            return media.schema.as_ref();
+        });
+        match schema {
+            Some(schema) => return Ok(Some(self.body_type(path, method, schema)?)),
+            None => return Ok(None),
+        }
     }
 
     /// Map a request/response body schema to a Rust type. Composite inline

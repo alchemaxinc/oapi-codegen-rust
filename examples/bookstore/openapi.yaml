@@ -95,6 +95,12 @@ paths:
                 $ref: "schemas/catalog.yaml#/components/schemas/Book"
         "404":
           $ref: "#/components/responses/NotFound"
+        default:
+          description: An unexpected error; the handler sets the status code.
+          content:
+            application/json:
+              schema:
+                $ref: "schemas/common.yaml#/components/schemas/ErrorResponse"
   /health:
     get:
       operationId: getHealth

@@ -1,0 +1,61 @@
+openapi: 3.0.3
+info:
+  title: Default and range responses
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List pets, with a default and a range error response.
+      responses:
+        "200":
+          description: The full list of pets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+        "5XX":
+          description: A server-side failure; the handler sets the concrete code.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          description: An unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /pets/{id}:
+    delete:
+      operationId: deletePet
+      summary: Delete a pet, with bodyless default and range responses.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "204":
+          description: The pet was deleted.
+        "4XX":
+          description: The request was rejected; the handler sets the code.
+        default:
+          description: An unexpected error.
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: integer
+          format: int64
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
