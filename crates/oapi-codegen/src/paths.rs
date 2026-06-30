@@ -9,10 +9,14 @@
 //! optional ones become `Option<..>`); array parameters must use OpenAPI's
 //! default `form`/`explode: true` encoding (repeated keys). Object/non-scalar
 //! query shapes, non-default array encodings, `content` parameters, and
-//! cross-file `$ref` query parameters are rejected. Header/cookie parameters,
-//! `default`/range responses, and component-level `$ref`s for parameters and
-//! request bodies are intentionally not handled yet and are rejected
-//! explicitly.
+//! cross-file `$ref` query parameters are rejected. Header parameters are
+//! lowered into a per-operation struct extracted via a generated
+//! `FromRequestParts` impl (scalars only; arrays/objects, `content`, cross-file
+//! `$ref`s, and `byte`/`binary` formats are rejected, and the reserved
+//! `Accept`/`Content-Type`/`Authorization` headers are ignored). Cookie
+//! parameters, `default`/range responses, and component-level `$ref`s for
+//! parameters and request bodies are intentionally not handled yet and are
+//! rejected explicitly.
 
 use std::collections::BTreeMap;
 
@@ -31,6 +35,8 @@ use openapiv3::Type;
 use crate::error::Error;
 use crate::error::Result;
 use crate::ir::Field;
+use crate::ir::HeaderParam;
+use crate::ir::Headers;
 use crate::ir::Operation;
 use crate::ir::Param;
 use crate::ir::ResponseCase;
@@ -48,6 +54,11 @@ use crate::schema::string_format_type;
 
 /// The JSON media type the slice reads request and response bodies from.
 const JSON_MEDIA_TYPE: &str = "application/json";
+
+/// Header parameter names that OpenAPI mandates be ignored when declared with
+/// `in: header`, since they are governed by content negotiation / security
+/// mechanisms rather than the parameter object (compared case-insensitively).
+const IGNORED_HEADER_NAMES: [&str; 3] = ["accept", "content-type", "authorization"];
 
 /// Lower every operation in `spec` into the server IR, resolving cross-file
 /// schema references through `import_mapping`.
@@ -99,6 +110,7 @@ impl Lowerer<'_> {
 
         let path_params = self.lower_path_params(path, method, operation, shared_params)?;
         let query = self.lower_query_params(path, method, operation, shared_params, &name)?;
+        let headers = self.lower_header_params(path, method, operation, shared_params, &name)?;
         let body = self.lower_request_body(path, method, operation)?;
         let responses = self.lower_responses(path, method, operation)?;
 
@@ -111,6 +123,7 @@ impl Lowerer<'_> {
             path: path.to_owned(),
             path_params,
             query,
+            headers,
             body,
             responses,
         });
@@ -305,6 +318,108 @@ impl Lowerer<'_> {
             }
             ReferenceOr::Reference { reference } => return self.spec.resolve(reference),
         }
+    }
+
+    /// Lower an operation's header parameters into a generated [`Headers`]
+    /// struct, returning `None` when the operation declares none. Only inline
+    /// `Parameter::Header` entries are considered (component parameter `$ref`s
+    /// are already rejected by [`Self::lower_path_params`]). Per OpenAPI's
+    /// override rule the first (operation-level) definition wins on a
+    /// case-insensitive name collision, and the `Accept`/`Content-Type`/
+    /// `Authorization` headers the specification reserves are skipped.
+    fn lower_header_params(
+        &self,
+        path: &str,
+        method: &str,
+        operation: &OasOperation,
+        shared_params: &[ReferenceOr<Parameter>],
+        operation_name: &RustIdent,
+    ) -> Result<Option<Headers>> {
+        let mut params = Vec::new();
+        let mut seen: Vec<&str> = Vec::new();
+        for parameter in operation.parameters.iter().chain(shared_params) {
+            let ReferenceOr::Item(Parameter::Header { parameter_data, .. }) = parameter else {
+                continue;
+            };
+            let name = parameter_data.name.as_str();
+            if IGNORED_HEADER_NAMES
+                .iter()
+                .any(|ignored| return ignored.eq_ignore_ascii_case(name))
+            {
+                continue;
+            }
+            if seen.iter().any(|other| return other.eq_ignore_ascii_case(name)) {
+                continue;
+            }
+            seen.push(name);
+            params.push(self.header_param(path, method, parameter_data)?);
+        }
+        if params.is_empty() {
+            return Ok(None);
+        }
+        let name = to_ident(&format!("{}_headers", operation_name.logical()), Case::Pascal);
+        return Ok(Some(Headers { name, params }));
+    }
+
+    /// Build a single header field, resolving its scalar type and recording the
+    /// exact header name for the generated case-insensitive lookup.
+    fn header_param(&self, path: &str, method: &str, data: &ParameterData) -> Result<HeaderParam> {
+        let ty = self.header_param_type(path, method, &data.name, &data.format)?;
+        return Ok(HeaderParam {
+            name: to_ident(&data.name, Case::Snake),
+            header_name: data.name.clone(),
+            ty,
+            required: data.required,
+            doc: data.description.as_deref().and_then(trimmed),
+        });
+    }
+
+    /// Map a header parameter's schema to a scalar Rust type. `content`,
+    /// cross-file `$ref`s, non-scalar shapes (arrays/objects), and `byte`/
+    /// `binary` strings (which have no `FromStr`) are rejected.
+    fn header_param_type(
+        &self,
+        path: &str,
+        method: &str,
+        name: &str,
+        format: &ParameterSchemaOrContent,
+    ) -> Result<RustType> {
+        let schema = match format {
+            ParameterSchemaOrContent::Schema(schema) => schema,
+            ParameterSchemaOrContent::Content(_) => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("header parameter `{name}` uses `content`, which is not supported"),
+                });
+            }
+        };
+        let schema = match schema {
+            ReferenceOr::Item(schema) => schema,
+            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("header parameter `{name}` uses a cross-file `$ref`, which is not supported"),
+                });
+            }
+            ReferenceOr::Reference { reference } => self.spec.resolve(reference)?,
+        };
+        let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
+            return Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("header parameter `{name}` must be a scalar"),
+            };
+        })?;
+        if matches!(ty, RustType::Bytes) {
+            return Err(Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("header parameter `{name}` uses a `byte`/`binary` format, which is not supported"),
+            });
+        }
+        return Ok(ty);
     }
 }
 

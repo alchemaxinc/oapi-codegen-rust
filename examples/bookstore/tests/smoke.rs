@@ -12,6 +12,7 @@ use bookstore_example::apimodel::catalog::Book;
 use bookstore_example::apimodel::catalog::NewBook;
 use bookstore_example::apimodel::common::ErrorResponse;
 use bookstore_example::restapi::Api;
+use bookstore_example::restapi::CreateBookHeaders;
 use bookstore_example::restapi::CreateBookResponse;
 use bookstore_example::restapi::GetBookResponse;
 use bookstore_example::restapi::GetHealthResponse;
@@ -38,7 +39,7 @@ impl Api for Service {
         return ListBooksResponse::Ok(vec![book]);
     }
 
-    async fn create_book(&self, body: NewBook) -> CreateBookResponse {
+    async fn create_book(&self, headers: CreateBookHeaders, body: NewBook) -> CreateBookResponse {
         if body.title.is_empty() {
             return CreateBookResponse::BadRequest(ErrorResponse {
                 code: "empty_title".to_owned(),
@@ -47,7 +48,7 @@ impl Api for Service {
         }
 
         return CreateBookResponse::Created(Book {
-            id: "book-1".to_owned(),
+            id: headers.idempotency_key,
             title: body.title,
             author: body.author,
             price_cents: body.price_cents,
