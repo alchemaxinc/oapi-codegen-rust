@@ -329,7 +329,7 @@ const TEST_TABLE: &[Feature] = &[
 /// These exercise the server generator (a different axis from the schema
 /// [`TEST_TABLE`]): path parameters, JSON request bodies, and typed responses.
 /// Each must have a `#[test]` via [`server_generated_tests!`].
-const SERVER_FIXTURES: &[&str] = &["server_petstore", "server_refs"];
+const SERVER_FIXTURES: &[&str] = &["server_petstore", "server_refs", "server_query_params"];
 
 /// Server fixtures whose generation must fail with a documented error, covering
 /// the slice's deliberate limitations (e.g. `default`/range responses).
@@ -338,6 +338,8 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_ref_param",
     "server_unsupported_xfile_response_ref",
     "server_unsupported_object_path_param",
+    "server_unsupported_object_query_param",
+    "server_unsupported_explode_false_query_param",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -502,7 +504,7 @@ macro_rules! server_generated_tests {
     };
 }
 
-server_generated_tests!(server_petstore, server_refs);
+server_generated_tests!(server_petstore, server_refs, server_query_params);
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.
 #[test]

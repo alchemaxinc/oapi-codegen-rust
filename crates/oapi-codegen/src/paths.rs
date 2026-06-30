@@ -1,18 +1,27 @@
 //! Lowering OpenAPI paths/operations into the server [`crate::ir::Service`].
 //!
-//! The current slice covers typed path parameters, a JSON request body, and
-//! explicit-status responses. Component `$ref` responses are resolved against
-//! the document and cross-file schema `$ref`s are routed through the
-//! `import-mapping`. Query/header/cookie parameters, `default`/range responses,
-//! and component-level `$ref`s for parameters and request bodies are
-//! intentionally not handled yet and are rejected explicitly.
+//! The current slice covers typed path parameters, query parameters (lowered
+//! into a per-operation `Deserialize` struct extracted via
+//! `axum_extra::extract::Query`), a JSON request body, and explicit-status
+//! responses. Component `$ref` responses are resolved against the document and
+//! cross-file schema `$ref`s are routed through the `import-mapping`. Query
+//! parameters accept scalars and arrays of scalars (required ones stay bare,
+//! optional ones become `Option<..>`); array parameters must use OpenAPI's
+//! default `form`/`explode: true` encoding (repeated keys). Object/non-scalar
+//! query shapes, non-default array encodings, `content` parameters, and
+//! cross-file `$ref` query parameters are rejected. Header/cookie parameters,
+//! `default`/range responses, and component-level `$ref`s for parameters and
+//! request bodies are intentionally not handled yet and are rejected
+//! explicitly.
 
 use std::collections::BTreeMap;
 
 use http::StatusCode as HttpStatus;
 use openapiv3::Operation as OasOperation;
 use openapiv3::Parameter;
+use openapiv3::ParameterData;
 use openapiv3::ParameterSchemaOrContent;
+use openapiv3::QueryStyle;
 use openapiv3::ReferenceOr;
 use openapiv3::Schema;
 use openapiv3::SchemaKind;
@@ -21,15 +30,18 @@ use openapiv3::Type;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::ir::Field;
 use crate::ir::Operation;
 use crate::ir::Param;
 use crate::ir::ResponseCase;
 use crate::ir::RustType;
 use crate::ir::Service;
+use crate::ir::Struct;
 use crate::loader::Spec;
 use crate::loader::ref_component_name;
 use crate::loader::ref_file_part;
 use crate::naming::Case;
+use crate::naming::RustIdent;
 use crate::naming::to_ident;
 use crate::schema::integer_format_type;
 use crate::schema::string_format_type;
@@ -86,6 +98,7 @@ impl Lowerer<'_> {
         let response_enum = to_ident(&format!("{}_response", name.logical()), Case::Pascal);
 
         let path_params = self.lower_path_params(path, method, operation, shared_params)?;
+        let query = self.lower_query_params(path, method, operation, shared_params, &name)?;
         let body = self.lower_request_body(path, method, operation)?;
         let responses = self.lower_responses(path, method, operation)?;
 
@@ -97,6 +110,7 @@ impl Lowerer<'_> {
             method: method.to_owned(),
             path: path.to_owned(),
             path_params,
+            query,
             body,
             responses,
         });
@@ -135,6 +149,163 @@ impl Lowerer<'_> {
         }
         return Ok(params);
     }
+
+    /// Lower an operation's query parameters into a generated `Deserialize`
+    /// struct, returning `None` when the operation declares none. Component
+    /// parameter `$ref`s are already rejected by [`Self::lower_path_params`], so
+    /// only inline `Parameter::Query` entries are considered here. Per OpenAPI's
+    /// override rule, an operation-level parameter takes precedence over a
+    /// path-item one with the same name, so duplicates are de-duplicated keeping
+    /// the first (operation-level) definition.
+    fn lower_query_params(
+        &self,
+        path: &str,
+        method: &str,
+        operation: &OasOperation,
+        shared_params: &[ReferenceOr<Parameter>],
+        operation_name: &RustIdent,
+    ) -> Result<Option<Struct>> {
+        let mut fields = Vec::new();
+        let mut seen: Vec<&str> = Vec::new();
+        for parameter in operation.parameters.iter().chain(shared_params) {
+            let ReferenceOr::Item(Parameter::Query {
+                parameter_data, style, ..
+            }) = parameter
+            else {
+                continue;
+            };
+            if seen.contains(&parameter_data.name.as_str()) {
+                continue;
+            }
+            seen.push(&parameter_data.name);
+            fields.push(self.query_field(path, method, parameter_data, style)?);
+        }
+        if fields.is_empty() {
+            return Ok(None);
+        }
+        let name = to_ident(&format!("{}_query", operation_name.logical()), Case::Pascal);
+        return Ok(Some(Struct {
+            name,
+            doc: None,
+            fields,
+            additional_properties: None,
+        }));
+    }
+
+    /// Build a query struct field from a single query parameter's metadata,
+    /// wrapping optional parameters in `Option<..>`.
+    fn query_field(&self, path: &str, method: &str, data: &ParameterData, style: &QueryStyle) -> Result<Field> {
+        let mut ty = self.query_param_type(path, method, &data.name, &data.format, style, data.explode)?;
+        if !data.required {
+            ty = ty.optional();
+        }
+        let ident = to_ident(&data.name, Case::Snake);
+        let rename = crate::naming::rename_for(&data.name, &ident);
+        return Ok(Field {
+            name: ident,
+            rename,
+            doc: data.description.as_deref().and_then(trimmed),
+            ty,
+            required: data.required,
+        });
+    }
+
+    /// Map a query parameter's schema to a scalar Rust type, or a `Vec<T>` of
+    /// scalars. Cross-file `$ref`s, `content`, and non-scalar shapes (including
+    /// arrays of non-scalars) are rejected. Array parameters must use OpenAPI's
+    /// default `form`/`explode: true` encoding (repeated keys), since the
+    /// generated server reads them through `axum-extra`'s `Query` extractor;
+    /// other array encodings are rejected rather than silently mis-parsed.
+    fn query_param_type(
+        &self,
+        path: &str,
+        method: &str,
+        name: &str,
+        format: &ParameterSchemaOrContent,
+        style: &QueryStyle,
+        explode: Option<bool>,
+    ) -> Result<RustType> {
+        let schema = match format {
+            ParameterSchemaOrContent::Schema(schema) => schema,
+            ParameterSchemaOrContent::Content(_) => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("query parameter `{name}` uses `content`, which is not supported"),
+                });
+            }
+        };
+        let schema = self.resolve_param_schema(path, method, name, schema)?;
+        if let SchemaKind::Type(Type::Array(array)) = &schema.schema_kind {
+            if !matches!(style, QueryStyle::Form) || explode == Some(false) {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!(
+                        "query parameter `{name}` uses a non-default array encoding; only `style: form` with `explode: true` (repeated keys) is supported"
+                    ),
+                });
+            }
+            let item = match &array.items {
+                Some(ReferenceOr::Item(item)) => item.as_ref(),
+                Some(ReferenceOr::Reference { reference }) if ref_file_part(reference).is_some() => {
+                    return Err(Error::UnsupportedOperation {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        reason: format!(
+                            "query parameter `{name}` uses array items via a cross-file `$ref`, which is not supported"
+                        ),
+                    });
+                }
+                Some(ReferenceOr::Reference { reference }) => self.spec.resolve(reference)?,
+                None => {
+                    return Err(Error::UnsupportedOperation {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        reason: format!("query parameter `{name}` is an array without `items`"),
+                    });
+                }
+            };
+            let element = scalar_type(&item.schema_kind).ok_or_else(|| {
+                return Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("query parameter `{name}` must be an array of scalars"),
+                };
+            })?;
+            return Ok(RustType::Vec(Box::new(element)));
+        }
+        let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
+            return Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("query parameter `{name}` must be a scalar or an array of scalars"),
+            };
+        })?;
+        return Ok(ty);
+    }
+
+    /// Resolve a parameter schema reference to a concrete schema, rejecting
+    /// cross-file `$ref`s: query parameters only route same-document references.
+    fn resolve_param_schema<'s>(
+        &'s self,
+        path: &str,
+        method: &str,
+        name: &str,
+        schema: &'s ReferenceOr<Schema>,
+    ) -> Result<&'s Schema> {
+        match schema {
+            ReferenceOr::Item(schema) => return Ok(schema),
+            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("query parameter `{name}` uses a cross-file `$ref`, which is not supported"),
+                });
+            }
+            ReferenceOr::Reference { reference } => return self.spec.resolve(reference),
+        }
+    }
 }
 
 /// Find a declared path parameter's schema by name, preferring the operation's
@@ -164,6 +335,19 @@ fn path_param_schema<'a>(name: &str, parameters: &'a [ReferenceOr<Parameter>]) -
     return None;
 }
 
+/// Map an OpenAPI schema kind to its Rust type when it is one of the four
+/// supported scalars (`string`, `integer`, `number`, `boolean`), else `None`.
+fn scalar_type(kind: &SchemaKind) -> Option<RustType> {
+    let ty = match kind {
+        SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
+        SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
+        SchemaKind::Type(Type::Number(_)) => RustType::F64,
+        SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
+        _ => return None,
+    };
+    return Some(ty);
+}
+
 impl Lowerer<'_> {
     /// Map a path parameter's schema to a scalar Rust type.
     fn param_type(&self, path: &str, method: &str, name: &str, format: &ParameterSchemaOrContent) -> Result<RustType> {
@@ -186,19 +370,13 @@ impl Lowerer<'_> {
             ReferenceOr::Reference { reference } => self.spec.resolve(reference)?,
             ReferenceOr::Item(schema) => schema,
         };
-        let ty = match &schema.schema_kind {
-            SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
-            SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
-            SchemaKind::Type(Type::Number(_)) => RustType::F64,
-            SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
-            _ => {
-                return Err(Error::UnsupportedOperation {
-                    method: method.to_owned(),
-                    path: path.to_owned(),
-                    reason: format!("path parameter `{name}` must be a scalar type"),
-                });
-            }
-        };
+        let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
+            return Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("path parameter `{name}` must be a scalar type"),
+            };
+        })?;
         return Ok(ty);
     }
 

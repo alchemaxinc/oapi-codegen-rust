@@ -283,7 +283,13 @@ fn emit_type(ty: &RustType) -> Result<TokenStream> {
 /// Emit the axum server interface: the `Api` trait, per-operation response
 /// enums, the `Router` builder, and the internal handler functions.
 fn service_items(service: &Service) -> Result<Vec<TokenStream>> {
-    let mut items = vec![emit_trait(service)?];
+    let mut items = Vec::new();
+    for operation in &service.operations {
+        if let Some(query) = &operation.query {
+            items.push(emit_struct(query)?);
+        }
+    }
+    items.push(emit_trait(service)?);
     for operation in &service.operations {
         let (enum_def, into_response) = emit_response_enum(operation)?;
         items.push(enum_def);
@@ -317,13 +323,18 @@ fn emit_trait(service: &Service) -> Result<TokenStream> {
     });
 }
 
-/// The typed arguments (path parameters then JSON body) of an operation method.
+/// The typed arguments (path parameters, query struct, then JSON body) of an
+/// operation method.
 fn emit_method_args(operation: &Operation) -> Result<Vec<TokenStream>> {
     let mut args = Vec::new();
     for param in &operation.path_params {
         let name = param.name.to_token();
         let ty = emit_type(&param.ty)?;
         args.push(quote! { #name: #ty });
+    }
+    if let Some(query) = &operation.query {
+        let ty = query.name.to_token();
+        args.push(quote! { query: #ty });
     }
     if let Some(body) = &operation.body {
         let ty = emit_type(body)?;
@@ -454,6 +465,11 @@ fn emit_handler(operation: &Operation) -> Result<TokenStream> {
         for name in &names {
             call_args.push(quote! { #name });
         }
+    }
+    if let Some(query) = &operation.query {
+        let ty = query.name.to_token();
+        extractors.push(quote! { axum_extra::extract::Query(query): axum_extra::extract::Query<#ty> });
+        call_args.push(quote! { query });
     }
     if let Some(body) = &operation.body {
         let ty = emit_type(body)?;

@@ -30,6 +30,7 @@ syn = { version = "2.0.118", features = ["full"] }
 # coverage-matrix anchor in tests/coverage.rs. None are needed by the generator
 # itself.
 axum = "0.8"
+axum-extra = { version = "0.10", features = ["query"] }
 chrono = { version = "0.4", features = ["serde"] }
 openapiv3 = "2"
 serde = { version = "1.0.228", features = ["derive"] }

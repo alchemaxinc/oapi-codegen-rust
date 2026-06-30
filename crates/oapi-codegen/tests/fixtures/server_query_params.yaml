@@ -1,0 +1,80 @@
+openapi: 3.0.3
+info:
+  title: Query parameter server
+  version: 1.0.0
+paths:
+  /books:
+    parameters:
+      - name: region
+        in: query
+        required: false
+        description: Shared region filter; overridden by the operation definition.
+        schema:
+          type: string
+    get:
+      operationId: listBooks
+      summary: List books, filtered by query parameters.
+      parameters:
+        - name: region
+          in: query
+          required: true
+          description: Region filter; the operation-level definition wins.
+          schema:
+            type: string
+        - name: author
+          in: query
+          required: false
+          description: Restrict results to a single author.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: available
+          in: query
+          required: true
+          schema:
+            type: boolean
+        - name: tags
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/Status"
+        - name: pageToken
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The matching books.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Book"
+components:
+  schemas:
+    Status:
+      type: string
+    Book:
+      type: object
+      required: [id, title]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
