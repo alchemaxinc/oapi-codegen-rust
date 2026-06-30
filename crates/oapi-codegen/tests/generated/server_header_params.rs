@@ -75,7 +75,7 @@ where
                     }
                 };
                 Some(
-                    match text.parse::<i32>() {
+                    match text.trim().parse::<i32>() {
                         Ok(parsed) => parsed,
                         Err(_) => {
                             return Err((
@@ -100,7 +100,7 @@ where
                     }
                 };
                 Some(
-                    match text.parse::<bool>() {
+                    match text.trim().parse::<bool>() {
                         Ok(parsed) => parsed,
                         Err(_) => {
                             return Err((

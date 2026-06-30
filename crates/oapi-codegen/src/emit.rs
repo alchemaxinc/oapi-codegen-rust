@@ -554,6 +554,10 @@ fn emit_headers(headers: &Headers) -> Result<Vec<TokenStream>> {
 
 /// Emit the `let <field> = ...;` binding that reads and parses one header,
 /// returning a `400` on a missing required header or an unparseable value.
+///
+/// String headers are taken verbatim; other scalars are `trim()`-ed before
+/// parsing, since HTTP permits optional surrounding whitespace (OWS) that
+/// `FromStr` would otherwise reject.
 fn emit_header_binding(param: &HeaderParam) -> Result<TokenStream> {
     let ident = param.name.to_token();
     let header_name = &param.header_name;
@@ -566,7 +570,7 @@ fn emit_header_binding(param: &HeaderParam) -> Result<TokenStream> {
         let ty = emit_type(&param.ty)?;
         let invalid_msg = format!("header `{header_name}` has an invalid value");
         quote! {
-            match text.parse::<#ty>() {
+            match text.trim().parse::<#ty>() {
                 Ok(parsed) => parsed,
                 Err(_) => return Err((axum::http::StatusCode::BAD_REQUEST, #invalid_msg.to_owned())),
             }
