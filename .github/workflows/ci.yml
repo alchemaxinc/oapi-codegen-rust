@@ -173,6 +173,13 @@ jobs:
         # both invocations target the same `target/` directory.
         run: cargo nextest run --workspace --all-targets --locked --no-fail-fast
 
+      # Regenerate the committed example + goldens and fail on any diff, so a
+      # change to the generator or a spec cannot land without its regenerated
+      # output. Runs unconditionally (no chore: skip) since drift is cheap to
+      # check and must never slip through. Reuses the target/ built above.
+      - name: Check generated code is up to date
+        run: make verify-generated
+
   lint-prettier:
     runs-on: ubuntu-latest
     needs: install-prettier

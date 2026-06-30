@@ -54,6 +54,19 @@ generate-example: ## Regenerate the composed bookstore example from its OpenAPI 
 		cargo run -q -p oapi-codegen -- schemas/catalog.yaml --config oapi-codegen-catalog.yaml && \
 		cargo run -q -p oapi-codegen -- openapi.yaml --config oapi-codegen-server.yaml
 
+.PHONY: verify-generated
+verify-generated: ## Regenerate all generated code and fail if it drifts from what is committed
+	$(MAKE) generate-example
+	$(MAKE) update-generated
+	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated)" ]; then \
+		echo "ERROR: generated code is out of date."; \
+		echo "Run 'make generate-example' and 'make update-generated', then commit the result."; \
+		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated; \
+		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated; \
+		exit 1; \
+	fi
+	@echo "Generated code is up to date."
+
 .PHONY: docs
 docs: ## Generate and open Rust documentation
 	cargo doc --no-deps --open
