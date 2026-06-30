@@ -257,12 +257,29 @@ pub struct HeaderParam {
 /// One arm of an operation's response enum.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResponseCase {
-    /// Variant identifier, named after the status reason phrase.
+    /// Variant identifier, named after the status reason phrase (fixed codes),
+    /// the response-range class, or `Default`.
     pub variant: RustIdent,
-    /// Numeric HTTP status code, emitted as `StatusCode::from_u16(..)`.
-    pub status: u16,
+    /// How the variant's HTTP status code is determined.
+    pub status: ResponseStatus,
     /// JSON response body type, when the response declares content.
     pub body: Option<RustType>,
     /// Doc comment derived from the response `description`.
     pub doc: Option<String>,
+}
+
+/// How a response variant's HTTP status code is produced.
+///
+/// Fixed codes are emitted as a compile-time constant; `default` and range
+/// responses have no single code, so the variant instead carries an
+/// `axum::http::StatusCode` the handler supplies at runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponseStatus {
+    /// A concrete status code (e.g. `200`), emitted as a `StatusCode` constant.
+    Fixed(u16),
+    /// The `default` catch-all response; the handler supplies the status code.
+    Default,
+    /// A status-code range such as `5XX`, carrying the leading digit (`1..=5`);
+    /// the handler supplies a concrete code within the class.
+    Range(u8),
 }

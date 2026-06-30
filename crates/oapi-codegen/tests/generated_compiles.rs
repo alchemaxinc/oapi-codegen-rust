@@ -84,6 +84,9 @@ mod generated {
     pub mod server_header_params {
         include!("generated/server_header_params.rs");
     }
+    pub mod server_default_range_responses {
+        include!("generated/server_default_range_responses.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -263,4 +266,54 @@ fn generated_server_accepts_header_params() {
     // Building the router only type-checks if the generated `GetWidgetsHeaders`
     // satisfies axum's `FromRequestParts`, which is how the handler consumes it.
     let _router: axum::Router = server_header_params::router(Service);
+}
+
+#[test]
+fn generated_server_supplies_status_for_default_and_range_responses() {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use generated::server_default_range_responses;
+    use server_default_range_responses::Api;
+    use server_default_range_responses::DeletePetResponse;
+    use server_default_range_responses::Error;
+    use server_default_range_responses::ListPetsResponse;
+    use server_default_range_responses::Pet;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn list_pets(&self) -> ListPetsResponse {
+            // Fixed `200` carries only the body; `5XX`/`default` carry the
+            // concrete status the handler chooses.
+            return ListPetsResponse::Status5xx(
+                StatusCode::SERVICE_UNAVAILABLE,
+                Error {
+                    message: "down".to_owned(),
+                },
+            );
+        }
+
+        async fn delete_pet(&self, _id: i64) -> DeletePetResponse {
+            return DeletePetResponse::Default(StatusCode::IM_A_TEAPOT);
+        }
+    }
+
+    // The handler-supplied status code is the one the response actually renders.
+    let ok = ListPetsResponse::Ok(Pet { id: 1 }).into_response();
+    assert_eq!(ok.status(), StatusCode::OK);
+
+    let range = ListPetsResponse::Status5xx(
+        StatusCode::SERVICE_UNAVAILABLE,
+        Error {
+            message: "down".to_owned(),
+        },
+    )
+    .into_response();
+    assert_eq!(range.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let default = DeletePetResponse::Default(StatusCode::IM_A_TEAPOT).into_response();
+    assert_eq!(default.status(), StatusCode::IM_A_TEAPOT);
+
+    let _router: axum::Router = server_default_range_responses::router(Service);
 }

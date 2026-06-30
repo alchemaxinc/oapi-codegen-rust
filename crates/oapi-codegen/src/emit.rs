@@ -19,6 +19,7 @@ use crate::ir::Headers;
 use crate::ir::Item;
 use crate::ir::Module;
 use crate::ir::Operation;
+use crate::ir::ResponseStatus;
 use crate::ir::RustType;
 use crate::ir::Service;
 use crate::ir::StringVariant;
@@ -359,35 +360,13 @@ fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream
     let mut arms = Vec::with_capacity(operation.responses.len());
     for case in &operation.responses {
         let variant = case.variant.to_token();
-        let code = proc_macro2::Literal::u16_unsuffixed(case.status);
         let doc = doc_attr(&case.doc);
-        let status = quote! {
-            const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(#code) {
-                Ok(status) => status,
-                Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
-            };
+        let (variant_def, arm) = match &case.status {
+            ResponseStatus::Fixed(code) => emit_fixed_response(&name, &variant, *code, &case.body)?,
+            ResponseStatus::Default | ResponseStatus::Range(_) => emit_dynamic_response(&name, &variant, &case.body)?,
         };
-        match &case.body {
-            Some(body) => {
-                let ty = emit_type(body)?;
-                variants.push(quote! { #doc #variant(#ty) });
-                arms.push(quote! {
-                    #name::#variant(body) => {
-                        #status
-                        (STATUS, axum::Json(body)).into_response()
-                    }
-                });
-            }
-            None => {
-                variants.push(quote! { #doc #variant });
-                arms.push(quote! {
-                    #name::#variant => {
-                        #status
-                        STATUS.into_response()
-                    }
-                });
-            }
-        }
+        variants.push(quote! { #doc #variant_def });
+        arms.push(arm);
     }
     let doc = doc_attr(&operation.doc);
     let enum_def = quote! {
@@ -406,6 +385,75 @@ fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream
         }
     };
     return Ok((enum_def, into_response));
+}
+
+/// Emit the variant and `IntoResponse` arm for a fixed status code, whose value
+/// is known at generation time and emitted as a compile-time constant.
+fn emit_fixed_response(
+    name: &proc_macro2::Ident,
+    variant: &proc_macro2::Ident,
+    code: u16,
+    body: &Option<RustType>,
+) -> Result<(TokenStream, TokenStream)> {
+    let code = proc_macro2::Literal::u16_unsuffixed(code);
+    let status = quote! {
+        const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(#code) {
+            Ok(status) => status,
+            Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+        };
+    };
+    let result = match body {
+        Some(body) => {
+            let ty = emit_type(body)?;
+            let variant_def = quote! { #variant(#ty) };
+            let arm = quote! {
+                #name::#variant(body) => {
+                    #status
+                    (STATUS, axum::Json(body)).into_response()
+                }
+            };
+            (variant_def, arm)
+        }
+        None => {
+            let variant_def = quote! { #variant };
+            let arm = quote! {
+                #name::#variant => {
+                    #status
+                    STATUS.into_response()
+                }
+            };
+            (variant_def, arm)
+        }
+    };
+    return Ok(result);
+}
+
+/// Emit the variant and `IntoResponse` arm for a `default`/range response, whose
+/// concrete status code is not fixed by the spec and is therefore carried in the
+/// variant and supplied by the handler at runtime.
+fn emit_dynamic_response(
+    name: &proc_macro2::Ident,
+    variant: &proc_macro2::Ident,
+    body: &Option<RustType>,
+) -> Result<(TokenStream, TokenStream)> {
+    let result = match body {
+        Some(body) => {
+            let ty = emit_type(body)?;
+            let variant_def = quote! { #variant(axum::http::StatusCode, #ty) };
+            let arm = quote! {
+                #name::#variant(status, body) => (status, axum::Json(body)).into_response(),
+            };
+            (variant_def, arm)
+        }
+        None => {
+            let variant_def = quote! { #variant(axum::http::StatusCode) };
+            let arm = quote! {
+                #name::#variant(status) => status.into_response(),
+            };
+            (variant_def, arm)
+        }
+    };
+    return Ok(result);
 }
 
 /// Emit the `Router` builder, grouping operations that share a path so they map

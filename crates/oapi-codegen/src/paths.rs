@@ -1,22 +1,31 @@
 //! Lowering OpenAPI paths/operations into the server [`crate::ir::Service`].
 //!
-//! The current slice covers typed path parameters, query parameters (lowered
-//! into a per-operation `Deserialize` struct extracted via
-//! `axum_extra::extract::Query`), a JSON request body, and explicit-status
-//! responses. Component `$ref` responses are resolved against the document and
-//! cross-file schema `$ref`s are routed through the `import-mapping`. Query
-//! parameters accept scalars and arrays of scalars (required ones stay bare,
-//! optional ones become `Option<..>`); array parameters must use OpenAPI's
-//! default `form`/`explode: true` encoding (repeated keys). Object/non-scalar
-//! query shapes, non-default array encodings, `content` parameters, and
-//! cross-file `$ref` query parameters are rejected. Header parameters are
-//! lowered into a per-operation struct extracted via a generated
-//! `FromRequestParts` impl (scalars only; arrays/objects, `content`, cross-file
-//! `$ref`s, and `byte`/`binary` formats are rejected, and the reserved
-//! `Accept`/`Content-Type`/`Authorization` headers are ignored). Cookie
-//! parameters, `default`/range responses, and component-level `$ref`s for
-//! parameters and request bodies are intentionally not handled yet and are
-//! rejected explicitly.
+//! Each operation is lowered into typed inputs (path/query/header parameters and
+//! a JSON request body) plus a response enum. The generator only models what it
+//! can translate faithfully; anything else is rejected with an error rather than
+//! mis-generated.
+//!
+//! Supported:
+//!
+//! - **Path parameters** — inline scalars, or a same-document `$ref` to a scalar.
+//! - **Query parameters** — scalars and arrays of scalars, lowered into a
+//!   per-operation `Deserialize` struct extracted via
+//!   `axum_extra::extract::Query`. Required parameters stay bare; optional ones
+//!   become `Option<..>`. Arrays must use the default `form`/`explode: true`
+//!   encoding (repeated keys).
+//! - **Header parameters** — scalars only, lowered into a per-operation struct
+//!   extracted via a generated `FromRequestParts` impl. The reserved
+//!   `Accept`/`Content-Type`/`Authorization` headers are ignored.
+//! - **Responses** — explicit status codes, the `default` catch-all, and ranges
+//!   (`5XX`); component `$ref` responses are resolved against the document.
+//! - **Cross-file `$ref`s** in bodies and responses are routed through the
+//!   `import-mapping`.
+//!
+//! Rejected: object or other non-scalar parameters, non-default query-array
+//! encodings, `content` parameters, array or `byte`/`binary` header parameters,
+//! cross-file `$ref` parameters, and an unrecognised response status code. Cookie
+//! parameters and component-level `$ref` parameters/request bodies are not
+//! handled yet.
 
 use std::collections::BTreeMap;
 
@@ -27,6 +36,7 @@ use openapiv3::ParameterData;
 use openapiv3::ParameterSchemaOrContent;
 use openapiv3::QueryStyle;
 use openapiv3::ReferenceOr;
+use openapiv3::Response as OasResponse;
 use openapiv3::Schema;
 use openapiv3::SchemaKind;
 use openapiv3::StatusCode;
@@ -40,6 +50,7 @@ use crate::ir::Headers;
 use crate::ir::Operation;
 use crate::ir::Param;
 use crate::ir::ResponseCase;
+use crate::ir::ResponseStatus;
 use crate::ir::RustType;
 use crate::ir::Service;
 use crate::ir::Struct;
@@ -524,51 +535,55 @@ impl Lowerer<'_> {
     }
 
     /// Lower an operation's responses into typed enum variants, resolving
-    /// component `$ref` responses against the document.
+    /// component `$ref` responses against the document. A fixed status code
+    /// becomes a reason-named variant with a compile-time status constant; a
+    /// range (`5XX` → `Status5xx`) or the `default` response becomes a variant
+    /// that carries the `axum::http::StatusCode` the handler supplies at runtime.
     fn lower_responses(&self, path: &str, method: &str, operation: &OasOperation) -> Result<Vec<ResponseCase>> {
-        if operation.responses.default.is_some() {
-            return Err(Error::UnsupportedOperation {
-                method: method.to_owned(),
-                path: path.to_owned(),
-                reason: "`default` responses are not supported yet".to_owned(),
+        let mut cases = Vec::new();
+        for (status_code, response) in &operation.responses.responses {
+            let (status, variant) = match status_code {
+                StatusCode::Code(code) => {
+                    let reason = HttpStatus::from_u16(*code).ok().and_then(|status| {
+                        return status.canonical_reason();
+                    });
+                    let reason = reason.ok_or_else(|| {
+                        return Error::UnsupportedOperation {
+                            method: method.to_owned(),
+                            path: path.to_owned(),
+                            reason: format!("status code `{code}` is not a recognised HTTP status"),
+                        };
+                    })?;
+                    (ResponseStatus::Fixed(*code), to_ident(reason, Case::Pascal))
+                }
+                StatusCode::Range(range) => {
+                    if !(1..=5).contains(range) {
+                        return Err(Error::UnsupportedOperation {
+                            method: method.to_owned(),
+                            path: path.to_owned(),
+                            reason: format!("response range `{range}XX` is not a valid HTTP status class"),
+                        });
+                    }
+                    let variant = to_ident(&format!("status_{range}xx"), Case::Pascal);
+                    (ResponseStatus::Range(*range as u8), variant)
+                }
+            };
+            let response = self.resolve_response_ref(response)?;
+            let body = self.response_body(path, method, response)?;
+            cases.push(ResponseCase {
+                variant,
+                status,
+                body,
+                doc: trimmed(&response.description),
             });
         }
 
-        let mut cases = Vec::new();
-        for (status_code, response) in &operation.responses.responses {
-            let code = match status_code {
-                StatusCode::Code(code) => *code,
-                StatusCode::Range(range) => {
-                    return Err(Error::UnsupportedOperation {
-                        method: method.to_owned(),
-                        path: path.to_owned(),
-                        reason: format!("range response `{range}XX` is not supported yet"),
-                    });
-                }
-            };
-            let reason = HttpStatus::from_u16(code).ok().and_then(|status| {
-                return status.canonical_reason();
-            });
-            let reason = reason.ok_or_else(|| {
-                return Error::UnsupportedOperation {
-                    method: method.to_owned(),
-                    path: path.to_owned(),
-                    reason: format!("status code `{code}` is not a recognised HTTP status"),
-                };
-            })?;
-            let response = match response {
-                ReferenceOr::Item(response) => response,
-                ReferenceOr::Reference { reference } => self.spec.resolve_response(reference)?,
-            };
-            let body = match response.content.get(JSON_MEDIA_TYPE).and_then(|media| {
-                return media.schema.as_ref();
-            }) {
-                Some(schema) => Some(self.body_type(path, method, schema)?),
-                None => None,
-            };
+        if let Some(default) = &operation.responses.default {
+            let response = self.resolve_response_ref(default)?;
+            let body = self.response_body(path, method, response)?;
             cases.push(ResponseCase {
-                variant: to_ident(reason, Case::Pascal),
-                status: code,
+                variant: to_ident("default", Case::Pascal),
+                status: ResponseStatus::Default,
                 body,
                 doc: trimmed(&response.description),
             });
@@ -582,6 +597,26 @@ impl Lowerer<'_> {
             });
         }
         return Ok(cases);
+    }
+
+    /// Resolve a possibly-referenced response to a concrete [`OasResponse`].
+    fn resolve_response_ref<'r>(&'r self, response: &'r ReferenceOr<OasResponse>) -> Result<&'r OasResponse> {
+        match response {
+            ReferenceOr::Item(response) => return Ok(response),
+            ReferenceOr::Reference { reference } => return self.spec.resolve_response(reference),
+        }
+    }
+
+    /// Extract a response's JSON body type, if it declares `application/json`
+    /// content.
+    fn response_body(&self, path: &str, method: &str, response: &OasResponse) -> Result<Option<RustType>> {
+        let schema = response.content.get(JSON_MEDIA_TYPE).and_then(|media| {
+            return media.schema.as_ref();
+        });
+        match schema {
+            Some(schema) => return Ok(Some(self.body_type(path, method, schema)?)),
+            None => return Ok(None),
+        }
     }
 
     /// Map a request/response body schema to a Rust type. Composite inline
@@ -722,5 +757,16 @@ mod tests {
         assert_eq!(variant(204), "NoContent");
         assert_eq!(variant(404), "NotFound");
         assert_eq!(variant(500), "InternalServerError");
+    }
+
+    #[test]
+    fn range_response_variants_are_derived_from_the_range_digit() {
+        let variant = |range: u16| {
+            return to_ident(&format!("status_{range}xx"), Case::Pascal)
+                .logical()
+                .to_owned();
+        };
+        assert_eq!(variant(4), "Status4xx");
+        assert_eq!(variant(5), "Status5xx");
     }
 }

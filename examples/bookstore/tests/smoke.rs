@@ -67,6 +67,17 @@ impl Api for Service {
             });
         }
 
+        if id.is_empty() {
+            // The `default` response lets the handler pick the status code.
+            return GetBookResponse::Default(
+                axum::http::StatusCode::BAD_REQUEST,
+                ErrorResponse {
+                    code: "missing_id".to_owned(),
+                    message: "a book id is required".to_owned(),
+                },
+            );
+        }
+
         return GetBookResponse::NotFound;
     }
 

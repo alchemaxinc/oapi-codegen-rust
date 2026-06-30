@@ -134,6 +134,8 @@ pub enum GetBookResponse {
     Ok(crate::apimodel::catalog::Book),
     /// No resource matched the request.
     NotFound,
+    /// An unexpected error; the handler sets the status code.
+    Default(axum::http::StatusCode, crate::apimodel::common::ErrorResponse),
 }
 
 impl axum::response::IntoResponse for GetBookResponse {
@@ -156,6 +158,9 @@ impl axum::response::IntoResponse for GetBookResponse {
                     Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
                 };
                 STATUS.into_response()
+            }
+            GetBookResponse::Default(status, body) => {
+                (status, axum::Json(body)).into_response()
             }
         }
     }
