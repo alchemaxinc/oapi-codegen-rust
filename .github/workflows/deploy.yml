@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - develop
   workflow_dispatch:
 
 concurrency:
@@ -165,31 +164,3 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           TAG: ${{ needs.semantic-release.outputs.tag }}
         run: gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false
-
-      - name: Checkout and configure identity for backmerge
-        if: github.ref == 'refs/heads/main'
-        uses: alchemaxinc/composite-toolbox/checkout-and-setup@v1
-        with:
-          token: ${{ steps.app.outputs.token }}
-          shallow: "false"
-
-      - name: Backmerge main into develop
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-        run: |
-          set -e
-          git fetch origin develop
-          git checkout develop
-
-          if git merge main --no-edit; then
-            git push origin develop
-          else
-            echo "Merge conflict detected, creating PR instead"
-            git merge --abort
-            gh pr create \
-              --title "chore: backmerge main into develop" \
-              --body "Automatic backmerge from main into develop failed due to conflicts. Please resolve manually." \
-              --head main \
-              --base develop || echo "PR already exists"
-          fi

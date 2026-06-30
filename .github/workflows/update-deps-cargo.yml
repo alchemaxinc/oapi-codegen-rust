@@ -22,7 +22,6 @@ jobs:
           token: ${{ steps.app.outputs.token }}
           auto-merge: "true"
           merge-method: "squash"
-          base-branch: "develop"
           branch-prefix: "update-cargo"
           pr-title: "fix: update cargo dependencies"
           commit-message: "fix: update cargo dependencies"
