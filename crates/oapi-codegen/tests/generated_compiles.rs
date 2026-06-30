@@ -286,7 +286,7 @@ fn generated_server_supplies_status_for_default_and_range_responses() {
         async fn list_pets(&self) -> ListPetsResponse {
             // Fixed `200` carries only the body; `5XX`/`default` carry the
             // concrete status the handler chooses.
-            return ListPetsResponse::ServerError(
+            return ListPetsResponse::Status5xx(
                 StatusCode::SERVICE_UNAVAILABLE,
                 Error {
                     message: "down".to_owned(),
@@ -303,7 +303,7 @@ fn generated_server_supplies_status_for_default_and_range_responses() {
     let ok = ListPetsResponse::Ok(Pet { id: 1 }).into_response();
     assert_eq!(ok.status(), StatusCode::OK);
 
-    let range = ListPetsResponse::ServerError(
+    let range = ListPetsResponse::Status5xx(
         StatusCode::SERVICE_UNAVAILABLE,
         Error {
             message: "down".to_owned(),

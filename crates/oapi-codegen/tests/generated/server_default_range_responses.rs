@@ -26,7 +26,7 @@ pub enum ListPetsResponse {
     /// The full list of pets.
     Ok(Pet),
     /// A server-side failure; the handler sets the concrete code.
-    ServerError(axum::http::StatusCode, Error),
+    Status5xx(axum::http::StatusCode, Error),
     /// An unexpected error.
     Default(axum::http::StatusCode, Error),
 }
@@ -43,7 +43,7 @@ impl axum::response::IntoResponse for ListPetsResponse {
                 };
                 (STATUS, axum::Json(body)).into_response()
             }
-            ListPetsResponse::ServerError(status, body) => {
+            ListPetsResponse::Status5xx(status, body) => {
                 (status, axum::Json(body)).into_response()
             }
             ListPetsResponse::Default(status, body) => {
@@ -58,7 +58,7 @@ pub enum DeletePetResponse {
     /// The pet was deleted.
     NoContent,
     /// The request was rejected; the handler sets the code.
-    ClientError(axum::http::StatusCode),
+    Status4xx(axum::http::StatusCode),
     /// An unexpected error.
     Default(axum::http::StatusCode),
 }
@@ -75,7 +75,7 @@ impl axum::response::IntoResponse for DeletePetResponse {
                 };
                 STATUS.into_response()
             }
-            DeletePetResponse::ClientError(status) => status.into_response(),
+            DeletePetResponse::Status4xx(status) => status.into_response(),
             DeletePetResponse::Default(status) => status.into_response(),
         }
     }
