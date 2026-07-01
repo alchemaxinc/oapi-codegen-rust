@@ -1,10 +1,14 @@
-//! Conversion of OpenAPI names into valid, idiomatic Rust identifiers.
+//! Conversion of OpenAPI names into valid, idiomatic Rust identifiers and
+//! derivation of per-operation artifact names.
 
 use proc_macro2::Ident;
 use proc_macro2::Span;
 
 /// `snake_case` / `UpperCamelCase` conversion used by [`to_ident`].
 mod casing;
+
+/// Derivation of the Rust names of the artifacts generated for an operation.
+pub mod operations;
 
 /// A Rust identifier together with whether it must be emitted as a raw
 /// identifier (`r#name`).

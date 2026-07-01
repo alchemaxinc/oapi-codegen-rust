@@ -57,11 +57,12 @@ use crate::ir::Struct;
 use crate::loader::Spec;
 use crate::loader::ref_component_name;
 use crate::loader::ref_file_part;
+use crate::lower::schema::integer_format_type;
+use crate::lower::schema::string_format_type;
 use crate::naming::Case;
 use crate::naming::RustIdent;
+use crate::naming::operations;
 use crate::naming::to_ident;
-use crate::schema::integer_format_type;
-use crate::schema::string_format_type;
 
 /// The JSON media type the slice reads request and response bodies from.
 const JSON_MEDIA_TYPE: &str = "application/json";
@@ -116,8 +117,7 @@ impl Lowerer<'_> {
         shared_params: &[ReferenceOr<Parameter>],
     ) -> Result<Operation> {
         let name = operation_name(path, method, operation);
-        let handler = to_ident(&format!("{}_handler", name.logical()), Case::Snake);
-        let response_enum = to_ident(&format!("{}_response", name.logical()), Case::Pascal);
+        let response_enum = operations::response_enum_name(&name);
 
         let path_params = self.lower_path_params(path, method, operation, shared_params)?;
         let query = self.lower_query_params(path, method, operation, shared_params, &name)?;
@@ -127,7 +127,6 @@ impl Lowerer<'_> {
 
         return Ok(Operation {
             name,
-            handler,
             response_enum,
             doc: operation_doc(operation),
             method: method.to_owned(),
@@ -207,7 +206,7 @@ impl Lowerer<'_> {
         if fields.is_empty() {
             return Ok(None);
         }
-        let name = to_ident(&format!("{}_query", operation_name.logical()), Case::Pascal);
+        let name = operations::query_struct_name(operation_name);
         return Ok(Some(Struct {
             name,
             doc: None,
@@ -368,7 +367,7 @@ impl Lowerer<'_> {
         if params.is_empty() {
             return Ok(None);
         }
-        let name = to_ident(&format!("{}_headers", operation_name.logical()), Case::Pascal);
+        let name = operations::headers_struct_name(operation_name);
         return Ok(Some(Headers { name, params }));
     }
 
@@ -688,10 +687,10 @@ impl Lowerer<'_> {
 /// synthesised from the method and path (e.g. `get /v1/widgets` -> `get_v1_widgets`).
 fn operation_name(path: &str, method: &str, operation: &OasOperation) -> crate::naming::RustIdent {
     if let Some(id) = &operation.operation_id {
-        return to_ident(id, Case::Snake);
+        return operations::operation_method_name(id);
     }
     let synthesised = format!("{method} {path}");
-    return to_ident(&synthesised, Case::Snake);
+    return operations::operation_method_name(&synthesised);
 }
 
 /// The operation's doc comment, preferring `summary` over `description`.
