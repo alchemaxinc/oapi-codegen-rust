@@ -1,8 +1,8 @@
 //! `oapi-codegen` — generate idiomatic Rust from OpenAPI 3 specifications.
 //!
 //! The pipeline is: load a spec ([`loader`]), lower its component schemas into
-//! an intermediate representation ([`schema`] → [`ir`]) and, for the server
-//! generator, its operations ([`paths`] → [`ir`]), then emit formatted Rust
+//! an intermediate representation ([`lower::schema`] → [`ir`]) and, for the server
+//! generator, its operations ([`lower::paths`] → [`ir`]), then emit formatted Rust
 //! source ([`emit`]). [`Config`] mirrors `oapi-codegen`'s YAML configuration.
 
 pub mod config;
@@ -10,9 +10,8 @@ pub mod emit;
 pub mod error;
 pub mod ir;
 pub mod loader;
+pub mod lower;
 pub mod naming;
-pub mod paths;
-pub mod schema;
 
 use std::path::Path;
 
@@ -31,12 +30,12 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     let spec = Spec::load(spec_path)?;
     let want_server = config.generate.std_http_server;
     let module = if config.generate.models || want_server {
-        schema::generate_models(&spec)?
+        lower::generate_models(&spec)?
     } else {
         Module::default()
     };
     if want_server {
-        let service = paths::generate_service(&spec, &config.import_mapping)?;
+        let service = lower::generate_service(&spec, &config.import_mapping)?;
         return emit::emit_with_service(&module, &service);
     }
     return emit::emit_module(&module);
@@ -52,7 +51,7 @@ pub fn generate_to_file(spec_path: &Path, config: &Config, output_path: &Path) -
 /// Generate Rust models from a spec file and return the formatted source.
 pub fn generate_models_string(spec_path: &Path) -> Result<String> {
     let spec = Spec::load(spec_path)?;
-    let module = schema::generate_models(&spec)?;
+    let module = lower::generate_models(&spec)?;
     let code = emit::emit_module(&module)?;
     return Ok(code);
 }

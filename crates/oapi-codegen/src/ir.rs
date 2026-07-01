@@ -1,6 +1,6 @@
 //! Intermediate representation (IR) of generated Rust types.
 //!
-//! The schema mapping pass ([`crate::schema`]) lowers OpenAPI schemas into this
+//! The schema mapping pass ([`crate::lower::schema`]) lowers OpenAPI schemas into this
 //! IR; the emit pass ([`crate::emit`]) turns the IR into a token stream. Keeping
 //! the two separate makes the mapping logic testable without touching token
 //! generation, and keeps emission free of OpenAPI concerns.
@@ -187,8 +187,6 @@ pub struct Service {
 pub struct Operation {
     /// `Api` trait method name (`snake_case`).
     pub name: RustIdent,
-    /// Internal handler function name (`<name>_handler`).
-    pub handler: RustIdent,
     /// Per-operation response enum name (`<Name>Response`).
     pub response_enum: RustIdent,
     /// Doc comment derived from the operation `summary`/`description`.
