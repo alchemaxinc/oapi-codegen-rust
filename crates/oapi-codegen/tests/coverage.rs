@@ -335,6 +335,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_query_params",
     "server_header_params",
     "server_default_range_responses",
+    "server_cookie_params",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
@@ -347,6 +348,8 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_object_query_param",
     "server_unsupported_explode_false_query_param",
     "server_unsupported_array_header_param",
+    "server_unsupported_object_cookie_param",
+    "server_unsupported_bytes_cookie_param",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -517,6 +520,7 @@ server_generated_tests!(
     server_query_params,
     server_header_params,
     server_default_range_responses,
+    server_cookie_params,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.

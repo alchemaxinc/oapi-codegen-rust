@@ -1,0 +1,19 @@
+openapi: 3.0.3
+info:
+  title: unsupported object cookie param
+  version: "1"
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      parameters:
+        - name: prefs
+          in: cookie
+          schema:
+            type: object
+            properties:
+              theme:
+                type: string
+      responses:
+        "200":
+          description: ok

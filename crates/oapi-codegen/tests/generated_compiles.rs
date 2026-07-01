@@ -87,6 +87,9 @@ mod generated {
     pub mod server_default_range_responses {
         include!("generated/server_default_range_responses.rs");
     }
+    pub mod server_cookie_params {
+        include!("generated/server_cookie_params.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -316,4 +319,28 @@ fn generated_server_supplies_status_for_default_and_range_responses() {
     assert_eq!(default.status(), StatusCode::IM_A_TEAPOT);
 
     let _router: axum::Router = server_default_range_responses::router(Service);
+}
+
+#[test]
+fn generated_server_accepts_cookie_params() {
+    use generated::server_cookie_params;
+    use server_cookie_params::Api;
+    use server_cookie_params::GetWidgetsCookies;
+    use server_cookie_params::GetWidgetsResponse;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn get_widgets(&self, cookies: GetWidgetsCookies) -> GetWidgetsResponse {
+            // Required cookie is bare; optional is `Option<..>`.
+            let _session: String = cookies.session;
+            let _page_size: Option<i32> = cookies.page_size;
+            return GetWidgetsResponse::Ok;
+        }
+    }
+
+    // Building the router only type-checks if the generated `GetWidgetsCookies`
+    // satisfies axum's `FromRequestParts`, which is how the handler consumes it.
+    let _router: axum::Router = server_cookie_params::router(Service);
 }

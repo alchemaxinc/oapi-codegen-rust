@@ -44,6 +44,8 @@ use openapiv3::Type;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::ir::CookieParam;
+use crate::ir::Cookies;
 use crate::ir::Field;
 use crate::ir::HeaderParam;
 use crate::ir::Headers;
@@ -122,6 +124,7 @@ impl Lowerer<'_> {
         let path_params = self.lower_path_params(path, method, operation, shared_params)?;
         let query = self.lower_query_params(path, method, operation, shared_params, &name)?;
         let headers = self.lower_header_params(path, method, operation, shared_params, &name)?;
+        let cookies = self.lower_cookie_params(path, method, operation, shared_params, &name)?;
         let body = self.lower_request_body(path, method, operation)?;
         let responses = self.lower_responses(path, method, operation)?;
 
@@ -134,6 +137,7 @@ impl Lowerer<'_> {
             path_params,
             query,
             headers,
+            cookies,
             body,
             responses,
         });
@@ -427,6 +431,95 @@ impl Lowerer<'_> {
                 method: method.to_owned(),
                 path: path.to_owned(),
                 reason: format!("header parameter `{name}` uses a `byte`/`binary` format, which is not supported"),
+            });
+        }
+        return Ok(ty);
+    }
+
+    /// Lower an operation's cookie parameters into a generated [`Cookies`]
+    /// struct, returning `None` when the operation declares none. Only inline
+    /// `Parameter::Cookie` entries are considered (component parameter `$ref`s
+    /// are rejected earlier by [`Self::lower_path_params`]). Per OpenAPI's
+    /// override rule the first (operation-level) definition wins on a name
+    /// collision. Cookies have no reserved-name analogue, so none are skipped.
+    fn lower_cookie_params(
+        &self,
+        path: &str,
+        method: &str,
+        operation: &OasOperation,
+        shared_params: &[ReferenceOr<Parameter>],
+        operation_name: &RustIdent,
+    ) -> Result<Option<Cookies>> {
+        let mut params = Vec::new();
+        let mut seen: Vec<&str> = Vec::new();
+        for parameter in operation.parameters.iter().chain(shared_params) {
+            let ReferenceOr::Item(Parameter::Cookie { parameter_data, .. }) = parameter else {
+                continue;
+            };
+            let name = parameter_data.name.as_str();
+            if seen.contains(&name) {
+                continue;
+            }
+            seen.push(name);
+            let ty = self.cookie_param_type(path, method, &parameter_data.name, &parameter_data.format)?;
+            params.push(CookieParam {
+                name: to_ident(&parameter_data.name, Case::Snake),
+                cookie_name: parameter_data.name.clone(),
+                ty,
+                required: parameter_data.required,
+                doc: parameter_data.description.as_deref().and_then(trimmed),
+            });
+        }
+        if params.is_empty() {
+            return Ok(None);
+        }
+        let name = operations::cookies_struct_name(operation_name);
+        return Ok(Some(Cookies { name, params }));
+    }
+
+    /// Map a cookie parameter's schema to a scalar Rust type. `content`,
+    /// cross-file `$ref`s, non-scalar shapes (arrays/objects), and `byte`/
+    /// `binary` strings (no `FromStr`) are rejected.
+    fn cookie_param_type(
+        &self,
+        path: &str,
+        method: &str,
+        name: &str,
+        format: &ParameterSchemaOrContent,
+    ) -> Result<RustType> {
+        let schema = match format {
+            ParameterSchemaOrContent::Schema(schema) => schema,
+            ParameterSchemaOrContent::Content(_) => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("cookie parameter `{name}` uses `content`, which is not supported"),
+                });
+            }
+        };
+        let schema = match schema {
+            ReferenceOr::Item(schema) => schema,
+            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("cookie parameter `{name}` uses a cross-file `$ref`, which is not supported"),
+                });
+            }
+            ReferenceOr::Reference { reference } => self.spec.resolve(reference)?,
+        };
+        let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
+            return Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("cookie parameter `{name}` must be a scalar"),
+            };
+        })?;
+        if matches!(ty, RustType::Bytes) {
+            return Err(Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("cookie parameter `{name}` uses a `byte`/`binary` format, which is not supported"),
             });
         }
         return Ok(ty);

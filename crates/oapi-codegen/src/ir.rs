@@ -207,6 +207,10 @@ pub struct Operation {
     /// parameters. Its name doubles as the generated `FromRequestParts`
     /// extractor type and the `Api` method's `headers` argument type.
     pub headers: Option<Headers>,
+    /// Generated cookie-parameter struct, when the operation declares cookie
+    /// parameters. Its name doubles as the generated `FromRequestParts`
+    /// extractor type and the `Api` method's `cookies` argument type.
+    pub cookies: Option<Cookies>,
     /// JSON request body type, when the operation declares one.
     pub body: Option<RustType>,
     /// Response variants, in declaration order.
@@ -247,6 +251,34 @@ pub struct HeaderParam {
     /// wrapper for absent headers.
     pub ty: RustType,
     /// Whether the header is required. A missing required header is a `400`.
+    pub required: bool,
+    /// Doc comment derived from the parameter `description`.
+    pub doc: Option<String>,
+}
+
+/// A generated per-operation cookie struct, extracted via a hand-written
+/// `axum::extract::FromRequestParts` implementation backed by `axum_extra`'s
+/// `CookieJar`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cookies {
+    /// Struct name (`<Op>Cookies`), doubling as the extractor type and the
+    /// `Api` method's `cookies` argument type.
+    pub name: RustIdent,
+    /// Cookie fields, in declaration order.
+    pub params: Vec<CookieParam>,
+}
+
+/// A single cookie parameter within a [`Cookies`] struct.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CookieParam {
+    /// Rust field identifier (`snake_case`).
+    pub name: RustIdent,
+    /// The exact OpenAPI cookie name, used for the `CookieJar` lookup.
+    pub cookie_name: String,
+    /// The parsed scalar type. Like [`HeaderParam`], this is the bare element
+    /// type even when optional; the emitter adds the `Option<..>` wrapper.
+    pub ty: RustType,
+    /// Whether the cookie is required. A missing required cookie is a `400`.
     pub required: bool,
     /// Doc comment derived from the parameter `description`.
     pub doc: Option<String>,
