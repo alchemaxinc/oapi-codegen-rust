@@ -114,13 +114,19 @@ faithfully rather than emit subtly wrong code.
   supports the repeated keys arrays need). Required parameters stay bare;
   optional ones become `Option<..>`. A server that uses them needs
   `axum-extra = { version = "0.10", features = ["query"] }`, and array
-  parameters must use OpenAPI's default `style: form`, `explode: true` encoding
-  (`?tag=a&tag=b`).
+  parameters must use OpenAPI's default `style: form`, `explode: true`
+  encoding (`?tag=a&tag=b`).
 - **Header parameters** — scalars only, read by a generated
   `axum::extract::FromRequestParts` impl that parses each value with `FromStr`.
   A missing required header or an unparseable value yields a `400 Bad Request`
   with a short plaintext reason. The reserved `Accept`, `Content-Type`, and
   `Authorization` headers are ignored, per the spec.
+- **Cookie parameters** — scalars only, read via [`axum-extra`]'s `CookieJar`
+  and lowered into a per-operation struct extracted with
+  `axum::extract::FromRequestParts`. Required parameters stay bare; optional
+  ones become `Option<..>`. A missing required cookie or an unparseable value
+  yields a `400 Bad Request` with a short plaintext reason. A server that uses
+  them needs `axum-extra = { version = "0.10", features = ["cookie"] }`.
 - **JSON request bodies** — a `$ref` or a scalar.
 - **Responses** — keyed by an explicit status code, the `default` catch-all, or
   a range (`5XX`), including component `$ref` responses
@@ -141,8 +147,8 @@ faithfully rather than emit subtly wrong code.
   `spaceDelimited`, …), an array header parameter, or a `byte`/`binary` header
   parameter.
 - A cross-file `$ref` query or header parameter.
-
-Cookie parameters are currently **ignored**.
+- An object or array cookie parameter, a `byte`/`binary` cookie parameter, or a
+  cross-file `$ref` cookie parameter.
 
 ## Coverage
 
