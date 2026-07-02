@@ -231,8 +231,9 @@ pub fn ref_target_name(reference: &str) -> Option<&str> {
     return ref_component_name(reference, "schemas");
 }
 
-/// Extract the trailing component name of the given `kind` (`schemas` or
-/// `responses`) from a (possibly cross-file) `$ref`.
+/// Extract the trailing component name of the given `kind` (`schemas`,
+/// `responses`, `parameters`, or `requestBodies`) from a (possibly cross-file)
+/// `$ref`.
 pub fn ref_component_name<'a>(reference: &'a str, kind: &str) -> Option<&'a str> {
     let fragment = reference.split('#').nth(1).unwrap_or(reference);
     let prefix = match kind {

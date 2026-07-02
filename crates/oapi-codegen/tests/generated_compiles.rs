@@ -96,8 +96,8 @@ mod generated {
     pub mod server_component_body_ref {
         include!("generated/server_component_body_ref.rs");
     }
-    pub mod server_unsupported_ref_param {
-        include!("generated/server_unsupported_ref_param.rs");
+    pub mod server_component_param_ref_pet {
+        include!("generated/server_component_param_ref_pet.rs");
     }
 }
 

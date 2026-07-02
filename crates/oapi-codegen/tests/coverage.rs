@@ -338,7 +338,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_cookie_params",
     "server_component_param_ref",
     "server_component_body_ref",
-    "server_unsupported_ref_param",
+    "server_component_param_ref_pet",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
@@ -527,7 +527,7 @@ server_generated_tests!(
     server_cookie_params,
     server_component_param_ref,
     server_component_body_ref,
-    server_unsupported_ref_param,
+    server_component_param_ref_pet,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.

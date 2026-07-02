@@ -169,9 +169,7 @@ impl Lowerer<'_> {
                     return Err(Error::UnsupportedOperation {
                         method: method.to_owned(),
                         path: path.to_owned(),
-                        reason: format!(
-                            "component parameter `$ref` `{reference}` is cross-file, which is not supported"
-                        ),
+                        reason: format!("parameter `$ref` `{reference}` is cross-file, which is not supported"),
                     });
                 }
                 ReferenceOr::Reference { reference } => self.spec.resolve_parameter(reference)?.clone(),
@@ -615,9 +613,7 @@ impl Lowerer<'_> {
                 return Err(Error::UnsupportedOperation {
                     method: method.to_owned(),
                     path: path.to_owned(),
-                    reason: format!(
-                        "component request-body `$ref` `{reference}` is cross-file, which is not supported"
-                    ),
+                    reason: format!("request-body `$ref` `{reference}` is cross-file, which is not supported"),
                 });
             }
             ReferenceOr::Reference { reference } => self.spec.resolve_request_body(reference)?,
