@@ -1,0 +1,13 @@
+openapi: 3.0.3
+info:
+  title: unsupported cross-file param ref
+  version: "1"
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      parameters:
+        - $ref: "common.yaml#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: ok

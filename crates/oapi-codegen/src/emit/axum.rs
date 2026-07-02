@@ -466,6 +466,16 @@ fn emit_cookies(cookies: &Cookies) -> Result<Vec<TokenStream>> {
 fn emit_cookie_binding(param: &CookieParam) -> Result<TokenStream> {
     let ident = param.name.to_token();
     let cookie_name = &param.cookie_name;
+
+    // An optional string cookie maps straight through with no fallible step, so
+    // emit `.map()` rather than a `match { Some => Some, None => None }` (which
+    // trips clippy's `manual_map` in the generated output).
+    if !param.required && matches!(param.ty, RustType::String) {
+        return Ok(quote! {
+            let #ident = jar.get(#cookie_name).map(|cookie| return cookie.value().to_owned());
+        });
+    }
+
     let missing_msg = format!("missing required cookie `{cookie_name}`");
 
     let value_expr = if matches!(param.ty, RustType::String) {

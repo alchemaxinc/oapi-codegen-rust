@@ -1,0 +1,42 @@
+openapi: 3.0.3
+info:
+  title: component param refs
+  version: "1"
+paths:
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      parameters:
+        - $ref: "#/components/parameters/WidgetId"
+        - $ref: "#/components/parameters/Verbose"
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Session"
+      responses:
+        "200":
+          description: The widget.
+components:
+  parameters:
+    WidgetId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    Verbose:
+      name: verbose
+      in: query
+      required: false
+      schema:
+        type: boolean
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: true
+      schema:
+        type: string
+    Session:
+      name: session
+      in: cookie
+      required: false
+      schema:
+        type: string

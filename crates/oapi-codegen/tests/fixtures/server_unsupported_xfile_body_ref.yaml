@@ -1,0 +1,13 @@
+openapi: 3.0.3
+info:
+  title: unsupported cross-file body ref
+  version: "1"
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      requestBody:
+        $ref: "common.yaml#/components/requestBodies/CreateWidgetBody"
+      responses:
+        "201":
+          description: created

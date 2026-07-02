@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: component body ref
+  version: "1"
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      requestBody:
+        $ref: "#/components/requestBodies/CreateWidgetBody"
+      responses:
+        "201":
+          description: Created.
+components:
+  requestBodies:
+    CreateWidgetBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/NewWidget"
+  schemas:
+    NewWidget:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string

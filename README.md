@@ -127,6 +127,9 @@ faithfully rather than emit subtly wrong code.
   ones become `Option<..>`. A missing required cookie or an unparseable value
   yields a `400 Bad Request` with a short plaintext reason. A server that uses
   them needs `axum-extra = { version = "0.10", features = ["cookie"] }`.
+- **Component `$ref` parameters and request bodies** —
+  `#/components/parameters/*` and `#/components/requestBodies/*` are resolved
+  within the same document.
 - **JSON request bodies** — a `$ref` or a scalar.
 - **Responses** — keyed by an explicit status code, the `default` catch-all, or
   a range (`5XX`), including component `$ref` responses
@@ -140,15 +143,13 @@ faithfully rather than emit subtly wrong code.
 **Rejected** (an error, never mis-generated)
 
 - A response keyed by an unrecognised HTTP status code.
-- A component-level `$ref` _parameter_ or _request body_, or a cross-file
+- A cross-file `$ref` parameter or request-body wrapper, or a cross-file
   component-_response_ `$ref`.
 - An object or other non-scalar path, query, or header parameter.
 - An array query parameter using a non-default encoding (`explode: false`,
   `spaceDelimited`, …), an array header parameter, or a `byte`/`binary` header
   parameter.
-- A cross-file `$ref` query or header parameter.
-- An object or array cookie parameter, a `byte`/`binary` cookie parameter, or a
-  cross-file `$ref` cookie parameter.
+- An object or array cookie parameter, or a `byte`/`binary` cookie parameter.
 
 ## Coverage
 

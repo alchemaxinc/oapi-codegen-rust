@@ -5,7 +5,9 @@ use std::path::PathBuf;
 
 use indexmap::IndexMap;
 use openapiv3::OpenAPI;
+use openapiv3::Parameter;
 use openapiv3::ReferenceOr;
+use openapiv3::RequestBody;
 use openapiv3::Response;
 use openapiv3::Schema;
 
@@ -112,6 +114,80 @@ impl Spec {
         return Err(Error::UnresolvedRef(reference.to_owned()));
     }
 
+    /// Resolve a `#/components/parameters/<name>` reference to the concrete
+    /// component parameter it names, following same-document reference chains.
+    pub fn resolve_parameter(&self, reference: &str) -> Result<&Parameter> {
+        let mut current = reference.to_owned();
+        for _ in 0..MAX_REF_DEPTH {
+            if ref_file_part(&current).is_some() {
+                return Err(Error::UnsupportedRef {
+                    reference: current.clone(),
+                    reason: "cross-file component parameter `$ref`s are not supported".to_owned(),
+                });
+            }
+            let name = ref_component_name(&current, "parameters").ok_or_else(|| {
+                return Error::UnsupportedRef {
+                    reference: current.clone(),
+                    reason: "only `#/components/parameters/<name>` references are supported".to_owned(),
+                };
+            })?;
+            let entry = self
+                .inner
+                .components
+                .as_ref()
+                .and_then(|components| {
+                    return components.parameters.get(name);
+                })
+                .ok_or_else(|| return Error::UnresolvedRef(current.clone()))?;
+            match entry {
+                ReferenceOr::Item(parameter) => {
+                    return Ok(parameter);
+                }
+                ReferenceOr::Reference { reference } => {
+                    current = reference.clone();
+                }
+            }
+        }
+        return Err(Error::UnresolvedRef(reference.to_owned()));
+    }
+
+    /// Resolve a `#/components/requestBodies/<name>` reference to the concrete
+    /// component request body it names, following same-document reference chains.
+    pub fn resolve_request_body(&self, reference: &str) -> Result<&RequestBody> {
+        let mut current = reference.to_owned();
+        for _ in 0..MAX_REF_DEPTH {
+            if ref_file_part(&current).is_some() {
+                return Err(Error::UnsupportedRef {
+                    reference: current.clone(),
+                    reason: "cross-file component request-body `$ref`s are not supported".to_owned(),
+                });
+            }
+            let name = ref_component_name(&current, "requestBodies").ok_or_else(|| {
+                return Error::UnsupportedRef {
+                    reference: current.clone(),
+                    reason: "only `#/components/requestBodies/<name>` references are supported".to_owned(),
+                };
+            })?;
+            let entry = self
+                .inner
+                .components
+                .as_ref()
+                .and_then(|components| {
+                    return components.request_bodies.get(name);
+                })
+                .ok_or_else(|| return Error::UnresolvedRef(current.clone()))?;
+            match entry {
+                ReferenceOr::Item(body) => {
+                    return Ok(body);
+                }
+                ReferenceOr::Reference { reference } => {
+                    current = reference.clone();
+                }
+            }
+        }
+        return Err(Error::UnresolvedRef(reference.to_owned()));
+    }
+
     /// Resolve a `$ref` string to the concrete schema it names, following
     /// chains of references within this document.
     pub fn resolve(&self, reference: &str) -> Result<&Schema> {
@@ -155,13 +231,16 @@ pub fn ref_target_name(reference: &str) -> Option<&str> {
     return ref_component_name(reference, "schemas");
 }
 
-/// Extract the trailing component name of the given `kind` (`schemas` or
-/// `responses`) from a (possibly cross-file) `$ref`.
+/// Extract the trailing component name of the given `kind` (`schemas`,
+/// `responses`, `parameters`, or `requestBodies`) from a (possibly cross-file)
+/// `$ref`.
 pub fn ref_component_name<'a>(reference: &'a str, kind: &str) -> Option<&'a str> {
     let fragment = reference.split('#').nth(1).unwrap_or(reference);
     let prefix = match kind {
         "schemas" => "/components/schemas/",
         "responses" => "/components/responses/",
+        "parameters" => "/components/parameters/",
+        "requestBodies" => "/components/requestBodies/",
         _ => return None,
     };
     let name = fragment.strip_prefix(prefix)?;
@@ -208,5 +287,44 @@ mod tests {
             ref_file_part("schemas/common.yaml#/components/schemas/ErrorResponse"),
             Some("schemas/common.yaml"),
         );
+    }
+
+    #[test]
+    fn ref_component_name_recognizes_parameters_and_request_bodies() {
+        assert_eq!(
+            ref_component_name("#/components/parameters/PageSize", "parameters"),
+            Some("PageSize")
+        );
+        assert_eq!(
+            ref_component_name("#/components/requestBodies/CreateWidget", "requestBodies"),
+            Some("CreateWidget")
+        );
+        assert_eq!(ref_component_name("#/components/schemas/Foo", "parameters"), None);
+    }
+
+    #[test]
+    fn resolves_same_document_component_parameter() {
+        let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    PageSize:\n      name: pageSize\n      in: query\n      schema:\n        type: integer\n";
+        let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse");
+        let spec = Spec::from_parts(doc, std::path::PathBuf::from("inline.yaml"));
+        let param = spec
+            .resolve_parameter("#/components/parameters/PageSize")
+            .expect("resolve");
+        // The resolved parameter is the `pageSize` query parameter.
+        match param {
+            openapiv3::Parameter::Query { parameter_data, .. } => {
+                assert_eq!(parameter_data.name, "pageSize");
+            }
+            _ => panic!("expected a query parameter"),
+        }
+    }
+
+    #[test]
+    fn rejects_cross_file_component_parameter() {
+        let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\n";
+        let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse");
+        let spec = Spec::from_parts(doc, std::path::PathBuf::from("inline.yaml"));
+        let result = spec.resolve_parameter("common.yaml#/components/parameters/PageSize");
+        assert!(result.is_err(), "cross-file parameter ref must be rejected");
     }
 }
