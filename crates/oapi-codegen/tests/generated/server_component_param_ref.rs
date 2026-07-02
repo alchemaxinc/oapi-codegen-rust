@@ -6,12 +6,72 @@ pub struct GetWidgetQuery {
     pub verbose: Option<bool>,
 }
 
+#[derive(Debug, Clone)]
+pub struct GetWidgetHeaders {
+    pub x_request_id: String,
+}
+
+impl<S> axum::extract::FromRequestParts<S> for GetWidgetHeaders
+where
+    S: Send + Sync,
+{
+    type Rejection = (axum::http::StatusCode, String);
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let x_request_id = match parts.headers.get("X-Request-Id") {
+            Some(value) => {
+                let text = match value.to_str() {
+                    Ok(text) => text,
+                    Err(_) => {
+                        return Err((
+                            axum::http::StatusCode::BAD_REQUEST,
+                            "header `X-Request-Id` is not valid text".to_owned(),
+                        ));
+                    }
+                };
+                text.to_owned()
+            }
+            None => {
+                return Err((
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "missing required header `X-Request-Id`".to_owned(),
+                ));
+            }
+        };
+        return Ok(Self { x_request_id });
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GetWidgetCookies {
+    pub session: Option<String>,
+}
+
+impl<S> axum::extract::FromRequestParts<S> for GetWidgetCookies
+where
+    S: Send + Sync,
+{
+    type Rejection = (axum::http::StatusCode, String);
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let jar = axum_extra::extract::CookieJar::from_headers(&parts.headers);
+        let session = jar.get("session").map(|cookie| return cookie.value().to_owned());
+        return Ok(Self { session });
+    }
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     fn get_widget(
         &self,
         id: String,
         query: GetWidgetQuery,
+        headers: GetWidgetHeaders,
+        cookies: GetWidgetCookies,
     ) -> impl std::future::Future<Output = GetWidgetResponse> + Send;
 }
 
@@ -47,6 +107,8 @@ async fn get_widget_handler<T: Api>(
     axum::extract::State(api): axum::extract::State<T>,
     axum::extract::Path(id): axum::extract::Path<String>,
     axum_extra::extract::Query(query): axum_extra::extract::Query<GetWidgetQuery>,
+    headers: GetWidgetHeaders,
+    cookies: GetWidgetCookies,
 ) -> GetWidgetResponse {
-    api.get_widget(id, query).await
+    api.get_widget(id, query, headers, cookies).await
 }

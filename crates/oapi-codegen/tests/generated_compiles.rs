@@ -358,6 +358,8 @@ fn generated_server_accepts_cookie_params() {
 fn generated_server_resolves_component_param_refs() {
     use generated::server_component_param_ref;
     use server_component_param_ref::Api;
+    use server_component_param_ref::GetWidgetCookies;
+    use server_component_param_ref::GetWidgetHeaders;
     use server_component_param_ref::GetWidgetQuery;
     use server_component_param_ref::GetWidgetResponse;
 
@@ -365,9 +367,18 @@ fn generated_server_resolves_component_param_refs() {
     struct Service;
 
     impl Api for Service {
-        async fn get_widget(&self, id: String, query: GetWidgetQuery) -> GetWidgetResponse {
+        async fn get_widget(
+            &self,
+            id: String,
+            query: GetWidgetQuery,
+            headers: GetWidgetHeaders,
+            cookies: GetWidgetCookies,
+        ) -> GetWidgetResponse {
+            // All four parameter locations resolved from component `$ref`s.
             let _id: String = id;
             let _verbose: Option<bool> = query.verbose;
+            let _request_id: String = headers.x_request_id;
+            let _session: Option<String> = cookies.session;
             return GetWidgetResponse::Ok;
         }
     }
