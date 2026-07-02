@@ -90,6 +90,15 @@ mod generated {
     pub mod server_cookie_params {
         include!("generated/server_cookie_params.rs");
     }
+    pub mod server_component_param_ref {
+        include!("generated/server_component_param_ref.rs");
+    }
+    pub mod server_component_body_ref {
+        include!("generated/server_component_body_ref.rs");
+    }
+    pub mod server_unsupported_ref_param {
+        include!("generated/server_unsupported_ref_param.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -343,4 +352,45 @@ fn generated_server_accepts_cookie_params() {
     // Building the router only type-checks if the generated `GetWidgetsCookies`
     // satisfies axum's `FromRequestParts`, which is how the handler consumes it.
     let _router: axum::Router = server_cookie_params::router(Service);
+}
+
+#[test]
+fn generated_server_resolves_component_param_refs() {
+    use generated::server_component_param_ref;
+    use server_component_param_ref::Api;
+    use server_component_param_ref::GetWidgetQuery;
+    use server_component_param_ref::GetWidgetResponse;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn get_widget(&self, id: String, query: GetWidgetQuery) -> GetWidgetResponse {
+            let _id: String = id;
+            let _verbose: Option<bool> = query.verbose;
+            return GetWidgetResponse::Ok;
+        }
+    }
+
+    let _router: axum::Router = server_component_param_ref::router(Service);
+}
+
+#[test]
+fn generated_server_resolves_component_body_ref() {
+    use generated::server_component_body_ref;
+    use server_component_body_ref::Api;
+    use server_component_body_ref::CreateWidgetResponse;
+    use server_component_body_ref::NewWidget;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn create_widget(&self, body: NewWidget) -> CreateWidgetResponse {
+            let _name: String = body.name;
+            return CreateWidgetResponse::Created;
+        }
+    }
+
+    let _router: axum::Router = server_component_body_ref::router(Service);
 }

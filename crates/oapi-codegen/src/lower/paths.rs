@@ -16,6 +16,12 @@
 //! - **Header parameters** — scalars only, lowered into a per-operation struct
 //!   extracted via a generated `FromRequestParts` impl. The reserved
 //!   `Accept`/`Content-Type`/`Authorization` headers are ignored.
+//! - **Cookie parameters** — scalars only, lowered into a per-operation struct
+//!   extracted via a generated `FromRequestParts` impl backed by
+//!   `axum_extra`'s `CookieJar`.
+//! - **Component `$ref` parameters and request bodies** — `$ref`s to
+//!   `#/components/parameters/*` and `#/components/requestBodies/*` are resolved
+//!   against the document.
 //! - **Responses** — explicit status codes, the `default` catch-all, and ranges
 //!   (`5XX`); component `$ref` responses are resolved against the document.
 //! - **Cross-file `$ref`s** in bodies and responses are routed through the
@@ -23,9 +29,8 @@
 //!
 //! Rejected: object or other non-scalar parameters, non-default query-array
 //! encodings, `content` parameters, array or `byte`/`binary` header parameters,
-//! cross-file `$ref` parameters, and an unrecognised response status code. Cookie
-//! parameters and component-level `$ref` parameters/request bodies are not
-//! handled yet.
+//! `byte`/`binary` cookie parameters, cross-file `$ref` parameters and
+//! request-body wrappers, and an unrecognised response status code.
 
 use std::collections::BTreeMap;
 
@@ -121,10 +126,11 @@ impl Lowerer<'_> {
         let name = operation_name(path, method, operation);
         let response_enum = operations::response_enum_name(&name);
 
-        let path_params = self.lower_path_params(path, method, operation, shared_params)?;
-        let query = self.lower_query_params(path, method, operation, shared_params, &name)?;
-        let headers = self.lower_header_params(path, method, operation, shared_params, &name)?;
-        let cookies = self.lower_cookie_params(path, method, operation, shared_params, &name)?;
+        let params = self.resolve_parameters(path, method, operation, shared_params)?;
+        let path_params = self.lower_path_params(path, method, &params)?;
+        let query = self.lower_query_params(path, method, &params, &name)?;
+        let headers = self.lower_header_params(path, method, &params, &name)?;
+        let cookies = self.lower_cookie_params(path, method, &params, &name)?;
         let body = self.lower_request_body(path, method, operation)?;
         let responses = self.lower_responses(path, method, operation)?;
 
@@ -143,44 +149,58 @@ impl Lowerer<'_> {
         });
     }
 
-    /// Resolve the typed path parameters in their path-template order, which is
-    /// the order axum extracts a `Path<(..)>` tuple in.
-    fn lower_path_params(
+    /// Resolve an operation's parameters (its own, then the path-item's shared
+    /// parameters) into concrete `Parameter`s. `Item` entries pass through;
+    /// same-document component `$ref`s resolve via the loader; a cross-file
+    /// parameter `$ref` is rejected (deferred to cross-file parameter support).
+    /// Operation-level entries precede shared ones, preserving override order.
+    fn resolve_parameters(
         &self,
         path: &str,
         method: &str,
         operation: &OasOperation,
         shared_params: &[ReferenceOr<Parameter>],
-    ) -> Result<Vec<Param>> {
+    ) -> Result<Vec<Parameter>> {
+        let mut resolved = Vec::new();
         for parameter in operation.parameters.iter().chain(shared_params) {
-            if matches!(parameter, ReferenceOr::Reference { .. }) {
-                return Err(Error::UnsupportedOperation {
-                    method: method.to_owned(),
-                    path: path.to_owned(),
-                    reason: "component parameter `$ref`s are not supported".to_owned(),
-                });
-            }
+            let concrete = match parameter {
+                ReferenceOr::Item(param) => param.clone(),
+                ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
+                    return Err(Error::UnsupportedOperation {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        reason: format!(
+                            "component parameter `$ref` `{reference}` is cross-file, which is not supported"
+                        ),
+                    });
+                }
+                ReferenceOr::Reference { reference } => self.spec.resolve_parameter(reference)?.clone(),
+            };
+            resolved.push(concrete);
         }
+        return Ok(resolved);
+    }
 
-        let mut params = Vec::new();
+    /// Resolve the typed path parameters in their path-template order, which is
+    /// the order axum extracts a `Path<(..)>` tuple in.
+    fn lower_path_params(&self, path: &str, method: &str, params: &[Parameter]) -> Result<Vec<Param>> {
+        let mut path_params = Vec::new();
         for name in path_param_names(path) {
-            let declared = find_path_param(&name, operation, shared_params);
+            let declared = path_param_schema(&name, params);
             let ty = match declared {
                 Some(format) => self.param_type(path, method, &name, format)?,
                 None => RustType::String,
             };
-            params.push(Param {
+            path_params.push(Param {
                 name: to_ident(&name, Case::Snake),
                 ty,
             });
         }
-        return Ok(params);
+        return Ok(path_params);
     }
 
     /// Lower an operation's query parameters into a generated `Deserialize`
-    /// struct, returning `None` when the operation declares none. Component
-    /// parameter `$ref`s are already rejected by [`Self::lower_path_params`], so
-    /// only inline `Parameter::Query` entries are considered here. Per OpenAPI's
+    /// struct, returning `None` when the operation declares none. Per OpenAPI's
     /// override rule, an operation-level parameter takes precedence over a
     /// path-item one with the same name, so duplicates are de-duplicated keeping
     /// the first (operation-level) definition.
@@ -188,16 +208,15 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
-        operation: &OasOperation,
-        shared_params: &[ReferenceOr<Parameter>],
+        params: &[Parameter],
         operation_name: &RustIdent,
     ) -> Result<Option<Struct>> {
         let mut fields = Vec::new();
         let mut seen: Vec<&str> = Vec::new();
-        for parameter in operation.parameters.iter().chain(shared_params) {
-            let ReferenceOr::Item(Parameter::Query {
+        for parameter in params {
+            let Parameter::Query {
                 parameter_data, style, ..
-            }) = parameter
+            } = parameter
             else {
                 continue;
             };
@@ -335,9 +354,7 @@ impl Lowerer<'_> {
     }
 
     /// Lower an operation's header parameters into a generated [`Headers`]
-    /// struct, returning `None` when the operation declares none. Only inline
-    /// `Parameter::Header` entries are considered (component parameter `$ref`s
-    /// are already rejected by [`Self::lower_path_params`]). Per OpenAPI's
+    /// struct, returning `None` when the operation declares none. Per OpenAPI's
     /// override rule the first (operation-level) definition wins on a
     /// case-insensitive name collision, and the `Accept`/`Content-Type`/
     /// `Authorization` headers the specification reserves are skipped.
@@ -345,14 +362,13 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
-        operation: &OasOperation,
-        shared_params: &[ReferenceOr<Parameter>],
+        params: &[Parameter],
         operation_name: &RustIdent,
     ) -> Result<Option<Headers>> {
-        let mut params = Vec::new();
+        let mut header_params = Vec::new();
         let mut seen: Vec<&str> = Vec::new();
-        for parameter in operation.parameters.iter().chain(shared_params) {
-            let ReferenceOr::Item(Parameter::Header { parameter_data, .. }) = parameter else {
+        for parameter in params {
+            let Parameter::Header { parameter_data, .. } = parameter else {
                 continue;
             };
             let name = parameter_data.name.as_str();
@@ -366,13 +382,16 @@ impl Lowerer<'_> {
                 continue;
             }
             seen.push(name);
-            params.push(self.header_param(path, method, parameter_data)?);
+            header_params.push(self.header_param(path, method, parameter_data)?);
         }
-        if params.is_empty() {
+        if header_params.is_empty() {
             return Ok(None);
         }
         let name = operations::headers_struct_name(operation_name);
-        return Ok(Some(Headers { name, params }));
+        return Ok(Some(Headers {
+            name,
+            params: header_params,
+        }));
     }
 
     /// Build a single header field, resolving its scalar type and recording the
@@ -437,23 +456,20 @@ impl Lowerer<'_> {
     }
 
     /// Lower an operation's cookie parameters into a generated [`Cookies`]
-    /// struct, returning `None` when the operation declares none. Only inline
-    /// `Parameter::Cookie` entries are considered (component parameter `$ref`s
-    /// are rejected earlier by [`Self::lower_path_params`]). Per OpenAPI's
+    /// struct, returning `None` when the operation declares none. Per OpenAPI's
     /// override rule the first (operation-level) definition wins on a name
     /// collision. Cookies have no reserved-name analogue, so none are skipped.
     fn lower_cookie_params(
         &self,
         path: &str,
         method: &str,
-        operation: &OasOperation,
-        shared_params: &[ReferenceOr<Parameter>],
+        params: &[Parameter],
         operation_name: &RustIdent,
     ) -> Result<Option<Cookies>> {
-        let mut params = Vec::new();
+        let mut cookie_params = Vec::new();
         let mut seen: Vec<&str> = Vec::new();
-        for parameter in operation.parameters.iter().chain(shared_params) {
-            let ReferenceOr::Item(Parameter::Cookie { parameter_data, .. }) = parameter else {
+        for parameter in params {
+            let Parameter::Cookie { parameter_data, .. } = parameter else {
                 continue;
             };
             let name = parameter_data.name.as_str();
@@ -462,7 +478,7 @@ impl Lowerer<'_> {
             }
             seen.push(name);
             let ty = self.cookie_param_type(path, method, &parameter_data.name, &parameter_data.format)?;
-            params.push(CookieParam {
+            cookie_params.push(CookieParam {
                 name: to_ident(&parameter_data.name, Case::Snake),
                 cookie_name: parameter_data.name.clone(),
                 ty,
@@ -470,11 +486,14 @@ impl Lowerer<'_> {
                 doc: parameter_data.description.as_deref().and_then(trimmed),
             });
         }
-        if params.is_empty() {
+        if cookie_params.is_empty() {
             return Ok(None);
         }
         let name = operations::cookies_struct_name(operation_name);
-        return Ok(Some(Cookies { name, params }));
+        return Ok(Some(Cookies {
+            name,
+            params: cookie_params,
+        }));
     }
 
     /// Map a cookie parameter's schema to a scalar Rust type. `content`,
@@ -526,24 +545,10 @@ impl Lowerer<'_> {
     }
 }
 
-/// Find a declared path parameter's schema by name, preferring the operation's
-/// own parameters over the shared path-item parameters.
-fn find_path_param<'a>(
-    name: &str,
-    operation: &'a OasOperation,
-    shared_params: &'a [ReferenceOr<Parameter>],
-) -> Option<&'a ParameterSchemaOrContent> {
-    let from_operation = path_param_schema(name, &operation.parameters);
-    if from_operation.is_some() {
-        return from_operation;
-    }
-    return path_param_schema(name, shared_params);
-}
-
-/// Locate the inline `path` parameter named `name` within a parameter list.
-fn path_param_schema<'a>(name: &str, parameters: &'a [ReferenceOr<Parameter>]) -> Option<&'a ParameterSchemaOrContent> {
-    for parameter in parameters {
-        let ReferenceOr::Item(Parameter::Path { parameter_data, .. }) = parameter else {
+/// Locate the `path` parameter named `name` within a concrete parameter list.
+fn path_param_schema<'a>(name: &str, params: &'a [Parameter]) -> Option<&'a ParameterSchemaOrContent> {
+    for parameter in params {
+        let Parameter::Path { parameter_data, .. } = parameter else {
             continue;
         };
         if parameter_data.name == name {
@@ -606,13 +611,16 @@ impl Lowerer<'_> {
         };
         let body = match body {
             ReferenceOr::Item(body) => body,
-            ReferenceOr::Reference { .. } => {
+            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
                 return Err(Error::UnsupportedOperation {
                     method: method.to_owned(),
                     path: path.to_owned(),
-                    reason: "component request-body `$ref`s are not supported".to_owned(),
+                    reason: format!(
+                        "component request-body `$ref` `{reference}` is cross-file, which is not supported"
+                    ),
                 });
             }
+            ReferenceOr::Reference { reference } => self.spec.resolve_request_body(reference)?,
         };
         let media = match body.content.get(JSON_MEDIA_TYPE) {
             Some(media) => media,

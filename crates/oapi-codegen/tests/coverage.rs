@@ -336,13 +336,15 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_header_params",
     "server_default_range_responses",
     "server_cookie_params",
+    "server_component_param_ref",
+    "server_component_body_ref",
+    "server_unsupported_ref_param",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
 /// the slice's deliberate limitations (e.g. an unrecognised HTTP status code).
 const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_unknown_status",
-    "server_unsupported_ref_param",
     "server_unsupported_xfile_response_ref",
     "server_unsupported_object_path_param",
     "server_unsupported_object_query_param",
@@ -350,6 +352,8 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_array_header_param",
     "server_unsupported_object_cookie_param",
     "server_unsupported_bytes_cookie_param",
+    "server_unsupported_xfile_param_ref",
+    "server_unsupported_xfile_body_ref",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -521,6 +525,9 @@ server_generated_tests!(
     server_header_params,
     server_default_range_responses,
     server_cookie_params,
+    server_component_param_ref,
+    server_component_body_ref,
+    server_unsupported_ref_param,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.
