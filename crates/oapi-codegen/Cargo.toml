@@ -14,14 +14,14 @@ workspace = true
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
-http = "1"
+http = "1.4.2"
 indexmap = "2.14.0"
-openapiv3 = "2"
+openapiv3 = "2.2.0"
 prettyplease = "0.2.37"
 proc-macro2 = "1.0.106"
 quote = "1.0.46"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_yaml = "0.9"
+serde_yaml = "0.9.34+deprecated"
 syn = { version = "2.0.118", features = ["full"] }
 
 [dev-dependencies]
@@ -29,10 +29,10 @@ syn = { version = "2.0.118", features = ["full"] }
 # them); axum type-checks the generated server output; openapiv3 backs the
 # coverage-matrix anchor in tests/coverage.rs. None are needed by the generator
 # itself.
-axum = "0.8"
-axum-extra = { version = "0.10", features = ["query", "cookie"] }
-chrono = { version = "0.4", features = ["serde"] }
-openapiv3 = "2"
+axum = "0.8.9"
+axum-extra = { version = "0.12.6", features = ["query", "cookie"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+openapiv3 = "2.2.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
-uuid = { version = "1", features = ["serde"] }
+uuid = { version = "1.23.4", features = ["serde"] }
