@@ -1,13 +1,13 @@
 openapi: 3.0.3
 info:
-  title: unsupported cross-file param ref (referenced file missing)
+  title: unsupported cross-file ref (referenced file exists, component missing)
   version: "1"
 paths:
   /widgets:
     get:
       operationId: getWidgets
       parameters:
-        - $ref: "common.yaml#/components/parameters/PageSize"
+        - $ref: "schemas/shared.yaml#/components/parameters/DoesNotExist"
       responses:
         "200":
           description: ok

@@ -1,7 +1,10 @@
 //! Loading OpenAPI documents and resolving `$ref`s.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use indexmap::IndexMap;
 use openapiv3::OpenAPI;
@@ -20,11 +23,23 @@ const MAX_REF_DEPTH: usize = 32;
 /// Shared empty schema map returned when a document has no components.
 static EMPTY_SCHEMAS: std::sync::OnceLock<IndexMap<String, ReferenceOr<Schema>>> = std::sync::OnceLock::new();
 
+/// A resolved structural object plus the referenced file it came from.
+#[derive(Debug, Clone)]
+pub struct Resolved<T> {
+    /// The concrete, owned object.
+    pub value: T,
+    /// The referenced file the object was ultimately resolved from, written
+    /// exactly as it appears in the `$ref` (the `import-mapping` key), or `None`
+    /// for a same-document / inline object.
+    pub origin: Option<String>,
+}
+
 /// A loaded OpenAPI document plus its source path (for diagnostics).
 #[derive(Debug)]
 pub struct Spec {
     inner: OpenAPI,
     source: PathBuf,
+    docs: RefCell<HashMap<PathBuf, Rc<OpenAPI>>>,
 }
 
 impl Spec {
@@ -45,12 +60,44 @@ impl Spec {
         return Ok(Spec {
             inner,
             source: path.to_path_buf(),
+            docs: RefCell::new(HashMap::new()),
         });
     }
 
     /// Construct a spec directly from an already-parsed document (test helper).
     pub fn from_parts(inner: OpenAPI, source: PathBuf) -> Self {
-        return Spec { inner, source };
+        return Spec {
+            inner,
+            source,
+            docs: RefCell::new(HashMap::new()),
+        };
+    }
+
+    /// Parse (once, cached) the file referenced by a cross-file `$ref`,
+    /// resolving `file` relative to the directory containing the main spec.
+    fn document_for(&self, file: &str) -> Result<Rc<OpenAPI>> {
+        let base = self.source.parent().unwrap_or_else(|| {
+            return Path::new(".");
+        });
+        let path = base.join(file);
+        if let Some(doc) = self.docs.borrow().get(&path) {
+            return Ok(Rc::clone(doc));
+        }
+        let text = std::fs::read_to_string(&path).map_err(|source| {
+            return Error::ReadRefFile {
+                file: file.to_owned(),
+                source,
+            };
+        })?;
+        let parsed: OpenAPI = serde_yaml::from_str(&text).map_err(|source| {
+            return Error::ParseRefFile {
+                file: file.to_owned(),
+                source,
+            };
+        })?;
+        let doc = Rc::new(parsed);
+        self.docs.borrow_mut().insert(path, Rc::clone(&doc));
+        return Ok(doc);
     }
 
     /// The source path the spec was loaded from.
@@ -77,16 +124,15 @@ impl Spec {
         return &self.inner.paths;
     }
 
-    /// Resolve a `#/components/responses/<name>` reference to the concrete
-    /// component response it names, following same-document reference chains.
-    pub fn resolve_response(&self, reference: &str) -> Result<&Response> {
+    /// Resolve a `#/components/responses/<name>` (possibly cross-file)
+    /// reference to an owned component response plus the file it came from,
+    /// following reference chains within and across documents.
+    pub fn resolve_response(&self, reference: &str) -> Result<Resolved<Response>> {
         let mut current = reference.to_owned();
+        let mut origin: Option<String> = None;
         for _ in 0..MAX_REF_DEPTH {
-            if ref_file_part(&current).is_some() {
-                return Err(Error::UnsupportedRef {
-                    reference: current.clone(),
-                    reason: "cross-file component response `$ref`s are not supported".to_owned(),
-                });
+            if let Some(file) = ref_file_part(&current) {
+                origin = Some(file.to_owned());
             }
             let name = ref_component_name(&current, "responses").ok_or_else(|| {
                 return Error::UnsupportedRef {
@@ -94,36 +140,31 @@ impl Spec {
                     reason: "only `#/components/responses/<name>` references are supported".to_owned(),
                 };
             })?;
-            let entry = self
-                .inner
-                .components
-                .as_ref()
-                .and_then(|components| {
-                    return components.responses.get(name);
-                })
-                .ok_or_else(|| return Error::UnresolvedRef(current.clone()))?;
+            let entry = self.component_response(origin.as_deref(), &current, name)?;
             match entry {
                 ReferenceOr::Item(response) => {
-                    return Ok(response);
+                    return Ok(Resolved {
+                        value: response,
+                        origin,
+                    });
                 }
                 ReferenceOr::Reference { reference } => {
-                    current = reference.clone();
+                    current = reference;
                 }
             }
         }
         return Err(Error::UnresolvedRef(reference.to_owned()));
     }
 
-    /// Resolve a `#/components/parameters/<name>` reference to the concrete
-    /// component parameter it names, following same-document reference chains.
-    pub fn resolve_parameter(&self, reference: &str) -> Result<&Parameter> {
+    /// Resolve a `#/components/parameters/<name>` (possibly cross-file)
+    /// reference to an owned component parameter plus the file it came from,
+    /// following reference chains within and across documents.
+    pub fn resolve_parameter(&self, reference: &str) -> Result<Resolved<Parameter>> {
         let mut current = reference.to_owned();
+        let mut origin: Option<String> = None;
         for _ in 0..MAX_REF_DEPTH {
-            if ref_file_part(&current).is_some() {
-                return Err(Error::UnsupportedRef {
-                    reference: current.clone(),
-                    reason: "cross-file component parameter `$ref`s are not supported".to_owned(),
-                });
+            if let Some(file) = ref_file_part(&current) {
+                origin = Some(file.to_owned());
             }
             let name = ref_component_name(&current, "parameters").ok_or_else(|| {
                 return Error::UnsupportedRef {
@@ -131,36 +172,31 @@ impl Spec {
                     reason: "only `#/components/parameters/<name>` references are supported".to_owned(),
                 };
             })?;
-            let entry = self
-                .inner
-                .components
-                .as_ref()
-                .and_then(|components| {
-                    return components.parameters.get(name);
-                })
-                .ok_or_else(|| return Error::UnresolvedRef(current.clone()))?;
+            let entry = self.component_parameter(origin.as_deref(), &current, name)?;
             match entry {
                 ReferenceOr::Item(parameter) => {
-                    return Ok(parameter);
+                    return Ok(Resolved {
+                        value: parameter,
+                        origin,
+                    });
                 }
                 ReferenceOr::Reference { reference } => {
-                    current = reference.clone();
+                    current = reference;
                 }
             }
         }
         return Err(Error::UnresolvedRef(reference.to_owned()));
     }
 
-    /// Resolve a `#/components/requestBodies/<name>` reference to the concrete
-    /// component request body it names, following same-document reference chains.
-    pub fn resolve_request_body(&self, reference: &str) -> Result<&RequestBody> {
+    /// Resolve a `#/components/requestBodies/<name>` (possibly cross-file)
+    /// reference to an owned component request body plus the file it came from,
+    /// following reference chains within and across documents.
+    pub fn resolve_request_body(&self, reference: &str) -> Result<Resolved<RequestBody>> {
         let mut current = reference.to_owned();
+        let mut origin: Option<String> = None;
         for _ in 0..MAX_REF_DEPTH {
-            if ref_file_part(&current).is_some() {
-                return Err(Error::UnsupportedRef {
-                    reference: current.clone(),
-                    reason: "cross-file component request-body `$ref`s are not supported".to_owned(),
-                });
+            if let Some(file) = ref_file_part(&current) {
+                origin = Some(file.to_owned());
             }
             let name = ref_component_name(&current, "requestBodies").ok_or_else(|| {
                 return Error::UnsupportedRef {
@@ -168,20 +204,13 @@ impl Spec {
                     reason: "only `#/components/requestBodies/<name>` references are supported".to_owned(),
                 };
             })?;
-            let entry = self
-                .inner
-                .components
-                .as_ref()
-                .and_then(|components| {
-                    return components.request_bodies.get(name);
-                })
-                .ok_or_else(|| return Error::UnresolvedRef(current.clone()))?;
+            let entry = self.component_request_body(origin.as_deref(), &current, name)?;
             match entry {
                 ReferenceOr::Item(body) => {
-                    return Ok(body);
+                    return Ok(Resolved { value: body, origin });
                 }
                 ReferenceOr::Reference { reference } => {
-                    current = reference.clone();
+                    current = reference;
                 }
             }
         }
@@ -213,6 +242,106 @@ impl Spec {
             }
         }
         return Err(Error::UnresolvedRef(reference.to_owned()));
+    }
+
+    /// Resolve a same-document schema `$ref` to an owned schema, against the
+    /// main document when `origin` is `None` or a referenced document otherwise.
+    ///
+    /// A cross-file (`file#/...`) inner schema ref is intentionally rejected: a
+    /// schema *type* reference is emitted as a named external type through the
+    /// `import-mapping` (see the lowering pass's `schema_ref_type`), never read
+    /// and inlined. This method only resolves refs that stay within one
+    /// document's own `#/components/schemas`.
+    pub fn resolve_schema(&self, origin: Option<&str>, reference: &str) -> Result<Schema> {
+        let mut current = reference.to_owned();
+        for _ in 0..MAX_REF_DEPTH {
+            if ref_file_part(&current).is_some() {
+                return Err(Error::UnsupportedRef {
+                    reference: current.clone(),
+                    reason: "cross-file schema `$ref`s are not supported here".to_owned(),
+                });
+            }
+            let name = ref_component_name(&current, "schemas").ok_or_else(|| {
+                return Error::UnsupportedRef {
+                    reference: current.clone(),
+                    reason: "only `#/components/schemas/<name>` references are supported".to_owned(),
+                };
+            })?;
+            let entry = self.component_schema(origin, &current, name)?;
+            match entry {
+                ReferenceOr::Item(schema) => {
+                    return Ok(schema);
+                }
+                ReferenceOr::Reference { reference } => {
+                    current = reference;
+                }
+            }
+        }
+        return Err(Error::UnresolvedRef(reference.to_owned()));
+    }
+
+    /// Look up a named component in the main document (`origin` is `None`) or a
+    /// referenced document, returning an owned copy. `select` extracts the
+    /// specific component map's entry from a document; `reference` is the full
+    /// `$ref` fragment currently being resolved, reported verbatim in the
+    /// unresolved-reference error so a miss points at the exact ref (kind,
+    /// component, and file). The origin dispatch and error are shared across
+    /// component kinds.
+    fn component_lookup<T>(
+        &self,
+        origin: Option<&str>,
+        reference: &str,
+        select: impl Fn(&OpenAPI) -> Option<ReferenceOr<T>>,
+    ) -> Result<ReferenceOr<T>> {
+        let entry = match origin {
+            None => select(&self.inner),
+            Some(file) => {
+                let doc = self.document_for(file)?;
+                select(doc.as_ref())
+            }
+        };
+        return entry.ok_or_else(|| return Error::UnresolvedRef(reference.to_owned()));
+    }
+
+    /// Look up a component response (see [`Self::component_lookup`]).
+    fn component_response(&self, origin: Option<&str>, reference: &str, name: &str) -> Result<ReferenceOr<Response>> {
+        return self.component_lookup(origin, reference, |doc| {
+            return doc.components.as_ref().and_then(|components| {
+                return components.responses.get(name).cloned();
+            });
+        });
+    }
+
+    /// Look up a component parameter (see [`Self::component_lookup`]).
+    fn component_parameter(&self, origin: Option<&str>, reference: &str, name: &str) -> Result<ReferenceOr<Parameter>> {
+        return self.component_lookup(origin, reference, |doc| {
+            return doc.components.as_ref().and_then(|components| {
+                return components.parameters.get(name).cloned();
+            });
+        });
+    }
+
+    /// Look up a component request body (see [`Self::component_lookup`]).
+    fn component_request_body(
+        &self,
+        origin: Option<&str>,
+        reference: &str,
+        name: &str,
+    ) -> Result<ReferenceOr<RequestBody>> {
+        return self.component_lookup(origin, reference, |doc| {
+            return doc.components.as_ref().and_then(|components| {
+                return components.request_bodies.get(name).cloned();
+            });
+        });
+    }
+
+    /// Look up a component schema (see [`Self::component_lookup`]).
+    fn component_schema(&self, origin: Option<&str>, reference: &str, name: &str) -> Result<ReferenceOr<Schema>> {
+        return self.component_lookup(origin, reference, |doc| {
+            return doc.components.as_ref().and_then(|components| {
+                return components.schemas.get(name).cloned();
+            });
+        });
     }
 }
 
@@ -263,6 +392,64 @@ pub fn ref_file_part(reference: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new(test_name: &str) -> Self {
+            let unique = format!(
+                "oapi-codegen-loader-{test_name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock should be after Unix epoch")
+                    .as_nanos(),
+            );
+            let path = std::env::temp_dir().join(unique);
+            std::fs::create_dir_all(&path).expect("create test directory");
+            return Self { path };
+        }
+
+        fn write(&self, file: &str, contents: &str) -> PathBuf {
+            let path = self.path.join(file);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create parent directory");
+            }
+            std::fs::write(&path, contents).expect("write test file");
+            return path;
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn parse_openapi(yaml: &str) -> OpenAPI {
+        return serde_yaml::from_str(yaml).expect("parse OpenAPI document");
+    }
+
+    fn assert_query_parameter_name(parameter: &Parameter, expected: &str) {
+        match parameter {
+            Parameter::Query { parameter_data, .. } => {
+                assert_eq!(parameter_data.name, expected);
+            }
+            _ => panic!("expected a query parameter"),
+        }
+    }
+
+    fn minimal_doc() -> &'static str {
+        return "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\n";
+    }
+
+    fn shared_parameter_doc(name: &str) -> String {
+        return format!(
+            "openapi: 3.0.3\ninfo:\n  title: shared\n  version: '1'\npaths: {{}}\ncomponents:\n  parameters:\n    PageSize:\n      name: {name}\n      in: query\n      schema:\n        type: integer\n",
+        );
+    }
+
     #[test]
     fn ref_target_name_is_same_document_schemas_only() {
         assert_eq!(ref_target_name("#/components/schemas/Foo"), Some("Foo"));
@@ -305,26 +492,135 @@ mod tests {
     #[test]
     fn resolves_same_document_component_parameter() {
         let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    PageSize:\n      name: pageSize\n      in: query\n      schema:\n        type: integer\n";
-        let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse");
+        let doc = parse_openapi(yaml);
         let spec = Spec::from_parts(doc, std::path::PathBuf::from("inline.yaml"));
         let param = spec
             .resolve_parameter("#/components/parameters/PageSize")
             .expect("resolve");
-        // The resolved parameter is the `pageSize` query parameter.
-        match param {
-            openapiv3::Parameter::Query { parameter_data, .. } => {
-                assert_eq!(parameter_data.name, "pageSize");
+        assert!(param.origin.is_none());
+        assert_query_parameter_name(&param.value, "pageSize");
+    }
+
+    #[test]
+    fn errors_on_cross_file_ref_to_missing_file() {
+        let source = std::env::temp_dir().join(format!(
+            "oapi-codegen-loader-missing-{}-{}.yaml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after Unix epoch")
+                .as_nanos(),
+        ));
+        let spec = Spec::from_parts(parse_openapi(minimal_doc()), source);
+        let result = spec.resolve_parameter("common.yaml#/components/parameters/PageSize");
+        assert!(matches!(result, Err(Error::ReadRefFile { .. })));
+    }
+
+    #[test]
+    fn unresolved_component_error_preserves_the_full_reference() {
+        // A same-document miss reports the full `$ref` fragment (kind + name),
+        // not just the bare component name.
+        let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  parameters: {}\n";
+        let spec = Spec::from_parts(parse_openapi(yaml), std::path::PathBuf::from("inline.yaml"));
+        let result = spec.resolve_parameter("#/components/parameters/Missing");
+        match result {
+            Err(Error::UnresolvedRef(reference)) => {
+                assert_eq!(reference, "#/components/parameters/Missing");
             }
-            _ => panic!("expected a query parameter"),
+            other => panic!("expected UnresolvedRef, got {other:?}"),
+        }
+
+        // A cross-file miss reports the file plus the full fragment.
+        let dir = TestDir::new("unresolved-cross-file");
+        let main = dir.write("main.yaml", minimal_doc());
+        dir.write("shared.yaml", minimal_doc());
+        let spec = Spec::load(&main).expect("load main spec");
+        let result = spec.resolve_parameter("shared.yaml#/components/parameters/Missing");
+        match result {
+            Err(Error::UnresolvedRef(reference)) => {
+                assert_eq!(reference, "shared.yaml#/components/parameters/Missing");
+            }
+            other => panic!("expected UnresolvedRef, got {other:?}"),
         }
     }
 
     #[test]
-    fn rejects_cross_file_component_parameter() {
-        let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\n";
-        let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse");
-        let spec = Spec::from_parts(doc, std::path::PathBuf::from("inline.yaml"));
-        let result = spec.resolve_parameter("common.yaml#/components/parameters/PageSize");
-        assert!(result.is_err(), "cross-file parameter ref must be rejected");
+    fn document_for_reads_sibling_and_caches() {
+        let dir = TestDir::new("document-for-caches");
+        let main = dir.write("main.yaml", minimal_doc());
+        dir.write("shared.yaml", &shared_parameter_doc("pageSize"));
+
+        let spec = Spec::load(&main).expect("load main spec");
+        let param = spec
+            .resolve_parameter("shared.yaml#/components/parameters/PageSize")
+            .expect("resolve cross-file parameter");
+        assert_eq!(param.origin.as_deref(), Some("shared.yaml"));
+        assert_query_parameter_name(&param.value, "pageSize");
+        assert_eq!(spec.docs.borrow().len(), 1);
+
+        let second = spec
+            .resolve_parameter("shared.yaml#/components/parameters/PageSize")
+            .expect("resolve cached cross-file parameter");
+        assert_eq!(second.origin.as_deref(), Some("shared.yaml"));
+        assert_query_parameter_name(&second.value, "pageSize");
+        assert_eq!(spec.docs.borrow().len(), 1);
+    }
+
+    #[test]
+    fn cross_file_chain_across_two_files_resolves() {
+        let dir = TestDir::new("cross-file-chain");
+        let main = dir.write("main.yaml", minimal_doc());
+        dir.write(
+            "a.yaml",
+            "openapi: 3.0.3\ninfo:\n  title: a\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    X:\n      $ref: \"b.yaml#/components/parameters/Y\"\n",
+        );
+        dir.write(
+            "b.yaml",
+            "openapi: 3.0.3\ninfo:\n  title: b\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    Y:\n      name: cursor\n      in: query\n      schema:\n        type: string\n",
+        );
+
+        let spec = Spec::load(&main).expect("load main spec");
+        let param = spec
+            .resolve_parameter("a.yaml#/components/parameters/X")
+            .expect("resolve cross-file chain");
+        assert_eq!(param.origin.as_deref(), Some("b.yaml"));
+        assert_query_parameter_name(&param.value, "cursor");
+    }
+
+    #[test]
+    fn cross_file_cycle_terminates() {
+        let dir = TestDir::new("cross-file-cycle");
+        let main = dir.write("main.yaml", minimal_doc());
+        dir.write(
+            "a.yaml",
+            "openapi: 3.0.3\ninfo:\n  title: a\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    X:\n      $ref: \"b.yaml#/components/parameters/Y\"\n",
+        );
+        dir.write(
+            "b.yaml",
+            "openapi: 3.0.3\ninfo:\n  title: b\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    Y:\n      $ref: \"a.yaml#/components/parameters/X\"\n",
+        );
+
+        let spec = Spec::load(&main).expect("load main spec");
+        let result = spec.resolve_parameter("a.yaml#/components/parameters/X");
+        assert!(matches!(result, Err(Error::UnresolvedRef(_))));
+    }
+
+    #[test]
+    fn resolve_schema_against_origin() {
+        let dir = TestDir::new("resolve-schema-origin");
+        let main = dir.write("main.yaml", minimal_doc());
+        dir.write(
+            "shared.yaml",
+            "openapi: 3.0.3\ninfo:\n  title: shared\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    PageInfo:\n      type: integer\n      format: int32\n",
+        );
+
+        let spec = Spec::load(&main).expect("load main spec");
+        let schema = spec
+            .resolve_schema(Some("shared.yaml"), "#/components/schemas/PageInfo")
+            .expect("resolve schema from origin");
+        assert!(matches!(
+            schema.schema_kind,
+            openapiv3::SchemaKind::Type(openapiv3::Type::Integer(_))
+        ));
     }
 }

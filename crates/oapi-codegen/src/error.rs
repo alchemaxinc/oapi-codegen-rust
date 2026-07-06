@@ -19,6 +19,22 @@ pub enum Error {
         source: serde_yaml::Error,
     },
 
+    /// A referenced external file could not be read from disk.
+    ReadRefFile {
+        /// The referenced file, as written in the `$ref`.
+        file: String,
+        /// Underlying IO error.
+        source: std::io::Error,
+    },
+
+    /// A referenced external file could not be parsed as OpenAPI YAML/JSON.
+    ParseRefFile {
+        /// The referenced file, as written in the `$ref`.
+        file: String,
+        /// Underlying parse error.
+        source: serde_yaml::Error,
+    },
+
     /// The config file could not be read from disk.
     ReadConfig {
         /// Path that could not be read.
@@ -91,6 +107,12 @@ impl std::fmt::Display for Error {
             Error::ParseSpec { path, source } => {
                 return write!(f, "failed to parse spec file `{path}`: {source}");
             }
+            Error::ReadRefFile { file, source } => {
+                return write!(f, "failed to read referenced file `{file}`: {source}");
+            }
+            Error::ParseRefFile { file, source } => {
+                return write!(f, "failed to parse referenced file `{file}`: {source}");
+            }
             Error::ReadConfig { path, source } => {
                 return write!(f, "failed to read config file `{path}`: {source}");
             }
@@ -127,6 +149,8 @@ impl std::error::Error for Error {
         match self {
             Error::ReadSpec { source, .. } => return Some(source),
             Error::ParseSpec { source, .. } => return Some(source),
+            Error::ReadRefFile { source, .. } => return Some(source),
+            Error::ParseRefFile { source, .. } => return Some(source),
             Error::ReadConfig { source, .. } => return Some(source),
             Error::ParseConfig { source, .. } => return Some(source),
             Error::WriteOutput { source, .. } => return Some(source),

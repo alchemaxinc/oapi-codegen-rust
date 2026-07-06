@@ -137,14 +137,20 @@ faithfully rather than emit subtly wrong code.
   `default`/range variants instead carry an `axum::http::StatusCode` the handler
   supplies (e.g. `GetBookResponse::Default(StatusCode::BAD_REQUEST, error)`),
   mirroring how oapi-codegen's strict server lets the handler set the code.
-- **Cross-file `$ref`s** in bodies and responses are routed through
-  `import-mapping` to an external module type (e.g. `crate::apimodel::Widget`).
+- **Cross-file `$ref` parameters, request bodies, and responses** — the
+  referenced structural object is read from the sibling file, resolved relative
+  to the main spec's directory (chains across files are followed). A cross-file
+  parameter's inner schema must still resolve to a scalar; a body or response
+  inner schema `$ref` routes through `import-mapping` to an external module type
+  (e.g. `crate::apimodel::Widget`) and is never inlined.
 
 **Rejected** (an error, never mis-generated)
 
 - A response keyed by an unrecognised HTTP status code.
-- A cross-file `$ref` parameter or request-body wrapper, or a cross-file
-  component-_response_ `$ref`.
+- A path-item `$ref` (referencing a whole path from another file).
+- A cross-file schema-type `$ref` in a body or response whose referenced file
+  has no `import-mapping` entry, or a `$ref` (same- or cross-file) that points at
+  a component the referenced document does not define.
 - An object or other non-scalar path, query, or header parameter.
 - An array query parameter using a non-default encoding (`explode: false`,
   `spaceDelimited`, …), an array header parameter, or a `byte`/`binary` header

@@ -24,13 +24,18 @@
 //!   against the document.
 //! - **Responses** — explicit status codes, the `default` catch-all, and ranges
 //!   (`5XX`); component `$ref` responses are resolved against the document.
-//! - **Cross-file `$ref`s** in bodies and responses are routed through the
-//!   `import-mapping`.
+//! - **Cross-file `$ref` parameters, request bodies, and responses** — the
+//!   referenced structural object is read from the sibling file (resolved
+//!   relative to the main spec's directory), following chains across files.
+//!   Parameter inner schemas must still resolve to scalars; body/response inner
+//!   schema `$ref`s route through the `import-mapping` to an external type
+//!   (they are never inlined).
 //!
 //! Rejected: object or other non-scalar parameters, non-default query-array
 //! encodings, `content` parameters, array or `byte`/`binary` header parameters,
-//! `byte`/`binary` cookie parameters, cross-file `$ref` parameters and
-//! request-body wrappers, and an unrecognised response status code.
+//! `byte`/`binary` cookie parameters, path-item `$ref`s, cross-file schema-type
+//! `$ref`s (in a body or response) that lack an `import-mapping` entry for the
+//! referenced file, and an unrecognised response status code.
 
 use std::collections::BTreeMap;
 
@@ -41,6 +46,7 @@ use openapiv3::ParameterData;
 use openapiv3::ParameterSchemaOrContent;
 use openapiv3::QueryStyle;
 use openapiv3::ReferenceOr;
+use openapiv3::RequestBody;
 use openapiv3::Response as OasResponse;
 use openapiv3::Schema;
 use openapiv3::SchemaKind;
@@ -61,6 +67,7 @@ use crate::ir::ResponseStatus;
 use crate::ir::RustType;
 use crate::ir::Service;
 use crate::ir::Struct;
+use crate::loader::Resolved;
 use crate::loader::Spec;
 use crate::loader::ref_component_name;
 use crate::loader::ref_file_part;
@@ -126,7 +133,7 @@ impl Lowerer<'_> {
         let name = operation_name(path, method, operation);
         let response_enum = operations::response_enum_name(&name);
 
-        let params = self.resolve_parameters(path, method, operation, shared_params)?;
+        let params = self.resolve_parameters(operation, shared_params)?;
         let path_params = self.lower_path_params(path, method, &params)?;
         let query = self.lower_query_params(path, method, &params, &name)?;
         let headers = self.lower_header_params(path, method, &params, &name)?;
@@ -150,43 +157,37 @@ impl Lowerer<'_> {
     }
 
     /// Resolve an operation's parameters (its own, then the path-item's shared
-    /// parameters) into concrete `Parameter`s. `Item` entries pass through;
-    /// same-document component `$ref`s resolve via the loader; a cross-file
-    /// parameter `$ref` is rejected (deferred to cross-file parameter support).
+    /// parameters) into concrete `Parameter`s paired with the referenced file
+    /// each was resolved from (`None` for inline or same-document entries), so
+    /// inner schema `$ref`s can later be interpreted against the right document.
     /// Operation-level entries precede shared ones, preserving override order.
     fn resolve_parameters(
         &self,
-        path: &str,
-        method: &str,
         operation: &OasOperation,
         shared_params: &[ReferenceOr<Parameter>],
-    ) -> Result<Vec<Parameter>> {
+    ) -> Result<Vec<Resolved<Parameter>>> {
         let mut resolved = Vec::new();
         for parameter in operation.parameters.iter().chain(shared_params) {
-            let concrete = match parameter {
-                ReferenceOr::Item(param) => param.clone(),
-                ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
-                    return Err(Error::UnsupportedOperation {
-                        method: method.to_owned(),
-                        path: path.to_owned(),
-                        reason: format!("parameter `$ref` `{reference}` is cross-file, which is not supported"),
-                    });
-                }
-                ReferenceOr::Reference { reference } => self.spec.resolve_parameter(reference)?.clone(),
+            let entry = match parameter {
+                ReferenceOr::Item(param) => Resolved {
+                    value: param.clone(),
+                    origin: None,
+                },
+                ReferenceOr::Reference { reference } => self.spec.resolve_parameter(reference)?,
             };
-            resolved.push(concrete);
+            resolved.push(entry);
         }
         return Ok(resolved);
     }
 
     /// Resolve the typed path parameters in their path-template order, which is
     /// the order axum extracts a `Path<(..)>` tuple in.
-    fn lower_path_params(&self, path: &str, method: &str, params: &[Parameter]) -> Result<Vec<Param>> {
+    fn lower_path_params(&self, path: &str, method: &str, params: &[Resolved<Parameter>]) -> Result<Vec<Param>> {
         let mut path_params = Vec::new();
         for name in path_param_names(path) {
             let declared = path_param_schema(&name, params);
             let ty = match declared {
-                Some(format) => self.param_type(path, method, &name, format)?,
+                Some((format, origin)) => self.param_type(path, method, &name, origin, format)?,
                 None => RustType::String,
             };
             path_params.push(Param {
@@ -206,7 +207,7 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
-        params: &[Parameter],
+        params: &[Resolved<Parameter>],
         operation_name: &RustIdent,
     ) -> Result<Option<Struct>> {
         let mut fields = Vec::new();
@@ -214,7 +215,7 @@ impl Lowerer<'_> {
         for parameter in params {
             let Parameter::Query {
                 parameter_data, style, ..
-            } = parameter
+            } = &parameter.value
             else {
                 continue;
             };
@@ -222,7 +223,7 @@ impl Lowerer<'_> {
                 continue;
             }
             seen.push(&parameter_data.name);
-            fields.push(self.query_field(path, method, parameter_data, style)?);
+            fields.push(self.query_field(path, method, parameter.origin.as_deref(), parameter_data, style)?);
         }
         if fields.is_empty() {
             return Ok(None);
@@ -238,8 +239,15 @@ impl Lowerer<'_> {
 
     /// Build a query struct field from a single query parameter's metadata,
     /// wrapping optional parameters in `Option<..>`.
-    fn query_field(&self, path: &str, method: &str, data: &ParameterData, style: &QueryStyle) -> Result<Field> {
-        let mut ty = self.query_param_type(path, method, &data.name, &data.format, style, data.explode)?;
+    fn query_field(
+        &self,
+        path: &str,
+        method: &str,
+        origin: Option<&str>,
+        data: &ParameterData,
+        style: &QueryStyle,
+    ) -> Result<Field> {
+        let mut ty = self.query_param_type(path, method, origin, data, style)?;
         if !data.required {
             ty = ty.optional();
         }
@@ -264,12 +272,13 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
-        name: &str,
-        format: &ParameterSchemaOrContent,
+        origin: Option<&str>,
+        data: &ParameterData,
         style: &QueryStyle,
-        explode: Option<bool>,
     ) -> Result<RustType> {
-        let schema = match format {
+        let name = data.name.as_str();
+        let explode = data.explode;
+        let schema = match &data.format {
             ParameterSchemaOrContent::Schema(schema) => schema,
             ParameterSchemaOrContent::Content(_) => {
                 return Err(Error::UnsupportedOperation {
@@ -279,7 +288,7 @@ impl Lowerer<'_> {
                 });
             }
         };
-        let schema = self.resolve_param_schema(path, method, name, schema)?;
+        let schema = self.resolve_param_schema(path, method, origin, name, schema)?;
         if let SchemaKind::Type(Type::Array(array)) = &schema.schema_kind {
             if !matches!(style, QueryStyle::Form) || explode == Some(false) {
                 return Err(Error::UnsupportedOperation {
@@ -290,8 +299,8 @@ impl Lowerer<'_> {
                     ),
                 });
             }
-            let item = match &array.items {
-                Some(ReferenceOr::Item(item)) => item.as_ref(),
+            let element = match &array.items {
+                Some(ReferenceOr::Item(item)) => scalar_type(&item.schema_kind),
                 Some(ReferenceOr::Reference { reference }) if ref_file_part(reference).is_some() => {
                     return Err(Error::UnsupportedOperation {
                         method: method.to_owned(),
@@ -301,7 +310,10 @@ impl Lowerer<'_> {
                         ),
                     });
                 }
-                Some(ReferenceOr::Reference { reference }) => self.spec.resolve(reference)?,
+                Some(ReferenceOr::Reference { reference }) => {
+                    let item = self.spec.resolve_schema(origin, reference)?;
+                    scalar_type(&item.schema_kind)
+                }
                 None => {
                     return Err(Error::UnsupportedOperation {
                         method: method.to_owned(),
@@ -310,7 +322,7 @@ impl Lowerer<'_> {
                     });
                 }
             };
-            let element = scalar_type(&item.schema_kind).ok_or_else(|| {
+            let element = element.ok_or_else(|| {
                 return Error::UnsupportedOperation {
                     method: method.to_owned(),
                     path: path.to_owned(),
@@ -329,17 +341,20 @@ impl Lowerer<'_> {
         return Ok(ty);
     }
 
-    /// Resolve a parameter schema reference to a concrete schema, rejecting
-    /// cross-file `$ref`s: query parameters only route same-document references.
-    fn resolve_param_schema<'s>(
-        &'s self,
+    /// Resolve a parameter schema reference to an owned concrete schema. A
+    /// same-document reference is resolved against the main document, or against
+    /// the referenced document the parameter came from (`origin`); a cross-file
+    /// inner `$ref` is out of scope and rejected.
+    fn resolve_param_schema(
+        &self,
         path: &str,
         method: &str,
+        origin: Option<&str>,
         name: &str,
-        schema: &'s ReferenceOr<Schema>,
-    ) -> Result<&'s Schema> {
+        schema: &ReferenceOr<Schema>,
+    ) -> Result<Schema> {
         match schema {
-            ReferenceOr::Item(schema) => return Ok(schema),
+            ReferenceOr::Item(schema) => return Ok(schema.clone()),
             ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
                 return Err(Error::UnsupportedOperation {
                     method: method.to_owned(),
@@ -347,7 +362,7 @@ impl Lowerer<'_> {
                     reason: format!("query parameter `{name}` uses a cross-file `$ref`, which is not supported"),
                 });
             }
-            ReferenceOr::Reference { reference } => return self.spec.resolve(reference),
+            ReferenceOr::Reference { reference } => return self.spec.resolve_schema(origin, reference),
         }
     }
 
@@ -360,13 +375,13 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
-        params: &[Parameter],
+        params: &[Resolved<Parameter>],
         operation_name: &RustIdent,
     ) -> Result<Option<Headers>> {
         let mut header_params = Vec::new();
         let mut seen: Vec<&str> = Vec::new();
         for parameter in params {
-            let Parameter::Header { parameter_data, .. } = parameter else {
+            let Parameter::Header { parameter_data, .. } = &parameter.value else {
                 continue;
             };
             let name = parameter_data.name.as_str();
@@ -380,7 +395,7 @@ impl Lowerer<'_> {
                 continue;
             }
             seen.push(name);
-            header_params.push(self.header_param(path, method, parameter_data)?);
+            header_params.push(self.header_param(path, method, parameter.origin.as_deref(), parameter_data)?);
         }
         if header_params.is_empty() {
             return Ok(None);
@@ -394,8 +409,14 @@ impl Lowerer<'_> {
 
     /// Build a single header field, resolving its scalar type and recording the
     /// exact header name for the generated case-insensitive lookup.
-    fn header_param(&self, path: &str, method: &str, data: &ParameterData) -> Result<HeaderParam> {
-        let ty = self.header_param_type(path, method, &data.name, &data.format)?;
+    fn header_param(
+        &self,
+        path: &str,
+        method: &str,
+        origin: Option<&str>,
+        data: &ParameterData,
+    ) -> Result<HeaderParam> {
+        let ty = self.header_param_type(path, method, origin, &data.name, &data.format)?;
         return Ok(HeaderParam {
             name: to_ident(&data.name, Case::Snake),
             header_name: data.name.clone(),
@@ -412,6 +433,7 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
+        origin: Option<&str>,
         name: &str,
         format: &ParameterSchemaOrContent,
     ) -> Result<RustType> {
@@ -426,7 +448,7 @@ impl Lowerer<'_> {
             }
         };
         let schema = match schema {
-            ReferenceOr::Item(schema) => schema,
+            ReferenceOr::Item(schema) => schema.clone(),
             ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
                 return Err(Error::UnsupportedOperation {
                     method: method.to_owned(),
@@ -434,7 +456,7 @@ impl Lowerer<'_> {
                     reason: format!("header parameter `{name}` uses a cross-file `$ref`, which is not supported"),
                 });
             }
-            ReferenceOr::Reference { reference } => self.spec.resolve(reference)?,
+            ReferenceOr::Reference { reference } => self.spec.resolve_schema(origin, reference)?,
         };
         let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
             return Error::UnsupportedOperation {
@@ -461,13 +483,13 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
-        params: &[Parameter],
+        params: &[Resolved<Parameter>],
         operation_name: &RustIdent,
     ) -> Result<Option<Cookies>> {
         let mut cookie_params = Vec::new();
         let mut seen: Vec<&str> = Vec::new();
         for parameter in params {
-            let Parameter::Cookie { parameter_data, .. } = parameter else {
+            let Parameter::Cookie { parameter_data, .. } = &parameter.value else {
                 continue;
             };
             let name = parameter_data.name.as_str();
@@ -475,7 +497,13 @@ impl Lowerer<'_> {
                 continue;
             }
             seen.push(name);
-            let ty = self.cookie_param_type(path, method, &parameter_data.name, &parameter_data.format)?;
+            let ty = self.cookie_param_type(
+                path,
+                method,
+                parameter.origin.as_deref(),
+                &parameter_data.name,
+                &parameter_data.format,
+            )?;
             cookie_params.push(CookieParam {
                 name: to_ident(&parameter_data.name, Case::Snake),
                 cookie_name: parameter_data.name.clone(),
@@ -501,6 +529,7 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
+        origin: Option<&str>,
         name: &str,
         format: &ParameterSchemaOrContent,
     ) -> Result<RustType> {
@@ -515,7 +544,7 @@ impl Lowerer<'_> {
             }
         };
         let schema = match schema {
-            ReferenceOr::Item(schema) => schema,
+            ReferenceOr::Item(schema) => schema.clone(),
             ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
                 return Err(Error::UnsupportedOperation {
                     method: method.to_owned(),
@@ -523,7 +552,7 @@ impl Lowerer<'_> {
                     reason: format!("cookie parameter `{name}` uses a cross-file `$ref`, which is not supported"),
                 });
             }
-            ReferenceOr::Reference { reference } => self.spec.resolve(reference)?,
+            ReferenceOr::Reference { reference } => self.spec.resolve_schema(origin, reference)?,
         };
         let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
             return Error::UnsupportedOperation {
@@ -543,14 +572,18 @@ impl Lowerer<'_> {
     }
 }
 
-/// Locate the `path` parameter named `name` within a concrete parameter list.
-fn path_param_schema<'a>(name: &str, params: &'a [Parameter]) -> Option<&'a ParameterSchemaOrContent> {
+/// Locate the `path` parameter named `name` within a resolved parameter list,
+/// returning its schema/content and the referenced file it was resolved from.
+fn path_param_schema<'a>(
+    name: &str,
+    params: &'a [Resolved<Parameter>],
+) -> Option<(&'a ParameterSchemaOrContent, Option<&'a str>)> {
     for parameter in params {
-        let Parameter::Path { parameter_data, .. } = parameter else {
+        let Parameter::Path { parameter_data, .. } = &parameter.value else {
             continue;
         };
         if parameter_data.name == name {
-            return Some(&parameter_data.format);
+            return Some((&parameter_data.format, parameter.origin.as_deref()));
         }
     }
     return None;
@@ -570,8 +603,21 @@ fn scalar_type(kind: &SchemaKind) -> Option<RustType> {
 }
 
 impl Lowerer<'_> {
-    /// Map a path parameter's schema to a scalar Rust type.
-    fn param_type(&self, path: &str, method: &str, name: &str, format: &ParameterSchemaOrContent) -> Result<RustType> {
+    /// Map a path parameter's schema to a scalar Rust type. Path parameters must
+    /// be scalars (they are parsed from URL segments into an axum `Path<..>`
+    /// tuple), so a `$ref` is resolved to its concrete schema and the scalar-only
+    /// rule is enforced — the same as header and cookie parameters. A
+    /// same-document `$ref` is resolved against the main document, or against the
+    /// referenced document the parameter came from (`origin`); a cross-file inner
+    /// `$ref` is rejected.
+    fn param_type(
+        &self,
+        path: &str,
+        method: &str,
+        name: &str,
+        origin: Option<&str>,
+        format: &ParameterSchemaOrContent,
+    ) -> Result<RustType> {
         let schema = match format {
             ParameterSchemaOrContent::Schema(schema) => schema,
             ParameterSchemaOrContent::Content(_) => {
@@ -583,13 +629,15 @@ impl Lowerer<'_> {
             }
         };
         let schema = match schema {
-            // Cross-file parameter refs route through import-mapping; same-document
-            // refs are resolved here so the scalar-only rule below still applies.
+            ReferenceOr::Item(schema) => schema.clone(),
             ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
-                return self.named_from_ref(path, method, reference);
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("path parameter `{name}` uses a cross-file `$ref`, which is not supported"),
+                });
             }
-            ReferenceOr::Reference { reference } => self.spec.resolve(reference)?,
-            ReferenceOr::Item(schema) => schema,
+            ReferenceOr::Reference { reference } => self.spec.resolve_schema(origin, reference)?,
         };
         let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
             return Error::UnsupportedOperation {
@@ -601,22 +649,20 @@ impl Lowerer<'_> {
         return Ok(ty);
     }
 
-    /// Lower an operation's JSON request body, if it declares one.
+    /// Lower an operation's JSON request body, if it declares one. A cross-file
+    /// wrapper `$ref` is resolved against the referenced file; its inner schema
+    /// `$ref`s are then interpreted against that file (`origin`).
     fn lower_request_body(&self, path: &str, method: &str, operation: &OasOperation) -> Result<Option<RustType>> {
         let body = match &operation.request_body {
             Some(body) => body,
             None => return Ok(None),
         };
-        let body = match body {
-            ReferenceOr::Item(body) => body,
-            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
-                return Err(Error::UnsupportedOperation {
-                    method: method.to_owned(),
-                    path: path.to_owned(),
-                    reason: format!("request-body `$ref` `{reference}` is cross-file, which is not supported"),
-                });
+        let (body, origin): (RequestBody, Option<String>) = match body {
+            ReferenceOr::Item(body) => (body.clone(), None),
+            ReferenceOr::Reference { reference } => {
+                let resolved = self.spec.resolve_request_body(reference)?;
+                (resolved.value, resolved.origin)
             }
-            ReferenceOr::Reference { reference } => self.spec.resolve_request_body(reference)?,
         };
         let media = match body.content.get(JSON_MEDIA_TYPE) {
             Some(media) => media,
@@ -626,7 +672,7 @@ impl Lowerer<'_> {
             Some(schema) => schema,
             None => return Ok(None),
         };
-        let ty = self.body_type(path, method, schema)?;
+        let ty = self.body_type(path, method, origin.as_deref(), schema)?;
         return Ok(Some(ty));
     }
 
@@ -665,23 +711,23 @@ impl Lowerer<'_> {
                 }
             };
             let response = self.resolve_response_ref(response)?;
-            let body = self.response_body(path, method, response)?;
+            let body = self.response_body(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
                 variant,
                 status,
                 body,
-                doc: trimmed(&response.description),
+                doc: trimmed(&response.value.description),
             });
         }
 
         if let Some(default) = &operation.responses.default {
             let response = self.resolve_response_ref(default)?;
-            let body = self.response_body(path, method, response)?;
+            let body = self.response_body(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
                 variant: to_ident("default", Case::Pascal),
                 status: ResponseStatus::Default,
                 body,
-                doc: trimmed(&response.description),
+                doc: trimmed(&response.value.description),
             });
         }
 
@@ -695,38 +741,58 @@ impl Lowerer<'_> {
         return Ok(cases);
     }
 
-    /// Resolve a possibly-referenced response to a concrete [`OasResponse`].
-    fn resolve_response_ref<'r>(&'r self, response: &'r ReferenceOr<OasResponse>) -> Result<&'r OasResponse> {
+    /// Resolve a possibly-referenced response to an owned [`OasResponse`] plus
+    /// the referenced file it came from (`None` for inline/same-document).
+    fn resolve_response_ref(&self, response: &ReferenceOr<OasResponse>) -> Result<Resolved<OasResponse>> {
         match response {
-            ReferenceOr::Item(response) => return Ok(response),
+            ReferenceOr::Item(response) => {
+                return Ok(Resolved {
+                    value: response.clone(),
+                    origin: None,
+                });
+            }
             ReferenceOr::Reference { reference } => return self.spec.resolve_response(reference),
         }
     }
 
     /// Extract a response's JSON body type, if it declares `application/json`
-    /// content.
-    fn response_body(&self, path: &str, method: &str, response: &OasResponse) -> Result<Option<RustType>> {
+    /// content. Inner schema `$ref`s are interpreted against the response's
+    /// origin file when it was resolved from a referenced document.
+    fn response_body(
+        &self,
+        path: &str,
+        method: &str,
+        origin: Option<&str>,
+        response: &OasResponse,
+    ) -> Result<Option<RustType>> {
         let schema = response.content.get(JSON_MEDIA_TYPE).and_then(|media| {
             return media.schema.as_ref();
         });
         match schema {
-            Some(schema) => return Ok(Some(self.body_type(path, method, schema)?)),
+            Some(schema) => return Ok(Some(self.body_type(path, method, origin, schema)?)),
             None => return Ok(None),
         }
     }
 
     /// Map a request/response body schema to a Rust type. Composite inline
     /// schemas must be referenced by name (`$ref`) so the models pass owns
-    /// their emission.
-    fn body_type(&self, path: &str, method: &str, schema: &ReferenceOr<Schema>) -> Result<RustType> {
+    /// their emission. `origin` is the referenced file the enclosing wrapper was
+    /// resolved from, so a same-document inner `$ref` lowers to the right module.
+    fn body_type(
+        &self,
+        path: &str,
+        method: &str,
+        origin: Option<&str>,
+        schema: &ReferenceOr<Schema>,
+    ) -> Result<RustType> {
         match schema {
-            ReferenceOr::Reference { reference } => return self.named_from_ref(path, method, reference),
-            ReferenceOr::Item(schema) => return self.inline_body_type(path, method, schema),
+            ReferenceOr::Reference { reference } => return self.schema_ref_type(path, method, origin, reference),
+            ReferenceOr::Item(schema) => return self.inline_body_type(path, method, origin, schema),
         }
     }
 
     /// Map an inline (non-`$ref`) body schema to a Rust type.
-    fn inline_body_type(&self, path: &str, method: &str, schema: &Schema) -> Result<RustType> {
+    fn inline_body_type(&self, path: &str, method: &str, origin: Option<&str>, schema: &Schema) -> Result<RustType> {
         let ty = match &schema.schema_kind {
             SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
             SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
@@ -734,8 +800,10 @@ impl Lowerer<'_> {
             SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
             SchemaKind::Type(Type::Array(at)) => {
                 let element = match &at.items {
-                    Some(ReferenceOr::Reference { reference }) => self.named_from_ref(path, method, reference)?,
-                    Some(ReferenceOr::Item(item)) => self.inline_body_type(path, method, item)?,
+                    Some(ReferenceOr::Reference { reference }) => {
+                        self.schema_ref_type(path, method, origin, reference)?
+                    }
+                    Some(ReferenceOr::Item(item)) => self.inline_body_type(path, method, origin, item)?,
                     None => RustType::Value,
                 };
                 RustType::Vec(Box::new(element))
@@ -752,10 +820,12 @@ impl Lowerer<'_> {
         return Ok(ty);
     }
 
-    /// Resolve a `$ref` string to a named type. Same-document references become
-    /// a local [`RustType::Named`]; cross-file references are routed through the
-    /// `import-mapping` to a [`RustType::External`].
-    fn named_from_ref(&self, path: &str, method: &str, reference: &str) -> Result<RustType> {
+    /// Decide the Rust type for a schema `$ref`, given the referenced file the
+    /// enclosing structural object was resolved from (`origin`). A cross-file
+    /// ref, or a same-document ref whose enclosing object came from a referenced
+    /// file, resolves through the `import-mapping` to a [`RustType::External`];
+    /// a same-document ref in the main document stays a local [`RustType::Named`].
+    fn schema_ref_type(&self, path: &str, method: &str, origin: Option<&str>, reference: &str) -> Result<RustType> {
         let target = ref_component_name(reference, "schemas").ok_or_else(|| {
             return Error::UnsupportedOperation {
                 method: method.to_owned(),
@@ -763,10 +833,13 @@ impl Lowerer<'_> {
                 reason: format!("reference `{reference}` must point at a component schema"),
             };
         })?;
-        let Some(file) = ref_file_part(reference) else {
+        let file = ref_file_part(reference)
+            .map(str::to_owned)
+            .or_else(|| return origin.map(str::to_owned));
+        let Some(file) = file else {
             return Ok(RustType::Named(target.to_owned()));
         };
-        let module = self.import_mapping.get(file).ok_or_else(|| {
+        let module = self.import_mapping.get(&file).ok_or_else(|| {
             return Error::UnsupportedOperation {
                 method: method.to_owned(),
                 path: path.to_owned(),

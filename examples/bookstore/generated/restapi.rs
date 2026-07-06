@@ -8,6 +8,7 @@ pub struct ListBooksQuery {
     /// Only return books carrying every given tag.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<Vec<String>>,
+    /// Maximum number of items to return.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<i32>,
 }
@@ -101,6 +102,8 @@ pub enum CreateBookResponse {
     Created(crate::apimodel::catalog::Book),
     /// The request was malformed.
     BadRequest(crate::apimodel::common::ErrorResponse),
+    /// Authentication is required or has failed.
+    Unauthorized(crate::apimodel::common::ErrorResponse),
 }
 
 impl axum::response::IntoResponse for CreateBookResponse {
@@ -118,6 +121,15 @@ impl axum::response::IntoResponse for CreateBookResponse {
             CreateBookResponse::BadRequest(body) => {
                 const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
                     400,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
+            }
+            CreateBookResponse::Unauthorized(body) => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    401,
                 ) {
                     Ok(status) => status,
                     Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),

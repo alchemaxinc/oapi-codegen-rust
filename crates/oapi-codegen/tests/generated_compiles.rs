@@ -99,6 +99,9 @@ mod generated {
     pub mod server_component_param_ref_pet {
         include!("generated/server_component_param_ref_pet.rs");
     }
+    pub mod server_xfile_refs {
+        include!("generated/server_xfile_refs.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -110,6 +113,11 @@ mod generated {
 mod apimodel {
     #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
     pub struct CreateWidget {
+        pub name: String,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+    pub struct NewThing {
         pub name: String,
     }
 }
@@ -404,4 +412,36 @@ fn generated_server_resolves_component_body_ref() {
     }
 
     let _router: axum::Router = server_component_body_ref::router(Service);
+}
+
+#[test]
+fn generated_server_resolves_cross_file_param_ref() {
+    use generated::server_xfile_refs;
+    use server_xfile_refs::Api;
+    use server_xfile_refs::CreateThingResponse;
+    use server_xfile_refs::ListThingsQuery;
+    use server_xfile_refs::ListThingsResponse;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn list_things(&self, query: ListThingsQuery) -> ListThingsResponse {
+            // The `pageSize` query param was resolved from `schemas/shared.yaml`
+            // and lowered to its scalar type (`i32`).
+            let _page_size: Option<i32> = query.page_size;
+            return ListThingsResponse::Ok;
+        }
+
+        async fn create_thing(&self, body: apimodel::NewThing) -> CreateThingResponse {
+            // The request body `$ref` targets `schemas/shared.yaml`, whose inner
+            // `$ref` to `NewThing` is rewritten to the import-mapped module
+            // (`crate::apimodel::NewThing`). The cross-file `404` response ref
+            // resolves to a `NotFound` variant.
+            let _name: String = body.name;
+            return CreateThingResponse::NotFound;
+        }
+    }
+
+    let _router: axum::Router = server_xfile_refs::router(Service);
 }

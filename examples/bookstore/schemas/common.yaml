@@ -24,3 +24,21 @@ components:
       enum:
         - ok
         - degraded
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items to return.
+      schema:
+        type: integer
+        format: int32
+
+  responses:
+    Unauthorized:
+      description: Authentication is required or has failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

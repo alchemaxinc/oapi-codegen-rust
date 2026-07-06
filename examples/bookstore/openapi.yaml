@@ -36,12 +36,7 @@ paths:
             type: array
             items:
               type: string
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            format: int32
+        - $ref: "schemas/common.yaml#/components/parameters/Limit"
       responses:
         "200":
           description: The matching books.
@@ -76,6 +71,8 @@ paths:
                 $ref: "schemas/catalog.yaml#/components/schemas/Book"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "schemas/common.yaml#/components/responses/Unauthorized"
   /books/{id}:
     get:
       operationId: getBook
