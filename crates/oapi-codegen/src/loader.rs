@@ -297,7 +297,13 @@ impl Spec {
                 select(doc.as_ref())
             }
         };
-        return entry.ok_or_else(|| return Error::UnresolvedRef(name.to_owned()));
+        // Include the referenced file in the diagnostic so a cross-file miss
+        // points at which document was searched, not just the component name.
+        let unresolved = match origin {
+            None => name.to_owned(),
+            Some(file) => format!("{file}#{name}"),
+        };
+        return entry.ok_or_else(|| return Error::UnresolvedRef(unresolved));
     }
 
     /// Look up a component response by name (see [`Self::component_lookup`]).

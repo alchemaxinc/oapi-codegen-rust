@@ -603,10 +603,13 @@ fn scalar_type(kind: &SchemaKind) -> Option<RustType> {
 }
 
 impl Lowerer<'_> {
-    /// Map a path parameter's schema to a scalar Rust type. A cross-file inner
-    /// `$ref`, or a same-document inner `$ref` inside a parameter resolved from a
-    /// referenced file (`origin`), routes through the `import-mapping` to a named
-    /// external type; other same-document refs resolve to a scalar in place.
+    /// Map a path parameter's schema to a scalar Rust type. Path parameters must
+    /// be scalars (they are parsed from URL segments into an axum `Path<..>`
+    /// tuple), so a `$ref` is resolved to its concrete schema and the scalar-only
+    /// rule is enforced — the same as header and cookie parameters. A
+    /// same-document `$ref` is resolved against the main document, or against the
+    /// referenced document the parameter came from (`origin`); a cross-file inner
+    /// `$ref` is rejected.
     fn param_type(
         &self,
         path: &str,
@@ -626,11 +629,15 @@ impl Lowerer<'_> {
             }
         };
         let schema = match schema {
-            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() || origin.is_some() => {
-                return self.schema_ref_type(path, method, origin, reference);
+            ReferenceOr::Item(schema) => schema.clone(),
+            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("path parameter `{name}` uses a cross-file `$ref`, which is not supported"),
+                });
             }
-            ReferenceOr::Reference { reference } => self.spec.resolve(reference)?,
-            ReferenceOr::Item(schema) => schema,
+            ReferenceOr::Reference { reference } => self.spec.resolve_schema(origin, reference)?,
         };
         let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
             return Error::UnsupportedOperation {

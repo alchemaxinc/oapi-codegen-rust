@@ -357,6 +357,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_xfile_body_ref",
     "server_unsupported_xfile_missing_component",
     "server_unsupported_xfile_no_import_mapping",
+    "server_unsupported_xfile_object_path_param",
 ];
 
 /// Absolute path to the crate's `tests` directory.
