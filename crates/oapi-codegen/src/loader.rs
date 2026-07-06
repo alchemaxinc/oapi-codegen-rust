@@ -140,7 +140,7 @@ impl Spec {
                     reason: "only `#/components/responses/<name>` references are supported".to_owned(),
                 };
             })?;
-            let entry = self.component_response(origin.as_deref(), name)?;
+            let entry = self.component_response(origin.as_deref(), &current, name)?;
             match entry {
                 ReferenceOr::Item(response) => {
                     return Ok(Resolved {
@@ -172,7 +172,7 @@ impl Spec {
                     reason: "only `#/components/parameters/<name>` references are supported".to_owned(),
                 };
             })?;
-            let entry = self.component_parameter(origin.as_deref(), name)?;
+            let entry = self.component_parameter(origin.as_deref(), &current, name)?;
             match entry {
                 ReferenceOr::Item(parameter) => {
                     return Ok(Resolved {
@@ -204,7 +204,7 @@ impl Spec {
                     reason: "only `#/components/requestBodies/<name>` references are supported".to_owned(),
                 };
             })?;
-            let entry = self.component_request_body(origin.as_deref(), name)?;
+            let entry = self.component_request_body(origin.as_deref(), &current, name)?;
             match entry {
                 ReferenceOr::Item(body) => {
                     return Ok(Resolved { value: body, origin });
@@ -267,7 +267,7 @@ impl Spec {
                     reason: "only `#/components/schemas/<name>` references are supported".to_owned(),
                 };
             })?;
-            let entry = self.component_schema(origin, name)?;
+            let entry = self.component_schema(origin, &current, name)?;
             match entry {
                 ReferenceOr::Item(schema) => {
                     return Ok(schema);
@@ -282,12 +282,15 @@ impl Spec {
 
     /// Look up a named component in the main document (`origin` is `None`) or a
     /// referenced document, returning an owned copy. `select` extracts the
-    /// specific component map's entry from a document; the origin dispatch and
-    /// the unresolved-reference error are shared across component kinds.
+    /// specific component map's entry from a document; `reference` is the full
+    /// `$ref` fragment currently being resolved, reported verbatim in the
+    /// unresolved-reference error so a miss points at the exact ref (kind,
+    /// component, and file). The origin dispatch and error are shared across
+    /// component kinds.
     fn component_lookup<T>(
         &self,
         origin: Option<&str>,
-        name: &str,
+        reference: &str,
         select: impl Fn(&OpenAPI) -> Option<ReferenceOr<T>>,
     ) -> Result<ReferenceOr<T>> {
         let entry = match origin {
@@ -297,45 +300,44 @@ impl Spec {
                 select(doc.as_ref())
             }
         };
-        // Include the referenced file in the diagnostic so a cross-file miss
-        // points at which document was searched, not just the component name.
-        let unresolved = match origin {
-            None => name.to_owned(),
-            Some(file) => format!("{file}#{name}"),
-        };
-        return entry.ok_or_else(|| return Error::UnresolvedRef(unresolved));
+        return entry.ok_or_else(|| return Error::UnresolvedRef(reference.to_owned()));
     }
 
-    /// Look up a component response by name (see [`Self::component_lookup`]).
-    fn component_response(&self, origin: Option<&str>, name: &str) -> Result<ReferenceOr<Response>> {
-        return self.component_lookup(origin, name, |doc| {
+    /// Look up a component response (see [`Self::component_lookup`]).
+    fn component_response(&self, origin: Option<&str>, reference: &str, name: &str) -> Result<ReferenceOr<Response>> {
+        return self.component_lookup(origin, reference, |doc| {
             return doc.components.as_ref().and_then(|components| {
                 return components.responses.get(name).cloned();
             });
         });
     }
 
-    /// Look up a component parameter by name (see [`Self::component_lookup`]).
-    fn component_parameter(&self, origin: Option<&str>, name: &str) -> Result<ReferenceOr<Parameter>> {
-        return self.component_lookup(origin, name, |doc| {
+    /// Look up a component parameter (see [`Self::component_lookup`]).
+    fn component_parameter(&self, origin: Option<&str>, reference: &str, name: &str) -> Result<ReferenceOr<Parameter>> {
+        return self.component_lookup(origin, reference, |doc| {
             return doc.components.as_ref().and_then(|components| {
                 return components.parameters.get(name).cloned();
             });
         });
     }
 
-    /// Look up a component request body by name (see [`Self::component_lookup`]).
-    fn component_request_body(&self, origin: Option<&str>, name: &str) -> Result<ReferenceOr<RequestBody>> {
-        return self.component_lookup(origin, name, |doc| {
+    /// Look up a component request body (see [`Self::component_lookup`]).
+    fn component_request_body(
+        &self,
+        origin: Option<&str>,
+        reference: &str,
+        name: &str,
+    ) -> Result<ReferenceOr<RequestBody>> {
+        return self.component_lookup(origin, reference, |doc| {
             return doc.components.as_ref().and_then(|components| {
                 return components.request_bodies.get(name).cloned();
             });
         });
     }
 
-    /// Look up a component schema by name (see [`Self::component_lookup`]).
-    fn component_schema(&self, origin: Option<&str>, name: &str) -> Result<ReferenceOr<Schema>> {
-        return self.component_lookup(origin, name, |doc| {
+    /// Look up a component schema (see [`Self::component_lookup`]).
+    fn component_schema(&self, origin: Option<&str>, reference: &str, name: &str) -> Result<ReferenceOr<Schema>> {
+        return self.component_lookup(origin, reference, |doc| {
             return doc.components.as_ref().and_then(|components| {
                 return components.schemas.get(name).cloned();
             });
@@ -512,6 +514,34 @@ mod tests {
         let spec = Spec::from_parts(parse_openapi(minimal_doc()), source);
         let result = spec.resolve_parameter("common.yaml#/components/parameters/PageSize");
         assert!(matches!(result, Err(Error::ReadRefFile { .. })));
+    }
+
+    #[test]
+    fn unresolved_component_error_preserves_the_full_reference() {
+        // A same-document miss reports the full `$ref` fragment (kind + name),
+        // not just the bare component name.
+        let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  parameters: {}\n";
+        let spec = Spec::from_parts(parse_openapi(yaml), std::path::PathBuf::from("inline.yaml"));
+        let result = spec.resolve_parameter("#/components/parameters/Missing");
+        match result {
+            Err(Error::UnresolvedRef(reference)) => {
+                assert_eq!(reference, "#/components/parameters/Missing");
+            }
+            other => panic!("expected UnresolvedRef, got {other:?}"),
+        }
+
+        // A cross-file miss reports the file plus the full fragment.
+        let dir = TestDir::new("unresolved-cross-file");
+        let main = dir.write("main.yaml", minimal_doc());
+        dir.write("shared.yaml", minimal_doc());
+        let spec = Spec::load(&main).expect("load main spec");
+        let result = spec.resolve_parameter("shared.yaml#/components/parameters/Missing");
+        match result {
+            Err(Error::UnresolvedRef(reference)) => {
+                assert_eq!(reference, "shared.yaml#/components/parameters/Missing");
+            }
+            other => panic!("expected UnresolvedRef, got {other:?}"),
+        }
     }
 
     #[test]
