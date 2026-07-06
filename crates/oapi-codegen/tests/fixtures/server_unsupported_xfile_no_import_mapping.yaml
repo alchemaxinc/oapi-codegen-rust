@@ -1,0 +1,13 @@
+openapi: 3.0.3
+info:
+  title: unsupported cross-file body ref (referenced file has no import-mapping entry)
+  version: "1"
+paths:
+  /things:
+    post:
+      operationId: createThing
+      requestBody:
+        $ref: "schemas/orphan.yaml#/components/requestBodies/Thing"
+      responses:
+        "201":
+          description: created

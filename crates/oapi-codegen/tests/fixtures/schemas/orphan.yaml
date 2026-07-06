@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: orphan components (intentionally absent from import-mapping)
+  version: "1"
+paths: {}
+components:
+  requestBodies:
+    Thing:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Thing"
+  schemas:
+    Thing:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string

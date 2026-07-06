@@ -339,6 +339,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_component_param_ref",
     "server_component_body_ref",
     "server_component_param_ref_pet",
+    "server_xfile_refs",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
@@ -354,6 +355,8 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_bytes_cookie_param",
     "server_unsupported_xfile_param_ref",
     "server_unsupported_xfile_body_ref",
+    "server_unsupported_xfile_missing_component",
+    "server_unsupported_xfile_no_import_mapping",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -460,6 +463,7 @@ fn generated_tests_cover_supported_fixtures() {
 fn server_config() -> oapi_codegen::Config {
     let mut import_mapping = std::collections::BTreeMap::new();
     import_mapping.insert("schemas/widgets.yaml".to_owned(), "crate::apimodel".to_owned());
+    import_mapping.insert("schemas/shared.yaml".to_owned(), "crate::apimodel".to_owned());
     return oapi_codegen::Config {
         generate: oapi_codegen::config::Generate {
             std_http_server: true,
@@ -528,6 +532,7 @@ server_generated_tests!(
     server_component_param_ref,
     server_component_body_ref,
     server_component_param_ref_pet,
+    server_xfile_refs,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.

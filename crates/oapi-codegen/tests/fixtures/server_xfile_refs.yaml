@@ -1,0 +1,24 @@
+openapi: 3.0.3
+info:
+  title: cross-file refs server
+  version: "1"
+paths:
+  /things:
+    get:
+      operationId: listThings
+      summary: List things.
+      parameters:
+        - $ref: "schemas/shared.yaml#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: ok
+    post:
+      operationId: createThing
+      summary: Create a thing.
+      requestBody:
+        $ref: "schemas/shared.yaml#/components/requestBodies/CreateThing"
+      responses:
+        "201":
+          description: created
+        "404":
+          $ref: "schemas/shared.yaml#/components/responses/NotFound"
