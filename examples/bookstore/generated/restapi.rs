@@ -52,6 +52,96 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct UploadBookCoverMultipart {
+    pub image: Vec<u8>,
+    pub filename: String,
+    pub caption: Option<String>,
+}
+
+impl<S> axum::extract::FromRequest<S> for UploadBookCoverMultipart
+where
+    S: Send + Sync,
+{
+    type Rejection = (axum::http::StatusCode, String);
+    async fn from_request(
+        request: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let mut multipart = <axum::extract::Multipart as axum::extract::FromRequest<
+            S,
+        >>::from_request(request, state)
+            .await
+            .map_err(|error| {
+                return (axum::http::StatusCode::BAD_REQUEST, error.to_string());
+            })?;
+        let mut image: Option<Vec<u8>> = None;
+        let mut filename: Option<String> = None;
+        let mut caption: Option<String> = None;
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(|error| {
+                return (axum::http::StatusCode::BAD_REQUEST, error.to_string());
+            })?
+        {
+            let field_name = field.name().map(|name| return name.to_owned());
+            match field_name.as_deref() {
+                Some("image") => {
+                    let value = field
+                        .bytes()
+                        .await
+                        .map_err(|error| {
+                            return (
+                                axum::http::StatusCode::BAD_REQUEST,
+                                error.to_string(),
+                            );
+                        })?;
+                    image = Some(value.to_vec());
+                }
+                Some("filename") => {
+                    let value = field
+                        .text()
+                        .await
+                        .map_err(|error| {
+                            return (
+                                axum::http::StatusCode::BAD_REQUEST,
+                                error.to_string(),
+                            );
+                        })?;
+                    filename = Some(value);
+                }
+                Some("caption") => {
+                    let value = field
+                        .text()
+                        .await
+                        .map_err(|error| {
+                            return (
+                                axum::http::StatusCode::BAD_REQUEST,
+                                error.to_string(),
+                            );
+                        })?;
+                    caption = Some(value);
+                }
+                _ => {}
+            }
+        }
+        return Ok(Self {
+            image: image
+                .ok_or((
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "missing required multipart field `image`".to_owned(),
+                ))?,
+            filename: filename
+                .ok_or((
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "missing required multipart field `filename`".to_owned(),
+                ))?,
+            caption,
+        });
+    }
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// List books, optionally filtered.
@@ -70,6 +160,12 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         id: String,
     ) -> impl std::future::Future<Output = GetBookResponse> + Send;
+    /// Upload or replace a book's cover image.
+    fn upload_book_cover(
+        &self,
+        id: String,
+        body: UploadBookCoverMultipart,
+    ) -> impl std::future::Future<Output = UploadBookCoverResponse> + Send;
     /// Liveness probe returning a free-form document.
     fn get_health(&self) -> impl std::future::Future<Output = GetHealthResponse> + Send;
 }
@@ -178,6 +274,39 @@ impl axum::response::IntoResponse for GetBookResponse {
     }
 }
 
+/// Upload or replace a book's cover image.
+pub enum UploadBookCoverResponse {
+    /// The cover image was stored.
+    NoContent,
+    /// No resource matched the request.
+    NotFound,
+}
+
+impl axum::response::IntoResponse for UploadBookCoverResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            UploadBookCoverResponse::NoContent => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    204,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                STATUS.into_response()
+            }
+            UploadBookCoverResponse::NotFound => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    404,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                STATUS.into_response()
+            }
+        }
+    }
+}
+
 /// Liveness probe returning a free-form document.
 pub enum GetHealthResponse {
     /// An opaque service-health document.
@@ -208,6 +337,7 @@ pub fn router<T: Api>(api: T) -> axum::Router {
             axum::routing::get(list_books_handler::<T>).post(create_book_handler::<T>),
         )
         .route("/books/{id}", axum::routing::get(get_book_handler::<T>))
+        .route("/books/{id}/cover", axum::routing::put(upload_book_cover_handler::<T>))
         .route("/health", axum::routing::get(get_health_handler::<T>))
         .with_state(api)
 }
@@ -232,6 +362,14 @@ async fn get_book_handler<T: Api>(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> GetBookResponse {
     api.get_book(id).await
+}
+
+async fn upload_book_cover_handler<T: Api>(
+    axum::extract::State(api): axum::extract::State<T>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    body: UploadBookCoverMultipart,
+) -> UploadBookCoverResponse {
+    api.upload_book_cover(id, body).await
 }
 
 async fn get_health_handler<T: Api>(

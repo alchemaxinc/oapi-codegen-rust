@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: multipart cross-file body (unsupported)
+  version: "1"
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "shared.yaml#/components/schemas/UploadRequest"
+      responses:
+        "204":
+          description: The file was stored.

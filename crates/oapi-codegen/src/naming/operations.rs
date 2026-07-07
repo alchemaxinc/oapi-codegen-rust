@@ -28,6 +28,12 @@ pub fn cookies_struct_name(op: &RustIdent) -> RustIdent {
     return to_ident(&format!("{}_cookies", op.logical()), Case::Pascal);
 }
 
+/// The generated multipart-extractor struct name for an operation
+/// (`<Op>Multipart`).
+pub fn multipart_struct_name(op: &RustIdent) -> RustIdent {
+    return to_ident(&format!("{}_multipart", op.logical()), Case::Pascal);
+}
+
 pub fn axum_handler_name(op: &RustIdent) -> RustIdent {
     return to_ident(&format!("{}_handler", op.logical()), Case::Snake);
 }
@@ -48,6 +54,7 @@ mod tests {
         assert_eq!(query_struct_name(&list_pets).logical(), "ListPetsQuery");
         assert_eq!(headers_struct_name(&list_pets).logical(), "ListPetsHeaders");
         assert_eq!(cookies_struct_name(&list_pets).logical(), "ListPetsCookies");
+        assert_eq!(multipart_struct_name(&list_pets).logical(), "ListPetsMultipart");
         assert_eq!(axum_handler_name(&list_pets).logical(), "list_pets_handler");
     }
 }

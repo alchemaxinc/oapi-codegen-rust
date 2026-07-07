@@ -111,6 +111,9 @@ mod generated {
     pub mod server_form_body {
         include!("generated/server_form_body.rs");
     }
+    pub mod server_multipart_body {
+        include!("generated/server_multipart_body.rs");
+    }
     pub mod server_json_charset {
         include!("generated/server_json_charset.rs");
     }
@@ -579,4 +582,33 @@ fn generated_server_handles_form_body() {
     let response = LoginResponse::Ok(Session { token: "t".to_owned() }).into_response();
     assert_eq!(response.status(), axum::http::StatusCode::OK);
     let _router: axum::Router = server_form_body::router(Service);
+}
+
+#[test]
+fn generated_server_handles_multipart_body() {
+    use generated::server_multipart_body;
+    use server_multipart_body::Api;
+    use server_multipart_body::UploadMultipart;
+    use server_multipart_body::UploadResponse;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn upload(&self, body: UploadMultipart) -> UploadResponse {
+            // File fields decode to `Vec<u8>`, scalars are parsed from the part
+            // text (required ones bare, optional ones `Option<..>`).
+            let _file: Vec<u8> = body.file;
+            let _description: String = body.description;
+            let _note: Option<String> = body.note;
+            let _attempts: i64 = body.attempts;
+            let _priority: Option<String> = body.priority;
+            return UploadResponse::NoContent;
+        }
+    }
+
+    // Building the router only type-checks if the generated `UploadMultipart`
+    // struct satisfies axum's `FromRequest` (driving `axum::extract::Multipart`),
+    // which is how the handler consumes the `multipart/form-data` body.
+    let _router: axum::Router = server_multipart_body::router(Service);
 }
