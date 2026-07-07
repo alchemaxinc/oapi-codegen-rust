@@ -300,6 +300,50 @@ pub enum ResponseBody {
 pub struct Service {
     /// Operations in deterministic (document) order.
     pub operations: Vec<Operation>,
+    /// Security schemes referenced by at least one operation, in the order they
+    /// are declared in `components.securitySchemes`. The client emitter turns
+    /// each into a credential field and a `with_<scheme>` builder setter; the
+    /// server emitter ignores them (server-side auth is not generated yet).
+    pub security_schemes: Vec<SecurityScheme>,
+}
+
+/// A security scheme the client can apply to outgoing requests.
+///
+/// Derived from a `components.securitySchemes` entry; only the schemes the
+/// client generator can carry as a stored credential are modelled here, plus an
+/// [`SecuritySchemeKind::Unsupported`] catch-all so an operation that *requires*
+/// an unmodelled scheme (e.g. OAuth2) can be rejected with a clear message.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SecurityScheme {
+    /// The scheme's key in `components.securitySchemes`, matched against each
+    /// [`Operation::security`] entry.
+    pub key: String,
+    /// `snake_case` base name for the generated credential field and the
+    /// `with_<field>` builder setter.
+    pub field: RustIdent,
+    /// How the credential is carried on the request.
+    pub kind: SecuritySchemeKind,
+    /// Doc comment derived from the scheme's `description`.
+    pub doc: Option<String>,
+}
+
+/// How a [`SecurityScheme`]'s credential is applied to a request.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SecuritySchemeKind {
+    /// `type: http, scheme: bearer` — `Authorization: Bearer <token>`.
+    HttpBearer,
+    /// `type: http, scheme: basic` — `Authorization: Basic <base64>`.
+    HttpBasic,
+    /// `type: apiKey, in: header` — the key is sent as the named header.
+    ApiKeyHeader(String),
+    /// `type: apiKey, in: query` — the key is sent as the named query parameter.
+    ApiKeyQuery(String),
+    /// `type: apiKey, in: cookie` — the key is sent as the named cookie.
+    ApiKeyCookie(String),
+    /// A scheme the client cannot carry as a stored credential (`oauth2`,
+    /// `openIdConnect`). The wrapped string is a human-readable reason used when
+    /// rejecting an operation that requires it.
+    Unsupported(String),
 }
 
 /// A single HTTP operation lowered for code generation.
@@ -337,6 +381,11 @@ pub struct Operation {
     pub request: Option<RequestPayload>,
     /// Response variants, in declaration order.
     pub responses: Vec<ResponseCase>,
+    /// Keys of the security schemes this operation applies, derived from its
+    /// effective security requirement (its own `security`, else the document's
+    /// global `security`). Each key matches a [`SecurityScheme::key`]. Empty
+    /// means the operation is unauthenticated.
+    pub security: Vec<String>,
 }
 
 /// A typed operation parameter (path parameter in the current slice).

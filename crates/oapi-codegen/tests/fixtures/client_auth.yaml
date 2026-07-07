@@ -1,0 +1,122 @@
+openapi: 3.0.3
+info:
+  title: Authenticated client
+  version: 1.0.0
+security:
+  - bearerAuth: []
+paths:
+  /profile:
+    get:
+      operationId: getProfile
+      summary: Fetch the caller's profile, authenticated by the global bearer scheme.
+      responses:
+        "200":
+          description: The caller's profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /public:
+    get:
+      operationId: getPublic
+      summary: Fetch a public resource that requires no authentication.
+      security: []
+      responses:
+        "200":
+          description: The public resource.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /admin:
+    get:
+      operationId: getAdmin
+      summary: Fetch an admin resource, authenticated by HTTP basic auth.
+      security:
+        - basicAuth: []
+      responses:
+        "200":
+          description: The admin resource.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /reports:
+    get:
+      operationId: getReports
+      summary: Fetch reports, authenticated by an API key header.
+      security:
+        - apiKeyHeader: []
+      responses:
+        "200":
+          description: The reports.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /search:
+    get:
+      operationId: search
+      summary: Search, authenticated by an API key query parameter.
+      security:
+        - apiKeyQuery: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The search results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /session:
+    get:
+      operationId: getSession
+      summary: Fetch session data, authenticated by an API key cookie.
+      security:
+        - apiKeyCookie: []
+      responses:
+        "200":
+          description: The session data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: A JSON Web Token passed as a bearer credential.
+    basicAuth:
+      type: http
+      scheme: basic
+      description: HTTP basic username and password.
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key sent in a request header.
+    apiKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
+      description: API key sent as a query parameter.
+    apiKeyCookie:
+      type: apiKey
+      in: cookie
+      name: SESSION
+      description: API key sent as a cookie.
+  schemas:
+    Message:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string

@@ -5,6 +5,7 @@
 
 pub mod paths;
 pub mod schema;
+pub mod security;
 
 pub use crate::lower::paths::generate_service;
 pub use crate::lower::schema::generate_models;

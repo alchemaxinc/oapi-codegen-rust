@@ -279,8 +279,10 @@ const TEST_TABLE: &[Feature] = &[
         fixture: None,
     },
     // Document-level (server/client generation). The axum server generator now
-    // covers a slice of paths/parameters/requestBody/responses; that slice is
-    // validated separately by `SERVER_FIXTURES`. The rest remains deferred.
+    // covers a slice of paths/parameters/requestBody/responses; the blocking
+    // reqwest client generator additionally covers securitySchemes. Those slices
+    // are validated separately by `SERVER_FIXTURES` and `CLIENT_FIXTURES`. The
+    // rest remains deferred.
     Feature {
         element: "doc.paths",
         status: Status::Planned,
@@ -383,8 +385,9 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
 
 /// Client fixtures whose generated blocking `reqwest` client is compile-checked
 /// against a committed file. These exercise the client generator: path/query/
-/// header/cookie inputs, single-content request bodies, and typed responses.
-const CLIENT_FIXTURES: &[&str] = &["client_widgets"];
+/// header/cookie inputs, single-content request bodies, typed responses, and
+/// security schemes (bearer, basic, and API-key credentials).
+const CLIENT_FIXTURES: &[&str] = &["client_widgets", "client_auth"];
 
 /// Client fixtures whose generation must fail with a documented error, covering
 /// the request/response shapes the client generator does not support yet.
@@ -393,6 +396,7 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
     "client_unsupported_negotiated_request",
     "client_unsupported_negotiated_response",
     "client_unsupported_form_response",
+    "client_unsupported_oauth2",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -663,7 +667,7 @@ macro_rules! client_generated_tests {
     };
 }
 
-client_generated_tests!(client_widgets);
+client_generated_tests!(client_widgets, client_auth);
 
 /// The client `#[test]`s must cover exactly the supported client fixtures.
 #[test]

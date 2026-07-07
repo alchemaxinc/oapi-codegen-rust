@@ -74,6 +74,7 @@ use crate::ir::ResponseBody;
 use crate::ir::ResponseCase;
 use crate::ir::ResponseStatus;
 use crate::ir::RustType;
+use crate::ir::SecurityScheme;
 use crate::ir::Service;
 use crate::ir::Struct;
 use crate::loader::Resolved;
@@ -82,6 +83,7 @@ use crate::loader::ref_component_name;
 use crate::loader::ref_file_part;
 use crate::lower::schema::integer_format_type;
 use crate::lower::schema::string_format_type;
+use crate::lower::security;
 use crate::naming::Case;
 use crate::naming::RustIdent;
 use crate::naming::operations;
@@ -155,7 +157,9 @@ struct Lowerer<'a> {
 impl Lowerer<'_> {
     /// Lower every operation in the document into the server IR.
     fn lower(&self) -> Result<Service> {
+        let catalogue = security::scheme_catalogue(self.spec);
         let mut operations = Vec::new();
+        let mut used_schemes: Vec<String> = Vec::new();
         for (path, entry) in self.spec.paths().iter() {
             let item = match entry {
                 ReferenceOr::Item(item) => item,
@@ -168,11 +172,38 @@ impl Lowerer<'_> {
                 }
             };
             for (method, operation) in item.iter() {
-                let lowered = self.lower_operation(path, method, operation, &item.parameters)?;
+                let mut lowered = self.lower_operation(path, method, operation, &item.parameters)?;
+                lowered.security = self.operation_security(operation, &catalogue);
+                for key in &lowered.security {
+                    if !used_schemes.iter().any(|existing| return existing == key) {
+                        used_schemes.push(key.clone());
+                    }
+                }
                 operations.push(lowered);
             }
         }
-        return Ok(Service { operations });
+        let security_schemes = catalogue
+            .into_iter()
+            .filter(|scheme| return used_schemes.iter().any(|key| return *key == scheme.key))
+            .collect();
+        return Ok(Service {
+            operations,
+            security_schemes,
+        });
+    }
+
+    /// Resolve an operation's effective security requirement into the ordered
+    /// keys of the schemes it applies, keeping only keys declared in the
+    /// document's `components.securitySchemes` (the `catalogue`).
+    fn operation_security(&self, operation: &OasOperation, catalogue: &[SecurityScheme]) -> Vec<String> {
+        let effective = security::effective_requirements(operation.security.as_deref(), self.spec.global_security());
+        let Some(requirements) = effective else {
+            return Vec::new();
+        };
+        return security::required_keys(requirements)
+            .into_iter()
+            .filter(|key| return catalogue.iter().any(|scheme| return scheme.key == *key))
+            .collect();
     }
 
     /// Lower a single operation, given its path, method and path-item parameters.
@@ -206,6 +237,7 @@ impl Lowerer<'_> {
             cookies,
             request,
             responses,
+            security: Vec::new(),
         });
     }
 
