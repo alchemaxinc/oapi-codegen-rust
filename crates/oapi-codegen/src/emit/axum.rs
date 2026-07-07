@@ -8,14 +8,18 @@ use crate::emit::doc_attr;
 use crate::emit::emit_type;
 use crate::emit::models::emit_struct;
 use crate::error::Result;
-use crate::ir::Body;
+use crate::ir::BodyKind;
+use crate::ir::BodyVariant;
 use crate::ir::CookieParam;
 use crate::ir::Cookies;
 use crate::ir::HeaderParam;
 use crate::ir::Headers;
 use crate::ir::Multipart;
 use crate::ir::MultipartField;
+use crate::ir::NegotiatedBody;
 use crate::ir::Operation;
+use crate::ir::RequestPayload;
+use crate::ir::ResponseBody;
 use crate::ir::ResponseCase;
 use crate::ir::ResponseHeader;
 use crate::ir::ResponseStatus;
@@ -62,6 +66,49 @@ fn response_body_term(kind: crate::ir::BodyKind) -> TokenStream {
     };
 }
 
+/// The `IntoResponse` match arms that render each representation of a negotiated
+/// response body, binding the inner value to `body`. `status` is the status
+/// expression (a `STATUS` constant or a bound `status`) placed first in the
+/// response tuple; when `with_headers` is set, the in-scope `header_map` is
+/// inserted between the status and the body wrapper.
+fn negotiated_response_arms(body: &NegotiatedBody, status: &TokenStream, with_headers: bool) -> Vec<TokenStream> {
+    let enum_name = body.name.to_token();
+    return body
+        .variants
+        .iter()
+        .map(|variant| {
+            let ident = variant.variant.to_token();
+            let term = response_body_term(variant.body.kind);
+            let tuple = if with_headers {
+                quote! { (#status, header_map, #term) }
+            } else {
+                quote! { (#status, #term) }
+            };
+            return quote! {
+                #enum_name::#ident(body) => #tuple.into_response(),
+            };
+        })
+        .collect();
+}
+
+/// Emit the enum backing a negotiated response body: one variant per content
+/// representation, carrying that representation's decoded type. The generated
+/// `IntoResponse` renders whichever variant the handler returned.
+fn emit_response_body_enum(body: &NegotiatedBody) -> Result<TokenStream> {
+    let name = body.name.to_token();
+    let mut variants = Vec::with_capacity(body.variants.len());
+    for variant in &body.variants {
+        let ident = variant.variant.to_token();
+        let ty = emit_type(&variant.body.ty)?;
+        variants.push(quote! { #ident(#ty) });
+    }
+    return Ok(quote! {
+        pub enum #name {
+            #(#variants),*
+        }
+    });
+}
+
 /// Emit the axum server interface: the `Api` trait, per-operation response
 /// enums, the `Router` builder, and the internal handler functions.
 fn service_items(service: &Service) -> Result<Vec<TokenStream>> {
@@ -76,8 +123,15 @@ fn service_items(service: &Service) -> Result<Vec<TokenStream>> {
         if let Some(cookies) = &operation.cookies {
             items.extend(emit_cookies(cookies)?);
         }
-        if let Some(multipart) = &operation.multipart {
-            items.extend(emit_multipart(multipart)?);
+        match &operation.request {
+            Some(RequestPayload::Multipart(multipart)) => items.extend(emit_multipart(multipart)?),
+            Some(RequestPayload::Negotiated(request)) => items.extend(emit_request_body(request)?),
+            Some(RequestPayload::Single(_)) | None => {}
+        }
+        for case in &operation.responses {
+            if let Some(ResponseBody::Negotiated(body)) = &case.body {
+                items.push(emit_response_body_enum(body)?);
+            }
         }
     }
     items.push(emit_trait(service)?);
@@ -135,13 +189,20 @@ fn emit_method_args(operation: &Operation) -> Result<Vec<TokenStream>> {
         let ty = cookies.name.to_token();
         args.push(quote! { cookies: #ty });
     }
-    if let Some(body) = &operation.body {
-        let ty = emit_type(&body.ty)?;
-        args.push(quote! { body: #ty });
-    }
-    if let Some(multipart) = &operation.multipart {
-        let ty = multipart.name.to_token();
-        args.push(quote! { body: #ty });
+    match &operation.request {
+        Some(RequestPayload::Single(body)) => {
+            let ty = emit_type(&body.ty)?;
+            args.push(quote! { body: #ty });
+        }
+        Some(RequestPayload::Multipart(multipart)) => {
+            let ty = multipart.name.to_token();
+            args.push(quote! { body: #ty });
+        }
+        Some(RequestPayload::Negotiated(request)) => {
+            let ty = request.name.to_token();
+            args.push(quote! { body: #ty });
+        }
+        None => {}
     }
     return Ok(args);
 }
@@ -192,7 +253,7 @@ fn emit_fixed_response(
     name: &proc_macro2::Ident,
     variant: &proc_macro2::Ident,
     code: u16,
-    body: &Option<Body>,
+    body: &Option<ResponseBody>,
 ) -> Result<(TokenStream, TokenStream)> {
     let code = proc_macro2::Literal::u16_unsuffixed(code);
     let status = quote! {
@@ -202,7 +263,7 @@ fn emit_fixed_response(
         };
     };
     let result = match body {
-        Some(body) => {
+        Some(ResponseBody::Single(body)) => {
             let ty = emit_type(&body.ty)?;
             let variant_def = quote! { #variant(#ty) };
             let term = response_body_term(body.kind);
@@ -210,6 +271,20 @@ fn emit_fixed_response(
                 #name::#variant(body) => {
                     #status
                     (STATUS, #term).into_response()
+                }
+            };
+            (variant_def, arm)
+        }
+        Some(ResponseBody::Negotiated(negotiated)) => {
+            let ty = negotiated.name.to_token();
+            let variant_def = quote! { #variant(#ty) };
+            let arms = negotiated_response_arms(negotiated, &quote! { STATUS }, false);
+            let arm = quote! {
+                #name::#variant(body) => {
+                    #status
+                    match body {
+                        #(#arms)*
+                    }
                 }
             };
             (variant_def, arm)
@@ -234,15 +309,26 @@ fn emit_fixed_response(
 fn emit_dynamic_response(
     name: &proc_macro2::Ident,
     variant: &proc_macro2::Ident,
-    body: &Option<Body>,
+    body: &Option<ResponseBody>,
 ) -> Result<(TokenStream, TokenStream)> {
     let result = match body {
-        Some(body) => {
+        Some(ResponseBody::Single(body)) => {
             let ty = emit_type(&body.ty)?;
             let variant_def = quote! { #variant(axum::http::StatusCode, #ty) };
             let term = response_body_term(body.kind);
             let arm = quote! {
                 #name::#variant(status, body) => (status, #term).into_response(),
+            };
+            (variant_def, arm)
+        }
+        Some(ResponseBody::Negotiated(negotiated)) => {
+            let ty = negotiated.name.to_token();
+            let variant_def = quote! { #variant(axum::http::StatusCode, #ty) };
+            let arms = negotiated_response_arms(negotiated, &quote! { status }, false);
+            let arm = quote! {
+                #name::#variant(status, body) => match body {
+                    #(#arms)*
+                },
             };
             (variant_def, arm)
         }
@@ -339,15 +425,23 @@ fn emit_handler(operation: &Operation) -> Result<TokenStream> {
         extractors.push(quote! { cookies: #ty });
         call_args.push(quote! { cookies });
     }
-    if let Some(body) = &operation.body {
-        let ty = emit_type(&body.ty)?;
-        extractors.push(body_extractor(body.kind, &ty));
-        call_args.push(quote! { body });
-    }
-    if let Some(multipart) = &operation.multipart {
-        let ty = multipart.name.to_token();
-        extractors.push(quote! { body: #ty });
-        call_args.push(quote! { body });
+    match &operation.request {
+        Some(RequestPayload::Single(body)) => {
+            let ty = emit_type(&body.ty)?;
+            extractors.push(body_extractor(body.kind, &ty));
+            call_args.push(quote! { body });
+        }
+        Some(RequestPayload::Multipart(multipart)) => {
+            let ty = multipart.name.to_token();
+            extractors.push(quote! { body: #ty });
+            call_args.push(quote! { body });
+        }
+        Some(RequestPayload::Negotiated(request)) => {
+            let ty = request.name.to_token();
+            extractors.push(quote! { body: #ty });
+            call_args.push(quote! { body });
+        }
+        None => {}
     }
 
     return Ok(quote! {
@@ -376,7 +470,13 @@ fn emit_response_with_headers(
         field_defs.push(quote! { status: axum::http::StatusCode });
     }
     if let Some(body) = &case.body {
-        let ty = emit_type(&body.ty)?;
+        let ty = match body {
+            ResponseBody::Single(body) => emit_type(&body.ty)?,
+            ResponseBody::Negotiated(negotiated) => {
+                let ident = negotiated.name.to_token();
+                quote! { #ident }
+            }
+        };
         field_defs.push(quote! { body: #ty });
     }
     let mut header_field_defs = Vec::with_capacity(case.headers.len());
@@ -427,20 +527,28 @@ fn emit_response_with_headers(
         inserts.push(emit_response_header_insert(header));
     }
 
-    let body_term = case
-        .body
-        .as_ref()
-        .map(|b| {
-            let t = response_body_term(b.kind);
-            return quote! { , #t };
-        })
-        .unwrap_or_default();
+    let render = match &case.body {
+        Some(ResponseBody::Negotiated(negotiated)) => {
+            let arms = negotiated_response_arms(negotiated, &quote! { response_status }, true);
+            quote! {
+                let response_status = #status_expr;
+                match body {
+                    #(#arms)*
+                }
+            }
+        }
+        Some(ResponseBody::Single(body)) => {
+            let term = response_body_term(body.kind);
+            quote! { return (#status_expr, header_map, #term).into_response(); }
+        }
+        None => quote! { return (#status_expr, header_map).into_response(); },
+    };
 
     let arm = quote! {
         #name::#variant { #(#binds),* } => {
             let mut header_map = axum::http::HeaderMap::new();
             #(#inserts)*
-            return (#status_expr, header_map #body_term).into_response();
+            #render
         }
     };
 
@@ -826,5 +934,117 @@ fn emit_multipart_init(field: &MultipartField) -> TokenStream {
     let missing_msg = format!("missing required multipart field `{}`", field.wire_name);
     return quote! {
         #ident: #ident.ok_or((axum::http::StatusCode::BAD_REQUEST, #missing_msg.to_owned()))?
+    };
+}
+
+/// Emit a `Content-Type`-dispatched request body: an enum with one variant per
+/// supported content type plus a hand-written `axum::extract::FromRequest`.
+///
+/// The implementation reads the request's `Content-Type` header, matches it
+/// against each declared content type in priority order (JSON > form > text),
+/// and delegates to the matching axum extractor. A recognised type that fails
+/// to decode yields a `400 Bad Request`; an unrecognised or missing type yields
+/// a `415 Unsupported Media Type`.
+fn emit_request_body(request: &NegotiatedBody) -> Result<Vec<TokenStream>> {
+    let name = request.name.to_token();
+
+    let mut variants = Vec::with_capacity(request.variants.len());
+    let mut arms = Vec::with_capacity(request.variants.len());
+    for variant in &request.variants {
+        let ident = variant.variant.to_token();
+        let ty = emit_type(&variant.body.ty)?;
+        variants.push(quote! { #ident(#ty) });
+        arms.push(emit_request_body_arm(&name, variant)?);
+    }
+
+    let enum_def = quote! {
+        pub enum #name {
+            #(#variants),*
+        }
+    };
+
+    let impl_block = quote! {
+        impl<S> axum::extract::FromRequest<S> for #name
+        where
+            S: Send + Sync,
+        {
+            type Rejection = (axum::http::StatusCode, String);
+
+            async fn from_request(
+                request: axum::extract::Request,
+                state: &S,
+            ) -> Result<Self, Self::Rejection> {
+                let content_type = request
+                    .headers()
+                    .get(axum::http::header::CONTENT_TYPE)
+                    .and_then(|value| return value.to_str().ok())
+                    .map(|value| {
+                        return value.split(';').next().unwrap_or(value).trim().to_ascii_lowercase();
+                    })
+                    .unwrap_or_default();
+                #(#arms)*
+                if content_type.is_empty() {
+                    return Err((
+                        axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                        "missing `Content-Type` header".to_owned(),
+                    ));
+                }
+                return Err((
+                    axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    format!("unsupported content type `{content_type}`"),
+                ));
+            }
+        }
+    };
+
+    return Ok(vec![enum_def, impl_block]);
+}
+
+/// Emit the `from_request` arm that decodes one content-type representation:
+/// when the runtime `content_type` matches this variant's kind, delegate to the
+/// matching axum extractor and wrap the value in the variant.
+fn emit_request_body_arm(name: &proc_macro2::Ident, variant: &BodyVariant) -> Result<TokenStream> {
+    let ident = variant.variant.to_token();
+    let ty = emit_type(&variant.body.ty)?;
+    let test = request_content_type_test(variant.body.kind);
+    let decode = match variant.body.kind {
+        BodyKind::Json => quote! {
+            let axum::Json(body) = <axum::Json<#ty> as axum::extract::FromRequest<S>>::from_request(request, state)
+                .await
+                .map_err(|error| return (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
+        },
+        BodyKind::Form => quote! {
+            let axum::Form(body) = <axum::Form<#ty> as axum::extract::FromRequest<S>>::from_request(request, state)
+                .await
+                .map_err(|error| return (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
+        },
+        BodyKind::Text => quote! {
+            let body = <String as axum::extract::FromRequest<S>>::from_request(request, state)
+                .await
+                .map_err(|error| return (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
+        },
+        BodyKind::Multipart => {
+            unreachable!("multipart never participates in content-type negotiation")
+        }
+    };
+    return Ok(quote! {
+        if #test {
+            #decode
+            return Ok(#name::#ident(body));
+        }
+    });
+}
+
+/// The boolean test matching a normalised (lowercased, parameter-stripped)
+/// `content_type` against a negotiated request variant's kind. Mirrors the
+/// generator's `media_type_kind` classification.
+fn request_content_type_test(kind: BodyKind) -> TokenStream {
+    return match kind {
+        BodyKind::Json => quote! { content_type == "application/json" || content_type.ends_with("+json") },
+        BodyKind::Form => quote! { content_type == "application/x-www-form-urlencoded" },
+        BodyKind::Text => quote! { content_type == "text/plain" },
+        BodyKind::Multipart => {
+            unreachable!("multipart never participates in content-type negotiation")
+        }
     };
 }

@@ -345,6 +345,8 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_form_body",
     "server_multipart_body",
     "server_json_charset",
+    "server_multi_content_request",
+    "server_multi_content_response",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
@@ -376,6 +378,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_multipart_object_field",
     "server_unsupported_multipart_xfile_field",
     "server_unsupported_multipart_xfile_body",
+    "server_unsupported_multipart_combined",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -557,6 +560,8 @@ server_generated_tests!(
     server_form_body,
     server_multipart_body,
     server_json_charset,
+    server_multi_content_request,
+    server_multi_content_response,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.

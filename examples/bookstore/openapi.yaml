@@ -137,6 +137,42 @@ paths:
           description: The cover image was stored.
         "404":
           $ref: "#/components/responses/NotFound"
+  /books/{id}/reviews:
+    post:
+      operationId: submitReview
+      summary: Submit a review as JSON or a form; read it back as JSON or plain text.
+      description: >-
+        Exercises multi-content-type negotiation: the request is decoded from
+        either `application/json` or `application/x-www-form-urlencoded` based on
+        the `Content-Type` header, and the handler chooses whether to echo the
+        stored review back as JSON or as `text/plain`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "schemas/catalog.yaml#/components/schemas/NewReview"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "schemas/catalog.yaml#/components/schemas/NewReview"
+      responses:
+        "201":
+          description: The review was stored; returned as JSON or plain text.
+          content:
+            application/json:
+              schema:
+                $ref: "schemas/catalog.yaml#/components/schemas/Review"
+            text/plain:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
   /health:
     get:
       operationId: getHealth

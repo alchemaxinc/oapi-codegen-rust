@@ -236,6 +236,64 @@ pub struct MultipartField {
     pub is_file: bool,
 }
 
+/// An operation's request payload, when it declares one.
+///
+/// The three cases are mutually exclusive by construction, replacing what would
+/// otherwise be several mutually-exclusive `Option` fields on [`Operation`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum RequestPayload {
+    /// A single supported content type (JSON, `text/plain`, or form), extracted
+    /// directly by the matching axum extractor.
+    Single(Body),
+    /// A `multipart/form-data` body, decoded by a generated [`Multipart`]
+    /// extractor.
+    Multipart(Multipart),
+    /// Several supported content types, dispatched at request time on the
+    /// incoming `Content-Type` header by a generated [`NegotiatedBody`]
+    /// `FromRequest` enum. An unrecognised or missing content type yields a
+    /// `415 Unsupported Media Type`.
+    Negotiated(NegotiatedBody),
+}
+
+/// A body offering several content-type representations, lowered into a
+/// generated enum with one variant per representation.
+///
+/// For a request the enum is a hand-written `FromRequest` that dispatches on
+/// `Content-Type`; for a response it is a plain enum the handler selects a
+/// representation from, which the generated `IntoResponse` renders with the
+/// matching `Content-Type`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NegotiatedBody {
+    /// Enum name — `<Op>RequestBody` for a request, `<Response><Variant>Body`
+    /// for a response — doubling as the argument/field type on the generated
+    /// interface.
+    pub name: RustIdent,
+    /// One variant per supported content type, in priority order (JSON > form >
+    /// text).
+    pub variants: Vec<BodyVariant>,
+}
+
+/// One content-type representation within a [`NegotiatedBody`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct BodyVariant {
+    /// Variant identifier, named after the content kind (`Json`, `Form`,
+    /// `Text`).
+    pub variant: RustIdent,
+    /// The decoded body type and content kind for this representation.
+    pub body: Body,
+}
+
+/// The body of a response variant, when it declares supported content.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResponseBody {
+    /// A single supported content type, rendered by the matching axum response
+    /// wrapper.
+    Single(Body),
+    /// Several supported content types the handler chooses among; the generated
+    /// `IntoResponse` renders whichever representation the handler selected.
+    Negotiated(NegotiatedBody),
+}
+
 /// A generated axum server interface: the `Api` trait plus the operations that
 /// back its `Router`.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -273,16 +331,10 @@ pub struct Operation {
     /// parameters. Its name doubles as the generated `FromRequestParts`
     /// extractor type and the `Api` method's `cookies` argument type.
     pub cookies: Option<Cookies>,
-    /// Request body (JSON, `text/plain`, or form), when the operation declares
-    /// a supported content type. `multipart/form-data` bodies are carried by
-    /// [`Operation::multipart`] instead, so `body` and `multipart` are never
-    /// both `Some`.
-    pub body: Option<Body>,
-    /// Generated `multipart/form-data` extractor, when the operation declares a
-    /// `multipart/form-data` request body. Holds the per-field parsing detail
-    /// the hand-written `FromRequest` implementation needs. Mutually exclusive
-    /// with [`Operation::body`].
-    pub multipart: Option<Multipart>,
+    /// Request payload (a single supported content type, a `multipart/form-data`
+    /// extractor, or a `Content-Type`-dispatched set of content types), when the
+    /// operation declares a request body.
+    pub request: Option<RequestPayload>,
     /// Response variants, in declaration order.
     pub responses: Vec<ResponseCase>,
 }
@@ -362,9 +414,9 @@ pub struct ResponseCase {
     pub variant: RustIdent,
     /// How the variant's HTTP status code is determined.
     pub status: ResponseStatus,
-    /// Response body (JSON, `text/plain`, or form), when the response declares
-    /// a supported content type.
-    pub body: Option<Body>,
+    /// Response body (a single supported content type, or a set of content types
+    /// the handler chooses among), when the response declares supported content.
+    pub body: Option<ResponseBody>,
     /// Declared response headers written by the generated `IntoResponse`, in
     /// declaration order. Empty means no headers (the pre-C5 variant shape).
     pub headers: Vec<ResponseHeader>,

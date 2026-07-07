@@ -117,6 +117,12 @@ mod generated {
     pub mod server_json_charset {
         include!("generated/server_json_charset.rs");
     }
+    pub mod server_multi_content_request {
+        include!("generated/server_multi_content_request.rs");
+    }
+    pub mod server_multi_content_response {
+        include!("generated/server_multi_content_response.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
