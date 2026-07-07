@@ -13,6 +13,8 @@ use crate::ir::CookieParam;
 use crate::ir::Cookies;
 use crate::ir::HeaderParam;
 use crate::ir::Headers;
+use crate::ir::Multipart;
+use crate::ir::MultipartField;
 use crate::ir::Operation;
 use crate::ir::ResponseCase;
 use crate::ir::ResponseHeader;
@@ -31,20 +33,32 @@ impl crate::emit::ServerEmitter for AxumServer {
 }
 
 /// The handler extractor pattern + type for a request body of the given kind.
+///
+/// Multipart bodies are emitted by [`emit_multipart`] and wired in by
+/// [`emit_handler`] directly, so they never reach this helper.
 fn body_extractor(kind: crate::ir::BodyKind, ty: &TokenStream) -> TokenStream {
     return match kind {
         crate::ir::BodyKind::Json => quote! { axum::Json(body): axum::Json<#ty> },
         crate::ir::BodyKind::Text => quote! { body: String },
         crate::ir::BodyKind::Form => quote! { axum::Form(body): axum::Form<#ty> },
+        crate::ir::BodyKind::Multipart => {
+            unreachable!("multipart bodies are emitted via emit_multipart, not body_extractor")
+        }
     };
 }
 
 /// The response tuple term that renders a body of the given kind.
+///
+/// Multipart is request-only (`RESPONSE_BODY_PRIORITY` excludes it), so a
+/// response body never carries [`crate::ir::BodyKind::Multipart`].
 fn response_body_term(kind: crate::ir::BodyKind) -> TokenStream {
     return match kind {
         crate::ir::BodyKind::Json => quote! { axum::Json(body) },
         crate::ir::BodyKind::Text => quote! { body },
         crate::ir::BodyKind::Form => quote! { axum::Form(body) },
+        crate::ir::BodyKind::Multipart => {
+            unreachable!("multipart is request-only and never appears in a response body")
+        }
     };
 }
 
@@ -61,6 +75,9 @@ fn service_items(service: &Service) -> Result<Vec<TokenStream>> {
         }
         if let Some(cookies) = &operation.cookies {
             items.extend(emit_cookies(cookies)?);
+        }
+        if let Some(multipart) = &operation.multipart {
+            items.extend(emit_multipart(multipart)?);
         }
     }
     items.push(emit_trait(service)?);
@@ -120,6 +137,10 @@ fn emit_method_args(operation: &Operation) -> Result<Vec<TokenStream>> {
     }
     if let Some(body) = &operation.body {
         let ty = emit_type(&body.ty)?;
+        args.push(quote! { body: #ty });
+    }
+    if let Some(multipart) = &operation.multipart {
+        let ty = multipart.name.to_token();
         args.push(quote! { body: #ty });
     }
     return Ok(args);
@@ -321,6 +342,11 @@ fn emit_handler(operation: &Operation) -> Result<TokenStream> {
     if let Some(body) = &operation.body {
         let ty = emit_type(&body.ty)?;
         extractors.push(body_extractor(body.kind, &ty));
+        call_args.push(quote! { body });
+    }
+    if let Some(multipart) = &operation.multipart {
+        let ty = multipart.name.to_token();
+        extractors.push(quote! { body: #ty });
         call_args.push(quote! { body });
     }
 
@@ -664,4 +690,141 @@ fn emit_cookie_binding(param: &CookieParam) -> Result<TokenStream> {
             None => #absent,
         };
     });
+}
+
+/// Emit a `multipart/form-data` extractor: a per-operation struct of decoded
+/// fields plus a hand-written `axum::extract::FromRequest` implementation.
+///
+/// axum has no typed multipart extractor, so the implementation drives
+/// `axum::extract::Multipart`, reads each declared field (text scalars are
+/// parsed with `FromStr`; binary/file fields are read as raw bytes), and
+/// returns a `400 Bad Request` with a short plaintext reason on a missing
+/// required field or an unparseable value. Unknown fields are ignored; a
+/// repeated field keeps its last value.
+///
+/// The struct is generated per operation (rather than reusing a component
+/// model), so multipart works under any model configuration — including
+/// `models: false` with cross-file `import-mapping`.
+fn emit_multipart(multipart: &Multipart) -> Result<Vec<TokenStream>> {
+    let name = multipart.name.to_token();
+
+    let mut field_defs = Vec::with_capacity(multipart.fields.len());
+    let mut accumulators = Vec::with_capacity(multipart.fields.len());
+    let mut arms = Vec::with_capacity(multipart.fields.len());
+    let mut inits = Vec::with_capacity(multipart.fields.len());
+    for field in &multipart.fields {
+        let ident = field.rust_name.to_token();
+        let ty = emit_type(&field.ty)?;
+        let field_ty = if field.optional {
+            quote! { Option<#ty> }
+        } else {
+            quote! { #ty }
+        };
+        field_defs.push(quote! { pub #ident: #field_ty, });
+        accumulators.push(quote! { let mut #ident: Option<#ty> = None; });
+        arms.push(emit_multipart_arm(field)?);
+        inits.push(emit_multipart_init(field));
+    }
+
+    let struct_def = quote! {
+        #[derive(Debug, Clone)]
+        pub struct #name {
+            #(#field_defs)*
+        }
+    };
+
+    let impl_block = quote! {
+        impl<S> axum::extract::FromRequest<S> for #name
+        where
+            S: Send + Sync,
+        {
+            type Rejection = (axum::http::StatusCode, String);
+
+            async fn from_request(
+                request: axum::extract::Request,
+                state: &S,
+            ) -> Result<Self, Self::Rejection> {
+                let mut multipart = <axum::extract::Multipart as axum::extract::FromRequest<S>>::from_request(
+                    request,
+                    state,
+                )
+                .await
+                .map_err(|error| return (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
+                #(#accumulators)*
+                while let Some(field) = multipart
+                    .next_field()
+                    .await
+                    .map_err(|error| return (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?
+                {
+                    let field_name = field.name().map(|name| return name.to_owned());
+                    match field_name.as_deref() {
+                        #(#arms)*
+                        _ => {}
+                    }
+                }
+                return Ok(Self { #(#inits),* });
+            }
+        }
+    };
+
+    return Ok(vec![struct_def, impl_block]);
+}
+
+/// Emit the `match` arm that reads one multipart field into its accumulator: raw
+/// bytes for a file field, a verbatim `String`, or a `trim()`-parsed scalar.
+fn emit_multipart_arm(field: &MultipartField) -> Result<TokenStream> {
+    let ident = field.rust_name.to_token();
+    let wire = &field.wire_name;
+
+    let read = if field.is_file {
+        quote! {
+            let value = field
+                .bytes()
+                .await
+                .map_err(|error| return (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
+            #ident = Some(value.to_vec());
+        }
+    } else if matches!(field.ty, RustType::String) {
+        quote! {
+            let value = field
+                .text()
+                .await
+                .map_err(|error| return (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
+            #ident = Some(value);
+        }
+    } else {
+        let ty = emit_type(&field.ty)?;
+        let invalid_msg = format!("multipart field `{wire}` has an invalid value");
+        quote! {
+            let text = field
+                .text()
+                .await
+                .map_err(|error| return (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
+            let value = match text.trim().parse::<#ty>() {
+                Ok(parsed) => parsed,
+                Err(_) => return Err((axum::http::StatusCode::BAD_REQUEST, #invalid_msg.to_owned())),
+            };
+            #ident = Some(value);
+        }
+    };
+
+    return Ok(quote! {
+        Some(#wire) => {
+            #read
+        }
+    });
+}
+
+/// Emit the struct-literal initialiser for one multipart field. A non-optional
+/// field is unwrapped with a `400` on absence; an optional field passes its
+/// `Option<..>` accumulator straight through via field-init shorthand.
+fn emit_multipart_init(field: &MultipartField) -> TokenStream {
+    let ident = field.rust_name.to_token();
+    if field.optional {
+        return quote! { #ident };
+    }
+    let missing_msg = format!("missing required multipart field `{}`", field.wire_name);
+    return quote! {
+        #ident: #ident.ok_or((axum::http::StatusCode::BAD_REQUEST, #missing_msg.to_owned()))?
+    };
 }

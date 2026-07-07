@@ -193,6 +193,47 @@ pub enum BodyKind {
     Text,
     /// `application/x-www-form-urlencoded` → `axum::Form`.
     Form,
+    /// `multipart/form-data` (request bodies only) → a hand-written
+    /// `FromRequest` extractor driving `axum::extract::Multipart`. Carried
+    /// alongside an [`Operation`]'s [`Multipart`], which holds the per-field
+    /// parsing detail the extractor needs.
+    Multipart,
+}
+
+/// A `multipart/form-data` request body lowered into a per-operation extractor.
+///
+/// axum has no *typed* multipart extractor, so the generator emits a dedicated
+/// struct (an operation artifact, like the query/header/cookie structs) plus a
+/// hand-written `FromRequest` implementation that drives
+/// `axum::extract::Multipart`, reads each declared field, and returns a
+/// `400 Bad Request` on a missing required field or an unparseable value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Multipart {
+    /// Struct name (`<Op>Multipart`), doubling as the generated `FromRequest`
+    /// extractor type and the `Api` method's `body` argument type.
+    pub name: RustIdent,
+    /// Fields parsed from the multipart stream, in declaration order.
+    pub fields: Vec<MultipartField>,
+}
+
+/// A single field of a [`Multipart`] body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultipartField {
+    /// Wire field name (the part's `Content-Disposition` `name`).
+    pub wire_name: String,
+    /// Target struct field identifier on the generated `<Op>Multipart` struct.
+    pub rust_name: RustIdent,
+    /// The decoded field type: `Vec<u8>` for a binary (file) part, else a
+    /// scalar. This is the bare inner type even when the field is optional;
+    /// [`MultipartField::optional`] records whether the struct wraps it in
+    /// `Option<..>`.
+    pub ty: RustType,
+    /// Whether the generated struct wraps this field in `Option<..>` (true when
+    /// the property is not `required`, or is `nullable`). An absent
+    /// non-optional field is a `400`; an absent optional field is `None`.
+    pub optional: bool,
+    /// Whether the part is a binary/file field read as raw bytes (`Vec<u8>`).
+    pub is_file: bool,
 }
 
 /// A generated axum server interface: the `Api` trait plus the operations that
@@ -233,8 +274,15 @@ pub struct Operation {
     /// extractor type and the `Api` method's `cookies` argument type.
     pub cookies: Option<Cookies>,
     /// Request body (JSON, `text/plain`, or form), when the operation declares
-    /// a supported content type.
+    /// a supported content type. `multipart/form-data` bodies are carried by
+    /// [`Operation::multipart`] instead, so `body` and `multipart` are never
+    /// both `Some`.
     pub body: Option<Body>,
+    /// Generated `multipart/form-data` extractor, when the operation declares a
+    /// `multipart/form-data` request body. Holds the per-field parsing detail
+    /// the hand-written `FromRequest` implementation needs. Mutually exclusive
+    /// with [`Operation::body`].
+    pub multipart: Option<Multipart>,
     /// Response variants, in declaration order.
     pub responses: Vec<ResponseCase>,
 }

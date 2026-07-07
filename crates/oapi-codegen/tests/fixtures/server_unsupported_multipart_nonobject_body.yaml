@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: multipart non-object body (unsupported)
+  version: "1"
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: The file was stored.

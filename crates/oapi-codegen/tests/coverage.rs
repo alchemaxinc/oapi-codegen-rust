@@ -343,6 +343,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_response_headers",
     "server_text_body",
     "server_form_body",
+    "server_multipart_body",
     "server_json_charset",
 ];
 
@@ -371,6 +372,9 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_text_non_string_body",
     "server_unsupported_form_scalar_body",
     "server_unsupported_form_ref_scalar_body",
+    "server_unsupported_multipart_nonobject_body",
+    "server_unsupported_multipart_object_field",
+    "server_unsupported_multipart_xfile_body",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -550,6 +554,7 @@ server_generated_tests!(
     server_response_headers,
     server_text_body,
     server_form_body,
+    server_multipart_body,
     server_json_charset,
 );
 

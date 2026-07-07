@@ -18,6 +18,8 @@ use bookstore_example::restapi::GetBookResponse;
 use bookstore_example::restapi::GetHealthResponse;
 use bookstore_example::restapi::ListBooksQuery;
 use bookstore_example::restapi::ListBooksResponse;
+use bookstore_example::restapi::UploadBookCoverMultipart;
+use bookstore_example::restapi::UploadBookCoverResponse;
 
 #[derive(Clone)]
 struct Service;
@@ -83,6 +85,18 @@ impl Api for Service {
 
     async fn get_health(&self) -> GetHealthResponse {
         return GetHealthResponse::Ok(serde_json::json!({ "status": "ok" }));
+    }
+
+    async fn upload_book_cover(&self, id: String, body: UploadBookCoverMultipart) -> UploadBookCoverResponse {
+        // The multipart body decodes to a dedicated extractor struct: the binary
+        // `image` part is `Vec<u8>`, required text parts are bare, and the
+        // optional `caption` is `Option<String>`.
+        if id.is_empty() || body.image.is_empty() || body.filename.is_empty() {
+            return UploadBookCoverResponse::NotFound;
+        }
+
+        let _caption: Option<String> = body.caption;
+        return UploadBookCoverResponse::NoContent;
     }
 }
 

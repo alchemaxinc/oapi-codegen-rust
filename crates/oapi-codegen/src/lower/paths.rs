@@ -40,6 +40,7 @@
 use std::collections::BTreeMap;
 
 use http::StatusCode as HttpStatus;
+use openapiv3::ObjectType;
 use openapiv3::Operation as OasOperation;
 use openapiv3::Parameter;
 use openapiv3::ParameterData;
@@ -62,6 +63,8 @@ use crate::ir::Cookies;
 use crate::ir::Field;
 use crate::ir::HeaderParam;
 use crate::ir::Headers;
+use crate::ir::Multipart;
+use crate::ir::MultipartField;
 use crate::ir::Operation;
 use crate::ir::Param;
 use crate::ir::ResponseCase;
@@ -84,6 +87,25 @@ use crate::naming::to_ident;
 /// `in: header`, since they are governed by content negotiation / security
 /// mechanisms rather than the parameter object (compared case-insensitively).
 const IGNORED_HEADER_NAMES: [&str; 3] = ["accept", "content-type", "authorization"];
+
+/// Content-type selection priority for request bodies. `multipart/form-data` is
+/// only offered here (not for responses): axum has a multipart *extractor* but
+/// no multipart *response* writer.
+const REQUEST_BODY_PRIORITY: [BodyKind; 4] = [BodyKind::Json, BodyKind::Form, BodyKind::Multipart, BodyKind::Text];
+
+/// Content-type selection priority for response bodies. Multipart is excluded,
+/// so a multipart-only response is emitted bodyless (like any unsupported-only
+/// response) rather than erroring.
+const RESPONSE_BODY_PRIORITY: [BodyKind; 3] = [BodyKind::Json, BodyKind::Form, BodyKind::Text];
+
+/// The lowered request body. A `multipart/form-data` body yields a
+/// [`Multipart`] extractor (`multipart`); every other supported content type
+/// yields a [`Body`] (`body`). The two are mutually exclusive — at most one is
+/// `Some`.
+struct LoweredRequestBody {
+    body: Option<Body>,
+    multipart: Option<Multipart>,
+}
 
 /// Rust field names the response emitter injects into a header-bearing struct
 /// variant (`status` for dynamic responses, `body` when a body is present). A
@@ -166,7 +188,7 @@ impl Lowerer<'_> {
         let query = self.lower_query_params(path, method, &params, &name)?;
         let headers = self.lower_header_params(path, method, &params, &name)?;
         let cookies = self.lower_cookie_params(path, method, &params, &name)?;
-        let body = self.lower_request_body(path, method, operation)?;
+        let request_body = self.lower_request_body(path, method, &name, operation)?;
         let responses = self.lower_responses(path, method, operation)?;
 
         return Ok(Operation {
@@ -179,7 +201,8 @@ impl Lowerer<'_> {
             query,
             headers,
             cookies,
-            body,
+            body: request_body.body,
+            multipart: request_body.multipart,
             responses,
         });
     }
@@ -616,14 +639,17 @@ impl Lowerer<'_> {
         return Ok(ty);
     }
 
-    /// Choose the single content type to generate for a body, by priority
-    /// (JSON > form > text). Returns the kind and its media entry, or `None`
-    /// when the map is empty or declares no supported content type.
+    /// Choose the single content type to generate for a body, given a caller's
+    /// content-kind `priority` (requests and responses differ — see
+    /// [`REQUEST_BODY_PRIORITY`] / [`RESPONSE_BODY_PRIORITY`]). Returns the kind
+    /// and its media entry, or `None` when the map declares no content type the
+    /// `priority` accepts.
     fn select_body<'m>(
         &self,
         content: &'m indexmap::IndexMap<String, openapiv3::MediaType>,
+        priority: &[BodyKind],
     ) -> Option<(BodyKind, &'m openapiv3::MediaType)> {
-        for wanted in [BodyKind::Json, BodyKind::Form, BodyKind::Text] {
+        for &wanted in priority {
             for (name, media) in content {
                 if media_type_kind(name) == Some(wanted) {
                     return Some((wanted, media));
@@ -696,6 +722,16 @@ impl Lowerer<'_> {
                     });
                 }
             },
+            // Multipart is lowered by `lower_multipart_body`, and never selected
+            // for responses (`RESPONSE_BODY_PRIORITY` excludes it), so it does
+            // not reach the shared body mapping.
+            BodyKind::Multipart => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: "multipart/form-data is only supported for request bodies".to_owned(),
+                });
+            }
         };
         return Ok(Some(Body { ty, kind }));
     }
@@ -728,6 +764,9 @@ fn media_type_kind(name: &str) -> Option<BodyKind> {
     }
     if base == "application/x-www-form-urlencoded" {
         return Some(BodyKind::Form);
+    }
+    if base == "multipart/form-data" {
+        return Some(BodyKind::Multipart);
     }
     if base == "text/plain" {
         return Some(BodyKind::Text);
@@ -797,11 +836,24 @@ impl Lowerer<'_> {
 
     /// Lower an operation's request body, if it declares one. A cross-file
     /// wrapper `$ref` is resolved against the referenced file; its inner schema
-    /// `$ref`s are then interpreted against that file (`origin`).
-    fn lower_request_body(&self, path: &str, method: &str, operation: &OasOperation) -> Result<Option<Body>> {
+    /// `$ref`s are then interpreted against that file (`origin`). A
+    /// `multipart/form-data` body additionally yields a per-operation extractor
+    /// (`op_name` seeds its name).
+    fn lower_request_body(
+        &self,
+        path: &str,
+        method: &str,
+        op_name: &RustIdent,
+        operation: &OasOperation,
+    ) -> Result<LoweredRequestBody> {
         let body = match &operation.request_body {
             Some(body) => body,
-            None => return Ok(None),
+            None => {
+                return Ok(LoweredRequestBody {
+                    body: None,
+                    multipart: None,
+                });
+            }
         };
         let (body, origin): (RequestBody, Option<String>) = match body {
             ReferenceOr::Item(body) => (body.clone(), None),
@@ -810,11 +862,14 @@ impl Lowerer<'_> {
                 (resolved.value, resolved.origin)
             }
         };
-        let (kind, media) = match self.select_body(&body.content) {
+        let (kind, media) = match self.select_body(&body.content, &REQUEST_BODY_PRIORITY) {
             Some(selected) => selected,
             None => {
                 if body.content.is_empty() {
-                    return Ok(None);
+                    return Ok(LoweredRequestBody {
+                        body: None,
+                        multipart: None,
+                    });
                 }
                 return Err(Error::UnsupportedOperation {
                     method: method.to_owned(),
@@ -826,7 +881,136 @@ impl Lowerer<'_> {
                 });
             }
         };
-        return self.body_from_media(path, method, origin.as_deref(), kind, media);
+        if kind == BodyKind::Multipart {
+            let multipart = self.lower_multipart_body(path, method, op_name, origin.as_deref(), media)?;
+            return Ok(LoweredRequestBody {
+                body: None,
+                multipart: Some(multipart),
+            });
+        }
+        let body = self.body_from_media(path, method, origin.as_deref(), kind, media)?;
+        return Ok(LoweredRequestBody { body, multipart: None });
+    }
+
+    /// Lower a `multipart/form-data` request body into a per-operation extractor
+    /// struct (`<Op>Multipart`) that parses it. The schema must be an object,
+    /// declared either inline or as a same-document `$ref` (so its fields can be
+    /// enumerated); each property must be a scalar or a binary/file string.
+    /// Composite, nested-object, array, and cross-file/external bodies are
+    /// rejected.
+    ///
+    /// Unlike JSON/form/text bodies, a multipart body does not reuse a component
+    /// model type: axum has no typed multipart extractor, so the generator owns
+    /// a dedicated struct plus a hand-written `FromRequest`. Generating a
+    /// per-operation struct (rather than reusing the referenced component) keeps
+    /// multipart working under any model configuration — including
+    /// `models: false` with cross-file `import-mapping` — and lets an inline
+    /// object be used without declaring a redundant named component.
+    fn lower_multipart_body(
+        &self,
+        path: &str,
+        method: &str,
+        op_name: &RustIdent,
+        origin: Option<&str>,
+        media: &openapiv3::MediaType,
+    ) -> Result<Multipart> {
+        let unsupported = |reason: String| {
+            return Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason,
+            };
+        };
+        let schema = media
+            .schema
+            .as_ref()
+            .ok_or_else(|| return unsupported("multipart/form-data body must declare a schema".to_owned()))?;
+        let object = self.multipart_object(path, method, origin, schema)?;
+        let fields = self.lower_multipart_fields(path, method, &object)?;
+        return Ok(Multipart {
+            name: operations::multipart_struct_name(op_name),
+            fields,
+        });
+    }
+
+    /// Resolve a multipart body schema to its [`ObjectType`]. An inline object is
+    /// taken directly; a `$ref` must be same-document (no cross-file part, and
+    /// the body must not itself come from a referenced file) and resolve to an
+    /// object. Non-object schemas and cross-file/external references are
+    /// rejected — their fields cannot be enumerated into a typed extractor.
+    fn multipart_object(
+        &self,
+        path: &str,
+        method: &str,
+        origin: Option<&str>,
+        schema: &ReferenceOr<Schema>,
+    ) -> Result<ObjectType> {
+        let reject = |reason: &str| {
+            return Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: reason.to_owned(),
+            };
+        };
+        let not_object = "multipart/form-data body schema must be an `object`";
+        let cross_file = "multipart/form-data body must be an inline object or a same-document `$ref`; cross-file/external multipart is unsupported";
+        match schema {
+            ReferenceOr::Item(item) => {
+                if origin.is_some() {
+                    return Err(reject(cross_file));
+                }
+                match &item.schema_kind {
+                    SchemaKind::Type(Type::Object(object)) => return Ok(object.clone()),
+                    _ => return Err(reject(not_object)),
+                }
+            }
+            ReferenceOr::Reference { reference } => {
+                if origin.is_some() || ref_file_part(reference).is_some() {
+                    return Err(reject(cross_file));
+                }
+                let resolved = self.spec.resolve_schema(origin, reference)?;
+                match &resolved.schema_kind {
+                    SchemaKind::Type(Type::Object(object)) => return Ok(object.clone()),
+                    _ => return Err(reject(not_object)),
+                }
+            }
+        }
+    }
+
+    /// Lower a multipart object's properties into [`MultipartField`]s, mirroring
+    /// how the models pass shapes the decoded struct: a field is `Option<..>`
+    /// when it is not `required` or is `nullable`, and its identifier is the
+    /// property's `snake_case` name. Each property must resolve to a scalar (a
+    /// binary/`byte` string becomes a `Vec<u8>` file field); anything else is
+    /// rejected.
+    fn lower_multipart_fields(&self, path: &str, method: &str, object: &ObjectType) -> Result<Vec<MultipartField>> {
+        let mut fields = Vec::with_capacity(object.properties.len());
+        for (wire_name, property) in &object.properties {
+            let required = object.required.iter().any(|name| {
+                return name == wire_name;
+            });
+            let (kind, nullable) = match property {
+                ReferenceOr::Item(schema) => (schema.schema_kind.clone(), schema.schema_data.nullable),
+                ReferenceOr::Reference { reference } => (self.spec.resolve_schema(None, reference)?.schema_kind, false),
+            };
+            let ty = scalar_type(&kind).ok_or_else(|| {
+                return Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!(
+                        "multipart field `{wire_name}` must be a scalar or binary string; nested objects and arrays are not supported"
+                    ),
+                };
+            })?;
+            fields.push(MultipartField {
+                wire_name: wire_name.clone(),
+                rust_name: to_ident(wire_name, Case::Snake),
+                is_file: matches!(ty, RustType::Bytes),
+                ty,
+                optional: !required || nullable,
+            });
+        }
+        return Ok(fields);
     }
 
     /// Lower a response's declared headers into scalar-typed [`ResponseHeader`]s.
@@ -999,7 +1183,7 @@ impl Lowerer<'_> {
         origin: Option<&str>,
         response: &OasResponse,
     ) -> Result<Option<Body>> {
-        let (kind, media) = match self.select_body(&response.content) {
+        let (kind, media) = match self.select_body(&response.content, &RESPONSE_BODY_PRIORITY) {
             Some(selected) => selected,
             None => return Ok(None),
         };

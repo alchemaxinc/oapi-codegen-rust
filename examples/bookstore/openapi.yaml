@@ -98,6 +98,45 @@ paths:
             application/json:
               schema:
                 $ref: "schemas/common.yaml#/components/schemas/ErrorResponse"
+  /books/{id}/cover:
+    put:
+      operationId: uploadBookCover
+      summary: Upload or replace a book's cover image.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              description: >-
+                A book-cover image upload. Declared inline so the generator
+                emits a dedicated `UploadBookCoverMultipart` extractor without a
+                redundant named component.
+              required:
+                - image
+                - filename
+              properties:
+                image:
+                  type: string
+                  format: binary
+                  description: The raw cover-image bytes.
+                filename:
+                  type: string
+                  description: Original filename of the uploaded image.
+                caption:
+                  type: string
+                  description: Optional human-readable caption for the cover.
+      responses:
+        "204":
+          description: The cover image was stored.
+        "404":
+          $ref: "#/components/responses/NotFound"
   /health:
     get:
       operationId: getHealth

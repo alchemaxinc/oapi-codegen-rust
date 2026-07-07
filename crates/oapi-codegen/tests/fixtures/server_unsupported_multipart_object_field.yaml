@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: multipart non-scalar field (unsupported)
+  version: "1"
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadRequest"
+      responses:
+        "204":
+          description: The file was stored.
+components:
+  schemas:
+    UploadRequest:
+      type: object
+      required: [metadata]
+      properties:
+        metadata:
+          type: object
+          properties:
+            key:
+              type: string
