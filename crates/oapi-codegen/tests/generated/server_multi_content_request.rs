@@ -65,6 +65,12 @@ where
                 })?;
             return Ok(CreateWidgetRequestBody::Text(body));
         }
+        if content_type.is_empty() {
+            return Err((
+                axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "missing `Content-Type` header".to_owned(),
+            ));
+        }
         return Err((
             axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
             format!("unsupported content type `{content_type}`"),
