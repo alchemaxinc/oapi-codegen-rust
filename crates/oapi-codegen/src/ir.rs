@@ -232,7 +232,8 @@ pub struct Operation {
     /// parameters. Its name doubles as the generated `FromRequestParts`
     /// extractor type and the `Api` method's `cookies` argument type.
     pub cookies: Option<Cookies>,
-    /// JSON request body type, when the operation declares one.
+    /// Request body (JSON, `text/plain`, or form), when the operation declares
+    /// a supported content type.
     pub body: Option<Body>,
     /// Response variants, in declaration order.
     pub responses: Vec<ResponseCase>,
@@ -313,7 +314,8 @@ pub struct ResponseCase {
     pub variant: RustIdent,
     /// How the variant's HTTP status code is determined.
     pub status: ResponseStatus,
-    /// JSON response body type, when the response declares content.
+    /// Response body (JSON, `text/plain`, or form), when the response declares
+    /// a supported content type.
     pub body: Option<Body>,
     /// Declared response headers written by the generated `IntoResponse`, in
     /// declaration order. Empty means no headers (the pre-C5 variant shape).

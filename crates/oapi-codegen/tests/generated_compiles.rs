@@ -555,10 +555,12 @@ fn generated_server_handles_text_body() {
 
 #[test]
 fn generated_server_handles_form_body() {
+    use axum::response::IntoResponse;
     use generated::server_form_body;
     use server_form_body::Api;
     use server_form_body::Credentials;
     use server_form_body::LoginResponse;
+    use server_form_body::Session;
 
     #[derive(Clone)]
     struct Service;
@@ -567,11 +569,14 @@ fn generated_server_handles_form_body() {
         async fn login(&self, body: Credentials) -> LoginResponse {
             let _u: String = body.username;
             let _p: String = body.password;
-            return LoginResponse::NoContent;
+            return LoginResponse::Ok(Session { token: "t".to_owned() });
         }
     }
 
-    // Router builds only if the generated `axum::Form<Credentials>` extractor
-    // type-checks (Credentials derives Deserialize).
+    // The response renders the `Session` struct as an `axum::Form` body; the
+    // router builds only if both the `axum::Form<Credentials>` request extractor
+    // and the form response wrapper type-check (both derive Serialize/Deserialize).
+    let response = LoginResponse::Ok(Session { token: "t".to_owned() }).into_response();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
     let _router: axum::Router = server_form_body::router(Service);
 }

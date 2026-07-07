@@ -6,6 +6,11 @@ pub struct Credentials {
     pub password: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct Session {
+    pub token: String,
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     fn login(
@@ -15,21 +20,21 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 pub enum LoginResponse {
-    /// Logged in.
-    NoContent,
+    /// The issued session, form-encoded.
+    Ok(Session),
 }
 
 impl axum::response::IntoResponse for LoginResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
-            LoginResponse::NoContent => {
+            LoginResponse::Ok(body) => {
                 const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
-                    204,
+                    200,
                 ) {
                     Ok(status) => status,
                     Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
                 };
-                STATUS.into_response()
+                (STATUS, axum::Form(body)).into_response()
             }
         }
     }

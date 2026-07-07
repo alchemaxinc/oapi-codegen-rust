@@ -370,6 +370,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_only_binary_body",
     "server_unsupported_text_non_string_body",
     "server_unsupported_form_scalar_body",
+    "server_unsupported_form_ref_scalar_body",
 ];
 
 /// Absolute path to the crate's `tests` directory.

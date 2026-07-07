@@ -665,7 +665,28 @@ impl Lowerer<'_> {
                 RustType::String
             }
             BodyKind::Form => match schema {
-                ReferenceOr::Reference { reference } => self.schema_ref_type(path, method, origin, reference)?,
+                ReferenceOr::Reference { reference } => {
+                    // A form body must be a struct of scalar fields for
+                    // `serde_urlencoded`. When the schema is resolvable here
+                    // (same-document, or an origin-file `$ref` without its own
+                    // file part) require it to be an `object`. A cross-file
+                    // (`file#/...`) ref is opaque — it maps to an external type
+                    // via the `import-mapping`, so its shape cannot be inspected
+                    // and is trusted.
+                    if ref_file_part(reference).is_none() {
+                        let resolved = self.spec.resolve_schema(origin, reference)?;
+                        if !matches!(resolved.schema_kind, SchemaKind::Type(Type::Object(_))) {
+                            return Err(Error::UnsupportedOperation {
+                                method: method.to_owned(),
+                                path: path.to_owned(),
+                                reason:
+                                    "form (`application/x-www-form-urlencoded`) body must reference an `object` schema"
+                                        .to_owned(),
+                            });
+                        }
+                    }
+                    self.schema_ref_type(path, method, origin, reference)?
+                }
                 ReferenceOr::Item(_) => {
                     return Err(Error::UnsupportedOperation {
                         method: method.to_owned(),

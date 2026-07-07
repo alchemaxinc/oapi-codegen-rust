@@ -1,0 +1,21 @@
+openapi: 3.0.3
+info:
+  title: unsupported form body referencing a scalar schema
+  version: "1"
+paths:
+  /f:
+    post:
+      operationId: f
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/Token"
+      responses:
+        "204":
+          description: ok
+components:
+  schemas:
+    Token:
+      type: string
