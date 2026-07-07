@@ -28,6 +28,13 @@ paths:
                 type: array
                 items:
                   type: string
+        "204":
+          description: No content, but a correlation id header is still returned.
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
         default:
           description: An error, with a correlation id.
           headers:

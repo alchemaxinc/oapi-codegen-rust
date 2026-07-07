@@ -18,6 +18,8 @@ pub enum GetWidgetsResponse {
         /// Remaining quota in the current window.
         x_rate_limit_remaining: Option<i32>,
     },
+    /// No content, but a correlation id header is still returned.
+    NoContent { x_request_id: String },
     /// An error, with a correlation id.
     Default { status: axum::http::StatusCode, body: String, x_request_id: String },
 }
@@ -63,6 +65,33 @@ impl axum::response::IntoResponse for GetWidgetsResponse {
                     },
                     header_map,
                     axum::Json(body),
+                )
+                    .into_response();
+            }
+            GetWidgetsResponse::NoContent { x_request_id } => {
+                let mut header_map = axum::http::HeaderMap::new();
+                if let Ok(value) = axum::http::HeaderValue::from_str(
+                    &x_request_id.to_string(),
+                ) {
+                    header_map
+                        .insert(
+                            axum::http::HeaderName::from_static("x-request-id"),
+                            value,
+                        );
+                }
+                return (
+                    {
+                        const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                            204,
+                        ) {
+                            Ok(status) => status,
+                            Err(_) => {
+                                panic!("oapi-codegen emitted an invalid HTTP status code")
+                            }
+                        };
+                        STATUS
+                    },
+                    header_map,
                 )
                     .into_response();
             }

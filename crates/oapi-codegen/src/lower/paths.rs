@@ -87,8 +87,9 @@ const JSON_MEDIA_TYPE: &str = "application/json";
 const IGNORED_HEADER_NAMES: [&str; 3] = ["accept", "content-type", "authorization"];
 
 /// Check whether a header name is valid for use with `HeaderName::from_static`.
-/// Visible ASCII printable characters excluding `:` (the field-name token set
-/// per RFC 9110 §5.1). This prevents a later panic when emitting.
+/// Enforces the HTTP `tchar` token set (RFC 9110 §5.6.2 / RFC 7230): ASCII
+/// alphanumerics plus ``!#$%&'*+-.^_`|~``. This prevents a later panic when
+/// emitting `HeaderName::from_static`.
 fn is_valid_header_name(name: &str) -> bool {
     if name.is_empty() {
         return false;
@@ -727,6 +728,7 @@ impl Lowerer<'_> {
     ) -> Result<Vec<crate::ir::ResponseHeader>> {
         let mut headers = Vec::new();
         let mut seen: Vec<String> = Vec::new();
+        let mut seen_idents: Vec<String> = Vec::new();
         for (header_name, header_ref) in &response.headers {
             let header = match header_ref {
                 ReferenceOr::Item(header) => header,
@@ -748,10 +750,26 @@ impl Lowerer<'_> {
                     reason: format!("response header `{header_name}` has an invalid header name"),
                 });
             }
+            let ident = to_ident(header_name, Case::Snake);
+            // Distinct header names can collapse to the same Rust field
+            // identifier (e.g. `X-Foo` and `X_Foo` both → `x_foo`), which would
+            // emit a struct with duplicate fields. Reject rather than
+            // mis-generate.
+            if seen_idents.iter().any(|other| return other == ident.logical()) {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!(
+                        "response header `{header_name}` maps to the same Rust field name as another header (`{}`)",
+                        ident.logical()
+                    ),
+                });
+            }
             seen.push(header_name.clone());
+            seen_idents.push(ident.logical().to_owned());
             let ty = self.scalar_from_format(path, method, origin, "response header", header_name, &header.format)?;
             headers.push(crate::ir::ResponseHeader {
-                name: to_ident(header_name, Case::Snake),
+                name: ident,
                 header_name: header_name.clone(),
                 ty,
                 required: header.required,
