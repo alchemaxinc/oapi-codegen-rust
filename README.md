@@ -23,8 +23,8 @@ package: apimodel # informational
 output: models.rs # output path (overridden by -o)
 generate:
   models: true
-  std-http-server: true # also emit an axum server interface
-  client: true # instead emit a blocking reqwest client
+  std-http-server: true # emit an axum server interface, or…
+  client: true # …a blocking reqwest client (server wins if both are set)
 ```
 
 `import-mapping` maps a referenced spec file to the Rust module its schemas are
@@ -242,8 +242,8 @@ header fields are always `Option<T>` and parsed best-effort, even for headers th
 spec marks required.
 
 A client crate needs `reqwest = { version = "0.12", features = ["blocking",
-"json"] }` (the `json` feature is only required when an operation decodes a JSON
-response body).
+"json"] }`. The `json` feature is required when an operation sends a JSON request
+body and/or decodes a JSON response body.
 
 **Supported**
 
