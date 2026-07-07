@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: response header colliding with an injected field (unsupported)
+  version: "1"
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      responses:
+        "200":
+          description: a header named Body collides with the injected body field
+          headers:
+            Body:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: string
