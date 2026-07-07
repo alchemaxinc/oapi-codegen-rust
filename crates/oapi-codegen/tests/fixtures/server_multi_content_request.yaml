@@ -1,0 +1,34 @@
+openapi: 3.0.3
+info:
+  title: multi-content request
+  version: "1"
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      summary: Create a widget from JSON, form, or plain-text input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Widget"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/Widget"
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "201":
+          description: The widget was created.
+components:
+  schemas:
+    Widget:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        weight:
+          type: integer

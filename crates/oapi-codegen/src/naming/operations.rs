@@ -34,6 +34,21 @@ pub fn multipart_struct_name(op: &RustIdent) -> RustIdent {
     return to_ident(&format!("{}_multipart", op.logical()), Case::Pascal);
 }
 
+/// The generated dispatch-enum name for an operation whose request body offers
+/// several content types (`<Op>RequestBody`).
+pub fn request_body_enum_name(op: &RustIdent) -> RustIdent {
+    return to_ident(&format!("{}_request_body", op.logical()), Case::Pascal);
+}
+
+/// The generated body-enum name for a response variant that offers several
+/// content types (`<Response><Variant>Body`).
+pub fn response_body_enum_name(response_enum: &RustIdent, variant: &RustIdent) -> RustIdent {
+    return to_ident(
+        &format!("{}_{}_body", response_enum.logical(), variant.logical()),
+        Case::Pascal,
+    );
+}
+
 pub fn axum_handler_name(op: &RustIdent) -> RustIdent {
     return to_ident(&format!("{}_handler", op.logical()), Case::Snake);
 }
@@ -55,6 +70,13 @@ mod tests {
         assert_eq!(headers_struct_name(&list_pets).logical(), "ListPetsHeaders");
         assert_eq!(cookies_struct_name(&list_pets).logical(), "ListPetsCookies");
         assert_eq!(multipart_struct_name(&list_pets).logical(), "ListPetsMultipart");
+        assert_eq!(request_body_enum_name(&list_pets).logical(), "ListPetsRequestBody");
+        let response = response_enum_name(&list_pets);
+        let ok = to_ident("ok", Case::Pascal);
+        assert_eq!(
+            response_body_enum_name(&response, &ok).logical(),
+            "ListPetsResponseOkBody"
+        );
         assert_eq!(axum_handler_name(&list_pets).logical(), "list_pets_handler");
     }
 }

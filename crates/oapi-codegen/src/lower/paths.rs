@@ -58,6 +58,7 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::ir::Body;
 use crate::ir::BodyKind;
+use crate::ir::BodyVariant;
 use crate::ir::CookieParam;
 use crate::ir::Cookies;
 use crate::ir::Field;
@@ -65,8 +66,11 @@ use crate::ir::HeaderParam;
 use crate::ir::Headers;
 use crate::ir::Multipart;
 use crate::ir::MultipartField;
+use crate::ir::NegotiatedBody;
 use crate::ir::Operation;
 use crate::ir::Param;
+use crate::ir::RequestPayload;
+use crate::ir::ResponseBody;
 use crate::ir::ResponseCase;
 use crate::ir::ResponseStatus;
 use crate::ir::RustType;
@@ -98,13 +102,12 @@ const REQUEST_BODY_PRIORITY: [BodyKind; 4] = [BodyKind::Json, BodyKind::Form, Bo
 /// response) rather than erroring.
 const RESPONSE_BODY_PRIORITY: [BodyKind; 3] = [BodyKind::Json, BodyKind::Form, BodyKind::Text];
 
-/// The lowered request body. A `multipart/form-data` body yields a
-/// [`Multipart`] extractor (`multipart`); every other supported content type
-/// yields a [`Body`] (`body`). The two are mutually exclusive — at most one is
-/// `Some`.
-struct LoweredRequestBody {
-    body: Option<Body>,
-    multipart: Option<Multipart>,
+/// A lowered response body before it is named. A single content type yields a
+/// [`Body`]; several yield the per-representation variants, which the caller
+/// names into a [`NegotiatedBody`] (the name depends on the response variant).
+enum LoweredResponseBody {
+    Single(Body),
+    Negotiated(Vec<BodyVariant>),
 }
 
 /// Rust field names the response emitter injects into a header-bearing struct
@@ -188,8 +191,8 @@ impl Lowerer<'_> {
         let query = self.lower_query_params(path, method, &params, &name)?;
         let headers = self.lower_header_params(path, method, &params, &name)?;
         let cookies = self.lower_cookie_params(path, method, &params, &name)?;
-        let request_body = self.lower_request_body(path, method, &name, operation)?;
-        let responses = self.lower_responses(path, method, operation)?;
+        let request = self.lower_request_body(path, method, &name, operation)?;
+        let responses = self.lower_responses(path, method, &response_enum, operation)?;
 
         return Ok(Operation {
             name,
@@ -201,8 +204,7 @@ impl Lowerer<'_> {
             query,
             headers,
             cookies,
-            body: request_body.body,
-            multipart: request_body.multipart,
+            request,
             responses,
         });
     }
@@ -639,24 +641,28 @@ impl Lowerer<'_> {
         return Ok(ty);
     }
 
-    /// Choose the single content type to generate for a body, given a caller's
-    /// content-kind `priority` (requests and responses differ — see
-    /// [`REQUEST_BODY_PRIORITY`] / [`RESPONSE_BODY_PRIORITY`]). Returns the kind
-    /// and its media entry, or `None` when the map declares no content type the
-    /// `priority` accepts.
-    fn select_body<'m>(
+    /// Collect every supported content type a body declares, deduplicated by
+    /// [`BodyKind`] and ordered by the caller's `priority` (requests and
+    /// responses differ — see [`REQUEST_BODY_PRIORITY`] /
+    /// [`RESPONSE_BODY_PRIORITY`]). When several media entries map to the same
+    /// kind (e.g. `application/json` and `application/vnd.api+json`), the first
+    /// in document order wins. An empty result means the map declares no content
+    /// type the `priority` accepts.
+    fn supported_bodies<'m>(
         &self,
         content: &'m indexmap::IndexMap<String, openapiv3::MediaType>,
         priority: &[BodyKind],
-    ) -> Option<(BodyKind, &'m openapiv3::MediaType)> {
+    ) -> Vec<(BodyKind, &'m openapiv3::MediaType)> {
+        let mut selected = Vec::new();
         for &wanted in priority {
             for (name, media) in content {
                 if media_type_kind(name) == Some(wanted) {
-                    return Some((wanted, media));
+                    selected.push((wanted, media));
+                    break;
                 }
             }
         }
-        return None;
+        return selected;
     }
 
     /// Lower a selected body media entry into a typed [`Body`] for the given
@@ -754,6 +760,19 @@ fn path_param_schema<'a>(
     return None;
 }
 
+/// The enum-variant identifier for a negotiated body's content kind
+/// (`Json`, `Form`, `Text`). `Multipart` never participates in negotiation, so
+/// its arm is only for exhaustiveness.
+fn body_kind_ident(kind: BodyKind) -> RustIdent {
+    let name = match kind {
+        BodyKind::Json => "Json",
+        BodyKind::Form => "Form",
+        BodyKind::Text => "Text",
+        BodyKind::Multipart => "Multipart",
+    };
+    return to_ident(name, Case::Pascal);
+}
+
 /// Classify a media type string into a supported [`BodyKind`], or `None`.
 /// Parameters after `;` (e.g. `; charset=utf-8`) are ignored. JSON matches
 /// broadly: `application/json` or any `+json`-suffixed type.
@@ -836,24 +855,23 @@ impl Lowerer<'_> {
 
     /// Lower an operation's request body, if it declares one. A cross-file
     /// wrapper `$ref` is resolved against the referenced file; its inner schema
-    /// `$ref`s are then interpreted against that file (`origin`). A
-    /// `multipart/form-data` body additionally yields a per-operation extractor
-    /// (`op_name` seeds its name).
+    /// `$ref`s are then interpreted against that file (`origin`). A single
+    /// supported content type yields a [`RequestPayload::Single`]; a
+    /// `multipart/form-data` body yields a per-operation extractor (`op_name`
+    /// seeds its name); several supported content types yield a
+    /// [`RequestPayload::Negotiated`] dispatch enum. `multipart/form-data`
+    /// cannot be combined with other content types (it needs a bespoke
+    /// extractor rather than a `Content-Type` branch).
     fn lower_request_body(
         &self,
         path: &str,
         method: &str,
         op_name: &RustIdent,
         operation: &OasOperation,
-    ) -> Result<LoweredRequestBody> {
+    ) -> Result<Option<RequestPayload>> {
         let body = match &operation.request_body {
             Some(body) => body,
-            None => {
-                return Ok(LoweredRequestBody {
-                    body: None,
-                    multipart: None,
-                });
-            }
+            None => return Ok(None),
         };
         let (body, origin): (RequestBody, Option<String>) = match body {
             ReferenceOr::Item(body) => (body.clone(), None),
@@ -862,34 +880,53 @@ impl Lowerer<'_> {
                 (resolved.value, resolved.origin)
             }
         };
-        let (kind, media) = match self.select_body(&body.content, &REQUEST_BODY_PRIORITY) {
-            Some(selected) => selected,
-            None => {
-                if body.content.is_empty() {
-                    return Ok(LoweredRequestBody {
-                        body: None,
-                        multipart: None,
-                    });
-                }
+        let supported = self.supported_bodies(&body.content, &REQUEST_BODY_PRIORITY);
+        if supported.is_empty() {
+            if body.content.is_empty() {
+                return Ok(None);
+            }
+            return Err(Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!(
+                    "request body declares only unsupported content type(s): {}",
+                    body.content.keys().cloned().collect::<Vec<_>>().join(", ")
+                ),
+            });
+        }
+        let has_multipart = supported.iter().any(|(kind, _)| return *kind == BodyKind::Multipart);
+        if has_multipart {
+            if supported.len() > 1 {
                 return Err(Error::UnsupportedOperation {
                     method: method.to_owned(),
                     path: path.to_owned(),
-                    reason: format!(
-                        "request body declares only unsupported content type(s): {}",
-                        body.content.keys().cloned().collect::<Vec<_>>().join(", ")
-                    ),
+                    reason: "multipart/form-data cannot be combined with other request content types".to_owned(),
                 });
             }
-        };
-        if kind == BodyKind::Multipart {
+            let (_, media) = supported[0];
             let multipart = self.lower_multipart_body(path, method, op_name, origin.as_deref(), media)?;
-            return Ok(LoweredRequestBody {
-                body: None,
-                multipart: Some(multipart),
-            });
+            return Ok(Some(RequestPayload::Multipart(multipart)));
         }
-        let body = self.body_from_media(path, method, origin.as_deref(), kind, media)?;
-        return Ok(LoweredRequestBody { body, multipart: None });
+        let mut variants = Vec::with_capacity(supported.len());
+        for (kind, media) in supported {
+            if let Some(body) = self.body_from_media(path, method, origin.as_deref(), kind, media)? {
+                variants.push(BodyVariant {
+                    variant: body_kind_ident(kind),
+                    body,
+                });
+            }
+        }
+        if variants.len() == 1 {
+            let variant = variants.pop().expect("length checked to be 1");
+            return Ok(Some(RequestPayload::Single(variant.body)));
+        }
+        if variants.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(RequestPayload::Negotiated(NegotiatedBody {
+            name: operations::request_body_enum_name(op_name),
+            variants,
+        })));
     }
 
     /// Lower a `multipart/form-data` request body into a per-operation extractor
@@ -1107,7 +1144,13 @@ impl Lowerer<'_> {
     /// becomes a reason-named variant with a compile-time status constant; a
     /// range (`5XX` → `Status5xx`) or the `default` response becomes a variant
     /// that carries the `axum::http::StatusCode` the handler supplies at runtime.
-    fn lower_responses(&self, path: &str, method: &str, operation: &OasOperation) -> Result<Vec<ResponseCase>> {
+    fn lower_responses(
+        &self,
+        path: &str,
+        method: &str,
+        response_enum: &RustIdent,
+        operation: &OasOperation,
+    ) -> Result<Vec<ResponseCase>> {
         let mut cases = Vec::new();
         for (status_code, response) in &operation.responses.responses {
             let (status, variant) = match status_code {
@@ -1138,6 +1181,7 @@ impl Lowerer<'_> {
             };
             let response = self.resolve_response_ref(response)?;
             let body = self.response_body(path, method, response.origin.as_deref(), &response.value)?;
+            let body = self.name_response_body(response_enum, &variant, body);
             let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
                 variant,
@@ -1150,10 +1194,12 @@ impl Lowerer<'_> {
 
         if let Some(default) = &operation.responses.default {
             let response = self.resolve_response_ref(default)?;
+            let variant = to_ident("default", Case::Pascal);
             let body = self.response_body(path, method, response.origin.as_deref(), &response.value)?;
+            let body = self.name_response_body(response_enum, &variant, body);
             let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
-                variant: to_ident("default", Case::Pascal),
+                variant,
                 status: ResponseStatus::Default,
                 body,
                 headers,
@@ -1185,21 +1231,56 @@ impl Lowerer<'_> {
         }
     }
 
-    /// Extract a response's body type, if it declares supported content. Inner
+    /// Extract a response's body, if it declares supported content. Inner
     /// schema `$ref`s are interpreted against the response's origin file when it
-    /// was resolved from a referenced document.
+    /// was resolved from a referenced document. A single supported content type
+    /// yields [`LoweredResponseBody::Single`]; several yield the
+    /// per-representation variants the caller names into a [`NegotiatedBody`].
     fn response_body(
         &self,
         path: &str,
         method: &str,
         origin: Option<&str>,
         response: &OasResponse,
-    ) -> Result<Option<Body>> {
-        let (kind, media) = match self.select_body(&response.content, &RESPONSE_BODY_PRIORITY) {
-            Some(selected) => selected,
-            None => return Ok(None),
-        };
-        return self.body_from_media(path, method, origin, kind, media);
+    ) -> Result<Option<LoweredResponseBody>> {
+        let supported = self.supported_bodies(&response.content, &RESPONSE_BODY_PRIORITY);
+        let mut variants = Vec::with_capacity(supported.len());
+        for (kind, media) in supported {
+            if let Some(body) = self.body_from_media(path, method, origin, kind, media)? {
+                variants.push(BodyVariant {
+                    variant: body_kind_ident(kind),
+                    body,
+                });
+            }
+        }
+        if variants.len() == 1 {
+            let variant = variants.pop().expect("length checked to be 1");
+            return Ok(Some(LoweredResponseBody::Single(variant.body)));
+        }
+        if variants.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(LoweredResponseBody::Negotiated(variants)));
+    }
+
+    /// Name a lowered response body against its response variant: a single
+    /// content type stays [`ResponseBody::Single`]; several become a
+    /// [`ResponseBody::Negotiated`] enum named `<Response><Variant>Body`.
+    fn name_response_body(
+        &self,
+        response_enum: &RustIdent,
+        variant: &RustIdent,
+        lowered: Option<LoweredResponseBody>,
+    ) -> Option<ResponseBody> {
+        return lowered.map(|body| {
+            return match body {
+                LoweredResponseBody::Single(body) => ResponseBody::Single(body),
+                LoweredResponseBody::Negotiated(variants) => ResponseBody::Negotiated(NegotiatedBody {
+                    name: operations::response_body_enum_name(response_enum, variant),
+                    variants,
+                }),
+            };
+        });
     }
 
     /// Map a request/response body schema to a Rust type. Composite inline

@@ -142,6 +142,65 @@ where
     }
 }
 
+pub enum SubmitReviewRequestBody {
+    Json(crate::apimodel::catalog::NewReview),
+    Form(crate::apimodel::catalog::NewReview),
+}
+
+impl<S> axum::extract::FromRequest<S> for SubmitReviewRequestBody
+where
+    S: Send + Sync,
+{
+    type Rejection = (axum::http::StatusCode, String);
+    async fn from_request(
+        request: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let content_type = request
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|value| return value.to_str().ok())
+            .map(|value| {
+                return value
+                    .split(';')
+                    .next()
+                    .unwrap_or(value)
+                    .trim()
+                    .to_ascii_lowercase();
+            })
+            .unwrap_or_default();
+        if content_type == "application/json" || content_type.ends_with("+json") {
+            let axum::Json(body) = <axum::Json<
+                crate::apimodel::catalog::NewReview,
+            > as axum::extract::FromRequest<S>>::from_request(request, state)
+                .await
+                .map_err(|error| {
+                    return (axum::http::StatusCode::BAD_REQUEST, error.to_string());
+                })?;
+            return Ok(SubmitReviewRequestBody::Json(body));
+        }
+        if content_type == "application/x-www-form-urlencoded" {
+            let axum::Form(body) = <axum::Form<
+                crate::apimodel::catalog::NewReview,
+            > as axum::extract::FromRequest<S>>::from_request(request, state)
+                .await
+                .map_err(|error| {
+                    return (axum::http::StatusCode::BAD_REQUEST, error.to_string());
+                })?;
+            return Ok(SubmitReviewRequestBody::Form(body));
+        }
+        return Err((
+            axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            format!("unsupported content type `{content_type}`"),
+        ));
+    }
+}
+
+pub enum SubmitReviewResponseCreatedBody {
+    Json(crate::apimodel::catalog::Review),
+    Text(String),
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// List books, optionally filtered.
@@ -166,6 +225,12 @@ pub trait Api: Clone + Send + Sync + 'static {
         id: String,
         body: UploadBookCoverMultipart,
     ) -> impl std::future::Future<Output = UploadBookCoverResponse> + Send;
+    /// Submit a review as JSON or a form; read it back as JSON or plain text.
+    fn submit_review(
+        &self,
+        id: String,
+        body: SubmitReviewRequestBody,
+    ) -> impl std::future::Future<Output = SubmitReviewResponse> + Send;
     /// Liveness probe returning a free-form document.
     fn get_health(&self) -> impl std::future::Future<Output = GetHealthResponse> + Send;
 }
@@ -307,6 +372,46 @@ impl axum::response::IntoResponse for UploadBookCoverResponse {
     }
 }
 
+/// Submit a review as JSON or a form; read it back as JSON or plain text.
+pub enum SubmitReviewResponse {
+    /// The review was stored; returned as JSON or plain text.
+    Created(SubmitReviewResponseCreatedBody),
+    /// No resource matched the request.
+    NotFound,
+}
+
+impl axum::response::IntoResponse for SubmitReviewResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            SubmitReviewResponse::Created(body) => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    201,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                match body {
+                    SubmitReviewResponseCreatedBody::Json(body) => {
+                        (STATUS, axum::Json(body)).into_response()
+                    }
+                    SubmitReviewResponseCreatedBody::Text(body) => {
+                        (STATUS, body).into_response()
+                    }
+                }
+            }
+            SubmitReviewResponse::NotFound => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    404,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                STATUS.into_response()
+            }
+        }
+    }
+}
+
 /// Liveness probe returning a free-form document.
 pub enum GetHealthResponse {
     /// An opaque service-health document.
@@ -338,6 +443,7 @@ pub fn router<T: Api>(api: T) -> axum::Router {
         )
         .route("/books/{id}", axum::routing::get(get_book_handler::<T>))
         .route("/books/{id}/cover", axum::routing::put(upload_book_cover_handler::<T>))
+        .route("/books/{id}/reviews", axum::routing::post(submit_review_handler::<T>))
         .route("/health", axum::routing::get(get_health_handler::<T>))
         .with_state(api)
 }
@@ -370,6 +476,14 @@ async fn upload_book_cover_handler<T: Api>(
     body: UploadBookCoverMultipart,
 ) -> UploadBookCoverResponse {
     api.upload_book_cover(id, body).await
+}
+
+async fn submit_review_handler<T: Api>(
+    axum::extract::State(api): axum::extract::State<T>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    body: SubmitReviewRequestBody,
+) -> SubmitReviewResponse {
+    api.submit_review(id, body).await
 }
 
 async fn get_health_handler<T: Api>(

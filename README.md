@@ -130,31 +130,44 @@ faithfully rather than emit subtly wrong code.
 - **Component `$ref` parameters and request bodies** —
   `#/components/parameters/*` and `#/components/requestBodies/*` are resolved
   within the same document.
-- **Request bodies** — a single content type is selected per body by priority
-  (JSON > form > multipart > text). JSON (matched as `application/json`,
-  including variants with `; charset=utf-8` or `+json` suffixes) is deserialized
-  via `axum::Json`; `text/plain` is read as a `String`;
-  `application/x-www-form-urlencoded` is decoded into a named struct via
-  `axum::Form` (the schema must be a `$ref` to an object). `multipart/form-data`
-  is decoded into a dedicated struct via a generated `<Op>Multipart` extractor
-  (a hand-written `axum::extract::FromRequest` driving `axum::extract::Multipart`,
-  since axum has no typed multipart extractor): the schema must be an object —
-  declared inline or as a same-document `$ref` — whose properties are scalars or
-  binary/file strings (`format: binary`/`byte` → `Vec<u8>`); a missing required
-  field or an unparseable value yields a `400 Bad Request`. The extractor struct
-  is generated per operation rather than reusing a component model, so multipart
-  works under any model configuration (including `models: false`). A server that
-  uses a multipart body needs
-  `axum = { version = "0.8", features = ["multipart"] }`. When multiple supported
-  types are listed, the priority above decides; if none are supported, the body
-  is omitted from the handler signature. Multi-content-type negotiation is
-  planned.
-- **Response bodies** — the same content-type selection logic applies to
-  response bodies: JSON (broadly matched), `text/plain` (→ `String`), or form
-  (→ `$ref` object struct), with JSON taking priority when multiple are present.
-  `multipart/form-data` is request-only (axum has no multipart response writer),
-  so a multipart-only response — like any response with no supported content
-  type — is emitted as bodyless.
+- **Request bodies** — each supported content type maps to a decoder: JSON
+  (matched as `application/json`, including variants with `; charset=utf-8` or
+  `+json` suffixes) is deserialized via `axum::Json`; `text/plain` is read as a
+  `String`; `application/x-www-form-urlencoded` is decoded into a named struct
+  via `axum::Form` (the schema must be a `$ref` to an object).
+  `multipart/form-data` is decoded into a dedicated struct via a generated
+  `<Op>Multipart` extractor (a hand-written `axum::extract::FromRequest` driving
+  `axum::extract::Multipart`, since axum has no typed multipart extractor): the
+  schema must be an object — declared inline or as a same-document `$ref` — whose
+  properties are scalars or binary/file strings (`format: binary`/`byte` →
+  `Vec<u8>`); a missing required field or an unparseable value yields a
+  `400 Bad Request`. The extractor struct is generated per operation rather than
+  reusing a component model, so multipart works under any model configuration
+  (including `models: false`). A server that uses a multipart body needs
+  `axum = { version = "0.8", features = ["multipart"] }`. When a single supported
+  content type is listed, the body argument is that type directly. When two or
+  more non-multipart types are listed, they are combined into a generated
+  `<Op>RequestBody` enum (one variant per type — `Json(..)`, `Form(..)`,
+  `Text(String)`) with a hand-written `axum::extract::FromRequest` that dispatches
+  on the request's `Content-Type` header (parameters after `;` are stripped and
+  the value is matched case-insensitively); an unrecognised or missing
+  `Content-Type` yields a `415 Unsupported Media Type` and a decode failure a
+  `400 Bad Request`. `multipart/form-data` cannot participate in this dispatch, so
+  it is only supported on its own; combining it with other request content types
+  is rejected. If none are supported, the body is omitted from the handler
+  signature.
+- **Response bodies** — the same per-content-type decoders apply to response
+  bodies: JSON (broadly matched), `text/plain` (→ `String`), or form (→ `$ref`
+  object struct). When a response declares a single supported content type, the
+  variant carries that body directly. When it declares two or more, the variant
+  carries a generated `<Response><Variant>Body` enum (`Json(..)`, `Text(String)`,
+  `Form(..)`) and the handler chooses the representation; the generated
+  `IntoResponse` matches on it and each axum wrapper (`axum::Json`, `axum::Form`,
+  or a bare `String`) sets its own `Content-Type`. axum's `IntoResponse` has no
+  access to the request's `Accept` header, so the representation is handler-chosen
+  rather than negotiated from `Accept`. `multipart/form-data` is request-only
+  (axum has no multipart response writer), so a multipart-only response — like any
+  response with no supported content type — is emitted as bodyless.
 - **Responses** — keyed by an explicit status code, the `default` catch-all, or
   a range (`5XX`), including component `$ref` responses
   (`#/components/responses/...`). A fixed code is emitted as a constant;
@@ -198,6 +211,9 @@ faithfully rather than emit subtly wrong code.
   non-scalar property (a nested object or array), or that references a
   cross-file/external schema — either as the body itself or as one of its
   properties (such fields cannot be enumerated to build the extractor).
+- A `multipart/form-data` request body combined with any other content type on
+  the same operation (multipart needs its own extractor and cannot join the
+  `Content-Type` dispatch).
 
 ## Coverage
 

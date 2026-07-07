@@ -10,6 +10,7 @@
 
 use bookstore_example::apimodel::catalog::Book;
 use bookstore_example::apimodel::catalog::NewBook;
+use bookstore_example::apimodel::catalog::Review;
 use bookstore_example::apimodel::common::ErrorResponse;
 use bookstore_example::restapi::Api;
 use bookstore_example::restapi::CreateBookHeaders;
@@ -18,6 +19,9 @@ use bookstore_example::restapi::GetBookResponse;
 use bookstore_example::restapi::GetHealthResponse;
 use bookstore_example::restapi::ListBooksQuery;
 use bookstore_example::restapi::ListBooksResponse;
+use bookstore_example::restapi::SubmitReviewRequestBody;
+use bookstore_example::restapi::SubmitReviewResponse;
+use bookstore_example::restapi::SubmitReviewResponseCreatedBody;
 use bookstore_example::restapi::UploadBookCoverMultipart;
 use bookstore_example::restapi::UploadBookCoverResponse;
 
@@ -97,6 +101,36 @@ impl Api for Service {
 
         let _caption: Option<String> = body.caption;
         return UploadBookCoverResponse::NoContent;
+    }
+
+    async fn submit_review(&self, id: String, body: SubmitReviewRequestBody) -> SubmitReviewResponse {
+        // The request body decodes from either JSON or a form; both carry the
+        // same `NewReview` shape, so collapse them before storing.
+        let new_review = match body {
+            SubmitReviewRequestBody::Json(review) => review,
+            SubmitReviewRequestBody::Form(review) => review,
+        };
+
+        if id.is_empty() {
+            return SubmitReviewResponse::NotFound;
+        }
+
+        let review = Review {
+            id: format!("{id}-review-1"),
+            rating: new_review.rating,
+            comment: new_review.comment,
+        };
+
+        // The handler chooses the response representation: terse reviews echo
+        // back as plain text, richer ones as structured JSON.
+        if review.comment.is_none() {
+            return SubmitReviewResponse::Created(SubmitReviewResponseCreatedBody::Text(format!(
+                "stored review {} with rating {}",
+                review.id, review.rating
+            )));
+        }
+
+        return SubmitReviewResponse::Created(SubmitReviewResponseCreatedBody::Json(review));
     }
 }
 

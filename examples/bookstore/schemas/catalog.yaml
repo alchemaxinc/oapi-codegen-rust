@@ -46,3 +46,29 @@ components:
           type: array
           items:
             type: string
+
+    NewReview:
+      type: object
+      required:
+        - rating
+      properties:
+        rating:
+          type: integer
+          format: int64
+          description: Star rating from 1 to 5.
+        comment:
+          type: string
+
+    Review:
+      type: object
+      required:
+        - id
+        - rating
+      properties:
+        id:
+          type: string
+        rating:
+          type: integer
+          format: int64
+        comment:
+          type: string

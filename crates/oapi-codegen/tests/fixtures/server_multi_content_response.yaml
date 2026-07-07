@@ -1,0 +1,61 @@
+openapi: 3.0.3
+info:
+  title: multi-content response
+  version: "1"
+paths:
+  /report:
+    get:
+      operationId: getReport
+      summary: Fetch the report as JSON or plain text (handler chooses).
+      responses:
+        "200":
+          description: The report, as JSON or plain text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+            text/plain:
+              schema:
+                type: string
+  /export:
+    get:
+      operationId: exportReport
+      summary: Export the report; the handler also sets the status code.
+      responses:
+        default:
+          description: The report, as JSON or plain text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+            text/plain:
+              schema:
+                type: string
+  /summary:
+    get:
+      operationId: getSummary
+      summary: Fetch the summary as JSON or plain text, with a header.
+      responses:
+        "200":
+          description: The summary, as JSON or plain text.
+          headers:
+            X-Report-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+            text/plain:
+              schema:
+                type: string
+components:
+  schemas:
+    Report:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        lines:
+          type: integer
