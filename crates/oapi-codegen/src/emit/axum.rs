@@ -8,6 +8,7 @@ use crate::emit::doc_attr;
 use crate::emit::emit_type;
 use crate::emit::models::emit_struct;
 use crate::error::Result;
+use crate::ir::Body;
 use crate::ir::CookieParam;
 use crate::ir::Cookies;
 use crate::ir::HeaderParam;
@@ -27,6 +28,24 @@ impl crate::emit::ServerEmitter for AxumServer {
     fn emit(&self, service: &Service) -> Result<Vec<TokenStream>> {
         return service_items(service);
     }
+}
+
+/// The handler extractor pattern + type for a request body of the given kind.
+fn body_extractor(kind: crate::ir::BodyKind, ty: &TokenStream) -> TokenStream {
+    return match kind {
+        crate::ir::BodyKind::Json => quote! { axum::Json(body): axum::Json<#ty> },
+        crate::ir::BodyKind::Text => quote! { body: String },
+        crate::ir::BodyKind::Form => quote! { axum::Form(body): axum::Form<#ty> },
+    };
+}
+
+/// The response tuple term that renders a body of the given kind.
+fn response_body_term(kind: crate::ir::BodyKind) -> TokenStream {
+    return match kind {
+        crate::ir::BodyKind::Json => quote! { axum::Json(body) },
+        crate::ir::BodyKind::Text => quote! { body },
+        crate::ir::BodyKind::Form => quote! { axum::Form(body) },
+    };
 }
 
 /// Emit the axum server interface: the `Api` trait, per-operation response
@@ -100,7 +119,7 @@ fn emit_method_args(operation: &Operation) -> Result<Vec<TokenStream>> {
         args.push(quote! { cookies: #ty });
     }
     if let Some(body) = &operation.body {
-        let ty = emit_type(body)?;
+        let ty = emit_type(&body.ty)?;
         args.push(quote! { body: #ty });
     }
     return Ok(args);
@@ -152,7 +171,7 @@ fn emit_fixed_response(
     name: &proc_macro2::Ident,
     variant: &proc_macro2::Ident,
     code: u16,
-    body: &Option<RustType>,
+    body: &Option<Body>,
 ) -> Result<(TokenStream, TokenStream)> {
     let code = proc_macro2::Literal::u16_unsuffixed(code);
     let status = quote! {
@@ -163,12 +182,13 @@ fn emit_fixed_response(
     };
     let result = match body {
         Some(body) => {
-            let ty = emit_type(body)?;
+            let ty = emit_type(&body.ty)?;
             let variant_def = quote! { #variant(#ty) };
+            let term = response_body_term(body.kind);
             let arm = quote! {
                 #name::#variant(body) => {
                     #status
-                    (STATUS, axum::Json(body)).into_response()
+                    (STATUS, #term).into_response()
                 }
             };
             (variant_def, arm)
@@ -193,14 +213,15 @@ fn emit_fixed_response(
 fn emit_dynamic_response(
     name: &proc_macro2::Ident,
     variant: &proc_macro2::Ident,
-    body: &Option<RustType>,
+    body: &Option<Body>,
 ) -> Result<(TokenStream, TokenStream)> {
     let result = match body {
         Some(body) => {
-            let ty = emit_type(body)?;
+            let ty = emit_type(&body.ty)?;
             let variant_def = quote! { #variant(axum::http::StatusCode, #ty) };
+            let term = response_body_term(body.kind);
             let arm = quote! {
-                #name::#variant(status, body) => (status, axum::Json(body)).into_response(),
+                #name::#variant(status, body) => (status, #term).into_response(),
             };
             (variant_def, arm)
         }
@@ -298,8 +319,8 @@ fn emit_handler(operation: &Operation) -> Result<TokenStream> {
         call_args.push(quote! { cookies });
     }
     if let Some(body) = &operation.body {
-        let ty = emit_type(body)?;
-        extractors.push(quote! { axum::Json(body): axum::Json<#ty> });
+        let ty = emit_type(&body.ty)?;
+        extractors.push(body_extractor(body.kind, &ty));
         call_args.push(quote! { body });
     }
 
@@ -329,7 +350,7 @@ fn emit_response_with_headers(
         field_defs.push(quote! { status: axum::http::StatusCode });
     }
     if let Some(body) = &case.body {
-        let ty = emit_type(body)?;
+        let ty = emit_type(&body.ty)?;
         field_defs.push(quote! { body: #ty });
     }
     let mut header_field_defs = Vec::with_capacity(case.headers.len());
@@ -380,11 +401,14 @@ fn emit_response_with_headers(
         inserts.push(emit_response_header_insert(header));
     }
 
-    let body_term = if case.body.is_some() {
-        quote! { , axum::Json(body) }
-    } else {
-        quote! {}
-    };
+    let body_term = case
+        .body
+        .as_ref()
+        .map(|b| {
+            let t = response_body_term(b.kind);
+            return quote! { , #t };
+        })
+        .unwrap_or_default();
 
     let arm = quote! {
         #name::#variant { #(#binds),* } => {

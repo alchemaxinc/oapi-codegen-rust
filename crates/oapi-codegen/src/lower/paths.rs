@@ -55,6 +55,8 @@ use openapiv3::Type;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::ir::Body;
+use crate::ir::BodyKind;
 use crate::ir::CookieParam;
 use crate::ir::Cookies;
 use crate::ir::Field;
@@ -77,9 +79,6 @@ use crate::naming::Case;
 use crate::naming::RustIdent;
 use crate::naming::operations;
 use crate::naming::to_ident;
-
-/// The JSON media type the slice reads request and response bodies from.
-const JSON_MEDIA_TYPE: &str = "application/json";
 
 /// Header parameter names that OpenAPI mandates be ignored when declared with
 /// `in: header`, since they are governed by content negotiation / security
@@ -616,6 +615,69 @@ impl Lowerer<'_> {
         }
         return Ok(ty);
     }
+
+    /// Choose the single content type to generate for a body, by priority
+    /// (JSON > form > text). Returns the kind and its media entry, or `None`
+    /// when the map is empty or declares no supported content type.
+    fn select_body<'m>(
+        &self,
+        content: &'m indexmap::IndexMap<String, openapiv3::MediaType>,
+    ) -> Option<(BodyKind, &'m openapiv3::MediaType)> {
+        for wanted in [BodyKind::Json, BodyKind::Form, BodyKind::Text] {
+            for (name, media) in content {
+                if media_type_kind(name) == Some(wanted) {
+                    return Some((wanted, media));
+                }
+            }
+        }
+        return None;
+    }
+
+    /// Lower a selected body media entry into a typed [`Body`] for the given
+    /// content kind. Text bodies must be `string`; form bodies must reference a
+    /// named object schema; JSON reuses the existing body-type mapping.
+    fn body_from_media(
+        &self,
+        path: &str,
+        method: &str,
+        origin: Option<&str>,
+        kind: BodyKind,
+        media: &openapiv3::MediaType,
+    ) -> Result<Option<Body>> {
+        let schema = match &media.schema {
+            Some(schema) => schema,
+            None => return Ok(None),
+        };
+        let ty = match kind {
+            BodyKind::Json => self.body_type(path, method, origin, schema)?,
+            BodyKind::Text => {
+                let resolved = match schema {
+                    ReferenceOr::Item(schema) => schema.clone(),
+                    ReferenceOr::Reference { reference } => self.spec.resolve_schema(origin, reference)?,
+                };
+                if !matches!(resolved.schema_kind, SchemaKind::Type(Type::String(_))) {
+                    return Err(Error::UnsupportedOperation {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        reason: "text/plain body must be a `string` schema".to_owned(),
+                    });
+                }
+                RustType::String
+            }
+            BodyKind::Form => match schema {
+                ReferenceOr::Reference { reference } => self.schema_ref_type(path, method, origin, reference)?,
+                ReferenceOr::Item(_) => {
+                    return Err(Error::UnsupportedOperation {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        reason: "form (`application/x-www-form-urlencoded`) body must reference a named object schema"
+                            .to_owned(),
+                    });
+                }
+            },
+        };
+        return Ok(Some(Body { ty, kind }));
+    }
 }
 
 /// Locate the `path` parameter named `name` within a resolved parameter list,
@@ -631,6 +693,23 @@ fn path_param_schema<'a>(
         if parameter_data.name == name {
             return Some((&parameter_data.format, parameter.origin.as_deref()));
         }
+    }
+    return None;
+}
+
+/// Classify a media type string into a supported [`BodyKind`], or `None`.
+/// Parameters after `;` (e.g. `; charset=utf-8`) are ignored. JSON matches
+/// broadly: `application/json` or any `+json`-suffixed type.
+fn media_type_kind(name: &str) -> Option<BodyKind> {
+    let base = name.split(';').next().unwrap_or(name).trim().to_ascii_lowercase();
+    if base == "application/json" || base.ends_with("+json") {
+        return Some(BodyKind::Json);
+    }
+    if base == "application/x-www-form-urlencoded" {
+        return Some(BodyKind::Form);
+    }
+    if base == "text/plain" {
+        return Some(BodyKind::Text);
     }
     return None;
 }
@@ -695,10 +774,10 @@ impl Lowerer<'_> {
         return Ok(ty);
     }
 
-    /// Lower an operation's JSON request body, if it declares one. A cross-file
+    /// Lower an operation's request body, if it declares one. A cross-file
     /// wrapper `$ref` is resolved against the referenced file; its inner schema
     /// `$ref`s are then interpreted against that file (`origin`).
-    fn lower_request_body(&self, path: &str, method: &str, operation: &OasOperation) -> Result<Option<RustType>> {
+    fn lower_request_body(&self, path: &str, method: &str, operation: &OasOperation) -> Result<Option<Body>> {
         let body = match &operation.request_body {
             Some(body) => body,
             None => return Ok(None),
@@ -710,16 +789,23 @@ impl Lowerer<'_> {
                 (resolved.value, resolved.origin)
             }
         };
-        let media = match body.content.get(JSON_MEDIA_TYPE) {
-            Some(media) => media,
-            None => return Ok(None),
+        let (kind, media) = match self.select_body(&body.content) {
+            Some(selected) => selected,
+            None => {
+                if body.content.is_empty() {
+                    return Ok(None);
+                }
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!(
+                        "request body declares only unsupported content type(s): {}",
+                        body.content.keys().cloned().collect::<Vec<_>>().join(", ")
+                    ),
+                });
+            }
         };
-        let schema = match &media.schema {
-            Some(schema) => schema,
-            None => return Ok(None),
-        };
-        let ty = self.body_type(path, method, origin.as_deref(), schema)?;
-        return Ok(Some(ty));
+        return self.body_from_media(path, method, origin.as_deref(), kind, media);
     }
 
     /// Lower a response's declared headers into scalar-typed [`ResponseHeader`]s.
@@ -882,23 +968,21 @@ impl Lowerer<'_> {
         }
     }
 
-    /// Extract a response's JSON body type, if it declares `application/json`
-    /// content. Inner schema `$ref`s are interpreted against the response's
-    /// origin file when it was resolved from a referenced document.
+    /// Extract a response's body type, if it declares supported content. Inner
+    /// schema `$ref`s are interpreted against the response's origin file when it
+    /// was resolved from a referenced document.
     fn response_body(
         &self,
         path: &str,
         method: &str,
         origin: Option<&str>,
         response: &OasResponse,
-    ) -> Result<Option<RustType>> {
-        let schema = response.content.get(JSON_MEDIA_TYPE).and_then(|media| {
-            return media.schema.as_ref();
-        });
-        match schema {
-            Some(schema) => return Ok(Some(self.body_type(path, method, origin, schema)?)),
+    ) -> Result<Option<Body>> {
+        let (kind, media) = match self.select_body(&response.content) {
+            Some(selected) => selected,
             None => return Ok(None),
-        }
+        };
+        return self.body_from_media(path, method, origin, kind, media);
     }
 
     /// Map a request/response body schema to a Rust type. Composite inline

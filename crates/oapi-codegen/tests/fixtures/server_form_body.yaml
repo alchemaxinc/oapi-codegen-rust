@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: form body
+  version: "1"
+paths:
+  /login:
+    post:
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/Credentials"
+      responses:
+        "204":
+          description: Logged in.
+components:
+  schemas:
+    Credentials:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string

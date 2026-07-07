@@ -174,6 +174,27 @@ impl RustType {
     }
 }
 
+/// A request or response body: its Rust type plus the wire content type that
+/// selects the axum extractor / response wrapper.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Body {
+    /// The Rust type of the decoded body.
+    pub ty: RustType,
+    /// The content type that selects the extractor / response wrapper.
+    pub kind: BodyKind,
+}
+
+/// The supported request/response content type for a [`Body`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyKind {
+    /// `application/json` (and `+json` / charset variants) → `axum::Json`.
+    Json,
+    /// `text/plain` → `String`.
+    Text,
+    /// `application/x-www-form-urlencoded` → `axum::Form`.
+    Form,
+}
+
 /// A generated axum server interface: the `Api` trait plus the operations that
 /// back its `Router`.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -212,7 +233,7 @@ pub struct Operation {
     /// extractor type and the `Api` method's `cookies` argument type.
     pub cookies: Option<Cookies>,
     /// JSON request body type, when the operation declares one.
-    pub body: Option<RustType>,
+    pub body: Option<Body>,
     /// Response variants, in declaration order.
     pub responses: Vec<ResponseCase>,
 }
@@ -293,7 +314,7 @@ pub struct ResponseCase {
     /// How the variant's HTTP status code is determined.
     pub status: ResponseStatus,
     /// JSON response body type, when the response declares content.
-    pub body: Option<RustType>,
+    pub body: Option<Body>,
     /// Declared response headers written by the generated `IntoResponse`, in
     /// declaration order. Empty means no headers (the pre-C5 variant shape).
     pub headers: Vec<ResponseHeader>,

@@ -105,6 +105,15 @@ mod generated {
     pub mod server_response_headers {
         include!("generated/server_response_headers.rs");
     }
+    pub mod server_text_body {
+        include!("generated/server_text_body.rs");
+    }
+    pub mod server_form_body {
+        include!("generated/server_form_body.rs");
+    }
+    pub mod server_json_charset {
+        include!("generated/server_json_charset.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -519,4 +528,50 @@ fn generated_server_writes_response_headers() {
 
     // Building the router proves the trait + handler wiring type-check.
     let _router: axum::Router = server_response_headers::router(Service);
+}
+
+#[test]
+fn generated_server_handles_text_body() {
+    use axum::response::IntoResponse;
+    use generated::server_text_body;
+    use server_text_body::Api;
+    use server_text_body::EchoResponse;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn echo(&self, body: String) -> EchoResponse {
+            return EchoResponse::Ok(body);
+        }
+    }
+
+    // The `text/plain` request body extracts as a bare `String` (no `axum::Json`)
+    // and the response renders the `String` directly.
+    let response = EchoResponse::Ok("hi".to_owned()).into_response();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let _router: axum::Router = server_text_body::router(Service);
+}
+
+#[test]
+fn generated_server_handles_form_body() {
+    use generated::server_form_body;
+    use server_form_body::Api;
+    use server_form_body::Credentials;
+    use server_form_body::LoginResponse;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn login(&self, body: Credentials) -> LoginResponse {
+            let _u: String = body.username;
+            let _p: String = body.password;
+            return LoginResponse::NoContent;
+        }
+    }
+
+    // Router builds only if the generated `axum::Form<Credentials>` extractor
+    // type-checks (Credentials derives Deserialize).
+    let _router: axum::Router = server_form_body::router(Service);
 }

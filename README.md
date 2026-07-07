@@ -130,7 +130,18 @@ faithfully rather than emit subtly wrong code.
 - **Component `$ref` parameters and request bodies** —
   `#/components/parameters/*` and `#/components/requestBodies/*` are resolved
   within the same document.
-- **JSON request bodies** — a `$ref` or a scalar.
+- **Request bodies** — a single content type is selected per body by priority
+  (JSON > form > text). JSON (matched as `application/json`, including variants
+  with `; charset=utf-8` or `+json` suffixes) is deserialized via `axum::Json`;
+  `text/plain` is read as a `String`; `application/x-www-form-urlencoded` is
+  decoded into a named struct via `axum::Form` (the schema must be a `$ref` to
+  an object). When multiple supported types are listed, JSON takes precedence;
+  if none are supported, the body is omitted from the handler signature.
+  Multipart and multi-content-type negotiation are planned.
+- **Response bodies** — the same content-type selection logic applies to
+  response bodies: JSON (broadly matched), `text/plain` (→ `String`), or form
+  (→ `$ref` object struct), with JSON taking priority when multiple are present.
+  A response with no supported content type is emitted as bodyless.
 - **Responses** — keyed by an explicit status code, the `default` catch-all, or
   a range (`5XX`), including component `$ref` responses
   (`#/components/responses/...`). A fixed code is emitted as a constant;
@@ -165,6 +176,11 @@ faithfully rather than emit subtly wrong code.
   response header declared via `$ref`, a response header with an invalid HTTP
   header name, or two response headers whose names collide when mapped to the
   same Rust field (e.g. `X-Foo` and `X_Foo`).
+- A request body whose only content type is unsupported (e.g. `image/png`
+  only). An unsupported-only _response_ body is emitted as bodyless instead.
+- A `text/plain` body whose schema is not `type: string`.
+- A form (`application/x-www-form-urlencoded`) body whose schema is not a `$ref`
+  to an object schema.
 
 ## Coverage
 
