@@ -41,6 +41,9 @@ pub struct Generate {
     /// Generate an axum server interface from the spec's paths.
     #[serde(default)]
     pub std_http_server: bool,
+    /// Generate a blocking `reqwest` client from the spec's paths.
+    #[serde(default)]
+    pub client: bool,
     /// Embed the spec into the generated code (not yet implemented).
     #[serde(default)]
     pub embedded_spec: bool,

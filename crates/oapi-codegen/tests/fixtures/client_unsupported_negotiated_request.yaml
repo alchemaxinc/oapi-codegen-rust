@@ -1,0 +1,29 @@
+openapi: 3.0.3
+info:
+  title: Client negotiated request (unsupported)
+  version: 1.0.0
+paths:
+  /things:
+    post:
+      operationId: createThing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Thing"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/Thing"
+      responses:
+        "204":
+          description: Created.
+components:
+  schemas:
+    Thing:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string

@@ -24,12 +24,14 @@ use crate::loader::Spec;
 /// Generate Rust from a spec file according to `config`, returning the source.
 ///
 /// Models are emitted when `generate.models` is set, or implicitly when the
-/// server is generated (so referenced types are in scope). The axum server
-/// interface is appended when `generate.std-http-server` is set.
+/// server or client is generated (so referenced types are in scope). The axum
+/// server interface is appended when `generate.std-http-server` is set; the
+/// blocking `reqwest` client is appended when `generate.client` is set.
 pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     let spec = Spec::load(spec_path)?;
     let want_server = config.generate.std_http_server;
-    let module = if config.generate.models || want_server {
+    let want_client = config.generate.client;
+    let module = if config.generate.models || want_server || want_client {
         lower::generate_models(&spec)?
     } else {
         Module::default()
@@ -37,6 +39,10 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     if want_server {
         let service = lower::generate_service(&spec, &config.import_mapping)?;
         return emit::emit_with_service(&module, &service);
+    }
+    if want_client {
+        let service = lower::generate_service(&spec, &config.import_mapping)?;
+        return emit::emit_with_client(&module, &service);
     }
     return emit::emit_module(&module);
 }

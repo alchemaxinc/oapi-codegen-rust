@@ -1,0 +1,27 @@
+openapi: 3.0.3
+info:
+  title: Client negotiated response (unsupported)
+  version: 1.0.0
+paths:
+  /report:
+    get:
+      operationId: getReport
+      responses:
+        "200":
+          description: A report as JSON or text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+            text/plain:
+              schema:
+                type: string
+components:
+  schemas:
+    Report:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string

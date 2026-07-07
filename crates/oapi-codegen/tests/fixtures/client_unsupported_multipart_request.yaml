@@ -1,0 +1,23 @@
+openapi: 3.0.3
+info:
+  title: Client multipart request (unsupported)
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        "204":
+          description: Stored.

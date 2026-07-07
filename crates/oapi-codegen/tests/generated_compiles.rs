@@ -123,6 +123,9 @@ mod generated {
     pub mod server_multi_content_response {
         include!("generated/server_multi_content_response.rs");
     }
+    pub mod client_widgets {
+        include!("generated/client_widgets.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -617,4 +620,60 @@ fn generated_server_handles_multipart_body() {
     // struct satisfies axum's `FromRequest` (driving `axum::extract::Multipart`),
     // which is how the handler consumes the `multipart/form-data` body.
     let _router: axum::Router = server_multipart_body::router(Service);
+}
+
+/// Drive the generated blocking client against a tiny canned HTTP server to
+/// prove its status dispatch and JSON decoding behave at runtime (not just
+/// compile). Each response sets `Connection: close` so the blocking client
+/// opens a fresh socket per call, letting the mock accept them in order.
+#[test]
+fn generated_client_decodes_typed_responses() {
+    use std::io::Read;
+    use std::io::Write;
+    use std::net::TcpListener;
+
+    use client_widgets::Client;
+    use client_widgets::GetWidgetResponse;
+    use generated::client_widgets;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let base_url = format!("http://{addr}");
+
+    let ok_body = r#"{"id":"w1","name":"Widget One"}"#;
+    let responses = vec![
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\
+             Content-Length: {len}\r\n\r\n{ok_body}",
+            len = ok_body.len(),
+        ),
+        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned(),
+    ];
+
+    let server = std::thread::spawn(move || {
+        for response in responses {
+            let (mut stream, _) = listener.accept().expect("accept mock connection");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            stream.write_all(response.as_bytes()).expect("write mock response");
+            stream.flush().expect("flush mock response");
+        }
+    });
+
+    let client = Client::new(base_url).expect("build client");
+
+    match client.get_widget("w1".to_owned()).expect("200 call succeeds") {
+        GetWidgetResponse::Ok(widget) => {
+            assert_eq!(widget.id, "w1");
+            assert_eq!(widget.name, "Widget One");
+        }
+        _ => panic!("expected GetWidgetResponse::Ok for a 200 response"),
+    }
+
+    match client.get_widget("missing".to_owned()).expect("404 call succeeds") {
+        GetWidgetResponse::NotFound => {}
+        _ => panic!("expected GetWidgetResponse::NotFound for a 404 response"),
+    }
+
+    server.join().expect("mock server thread");
 }
