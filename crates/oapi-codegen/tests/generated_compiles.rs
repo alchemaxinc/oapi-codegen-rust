@@ -477,8 +477,20 @@ fn generated_server_writes_response_headers() {
     }
     .into_response();
     assert_eq!(response.status(), axum::http::StatusCode::OK);
-    assert_eq!(response.headers().get("x-request-id").unwrap(), "abc-123");
-    assert_eq!(response.headers().get("x-ratelimit-remaining").unwrap(), "42");
+    assert_eq!(
+        response
+            .headers()
+            .get("x-request-id")
+            .expect("missing x-request-id header"),
+        "abc-123"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-ratelimit-remaining")
+            .expect("missing x-ratelimit-remaining header"),
+        "42"
+    );
 
     // An unset optional header is absent.
     let response = GetWidgetsResponse::Ok {
@@ -497,7 +509,13 @@ fn generated_server_writes_response_headers() {
     }
     .into_response();
     assert_eq!(response.status(), axum::http::StatusCode::BAD_GATEWAY);
-    assert_eq!(response.headers().get("x-request-id").unwrap(), "abc-123");
+    assert_eq!(
+        response
+            .headers()
+            .get("x-request-id")
+            .expect("missing x-request-id header"),
+        "abc-123"
+    );
 
     // Building the router proves the trait + handler wiring type-check.
     let _router: axum::Router = server_response_headers::router(Service);

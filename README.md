@@ -138,9 +138,10 @@ faithfully rather than emit subtly wrong code.
   supplies (e.g. `GetBookResponse::Default(StatusCode::BAD_REQUEST, error)`),
   mirroring how oapi-codegen's strict server lets the handler set the code.
 - **Response headers** — declared headers are emitted as named fields on the
-  response variant (scalars via `ToString`; required always written, optional
-  written only when set), inserted best-effort into the response `HeaderMap` —
-  a value that cannot encode as a header is skipped rather than panicking.
+  response variant (scalars via `ToString`; required values are always
+  attempted, optional ones only when set), inserted best-effort into the
+  response `HeaderMap` — a value that cannot encode as a header (even a required
+  one) is skipped rather than panicking.
 - **Cross-file `$ref` parameters, request bodies, and responses** — the
   referenced structural object is read from the sibling file, resolved relative
   to the main spec's directory (chains across files are followed). A cross-file
@@ -160,8 +161,10 @@ faithfully rather than emit subtly wrong code.
   `spaceDelimited`, …), an array header parameter, or a `byte`/`binary` header
   parameter.
 - An object or array cookie parameter, or a `byte`/`binary` cookie parameter.
-- An object or array response header, a `byte`/`binary` response header, or a
-  response header declared via `$ref`.
+- An object or array response header, a `byte`/`binary` response header, a
+  response header declared via `$ref`, a response header with an invalid HTTP
+  header name, or two response headers whose names collide when mapped to the
+  same Rust field (e.g. `X-Foo` and `X_Foo`).
 
 ## Coverage
 
