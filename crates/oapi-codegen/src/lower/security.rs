@@ -21,17 +21,22 @@ use crate::naming::to_ident;
 /// Build the ordered catalogue of security schemes declared in the document,
 /// in `components.securitySchemes` declaration order.
 ///
-/// `$ref` scheme entries are skipped (uncommon in practice); OAuth2 and OpenID
-/// Connect are catalogued as [`SecuritySchemeKind::Unsupported`] so an operation
-/// that requires one can be rejected with a clear message during client emit.
+/// `$ref` scheme entries, OAuth2, and OpenID Connect are catalogued as
+/// [`SecuritySchemeKind::Unsupported`] so an operation that requires one is
+/// rejected with a clear message during client emit, rather than silently
+/// sending no credential.
 pub fn scheme_catalogue(spec: &Spec) -> Vec<SecurityScheme> {
     let mut schemes = Vec::new();
     for (key, entry) in spec.security_schemes() {
-        let scheme = match entry {
-            ReferenceOr::Item(scheme) => scheme,
-            ReferenceOr::Reference { .. } => continue,
+        let (kind, doc) = match entry {
+            ReferenceOr::Item(scheme) => lower_scheme(scheme),
+            ReferenceOr::Reference { reference } => (
+                SecuritySchemeKind::Unsupported(format!(
+                    "security scheme `{key}` is a `$ref` (`{reference}`), which is not supported"
+                )),
+                None,
+            ),
         };
-        let (kind, doc) = lower_scheme(scheme);
         schemes.push(SecurityScheme {
             key: key.clone(),
             field: to_ident(key, Case::Snake),

@@ -234,9 +234,14 @@ impl Client {
     pub fn get_session(&self) -> Result<GetSessionResponse, ClientError> {
         let url = format!("{}/session", self.base_url);
         let mut request = self.http.request(reqwest::Method::GET, url);
-        if let Some(value) = &self.api_key_cookie {
-            request = request
-                .header(reqwest::header::COOKIE, format!("SESSION={value}"));
+        let cookie_pairs: Vec<String> = [
+            self.api_key_cookie.as_ref().map(|value| format!("SESSION={value}")),
+        ]
+            .into_iter()
+            .flatten()
+            .collect();
+        if !cookie_pairs.is_empty() {
+            request = request.header(reqwest::header::COOKIE, cookie_pairs.join("; "));
         }
         let response = request.send()?;
         let status = response.status();

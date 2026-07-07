@@ -397,6 +397,8 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
     "client_unsupported_negotiated_response",
     "client_unsupported_form_response",
     "client_unsupported_oauth2",
+    "client_unsupported_ref_scheme",
+    "client_unsupported_undeclared_scheme",
 ];
 
 /// Absolute path to the crate's `tests` directory.

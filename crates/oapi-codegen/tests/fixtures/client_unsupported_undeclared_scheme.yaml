@@ -1,0 +1,31 @@
+openapi: 3.0.3
+info:
+  title: Client requiring an undeclared security scheme (unsupported)
+  version: 1.0.0
+paths:
+  /thing:
+    get:
+      operationId: getThing
+      summary: Fetch a thing, requiring a scheme that is not declared.
+      security:
+        - missingAuth: []
+      responses:
+        "200":
+          description: The thing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Message:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string

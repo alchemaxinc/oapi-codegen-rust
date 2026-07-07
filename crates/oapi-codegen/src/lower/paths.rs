@@ -74,7 +74,6 @@ use crate::ir::ResponseBody;
 use crate::ir::ResponseCase;
 use crate::ir::ResponseStatus;
 use crate::ir::RustType;
-use crate::ir::SecurityScheme;
 use crate::ir::Service;
 use crate::ir::Struct;
 use crate::loader::Resolved;
@@ -173,7 +172,7 @@ impl Lowerer<'_> {
             };
             for (method, operation) in item.iter() {
                 let mut lowered = self.lower_operation(path, method, operation, &item.parameters)?;
-                lowered.security = self.operation_security(operation, &catalogue);
+                lowered.security = self.operation_security(operation);
                 for key in &lowered.security {
                     if !used_schemes.iter().any(|existing| return existing == key) {
                         used_schemes.push(key.clone());
@@ -193,17 +192,19 @@ impl Lowerer<'_> {
     }
 
     /// Resolve an operation's effective security requirement into the ordered
-    /// keys of the schemes it applies, keeping only keys declared in the
-    /// document's `components.securitySchemes` (the `catalogue`).
-    fn operation_security(&self, operation: &OasOperation, catalogue: &[SecurityScheme]) -> Vec<String> {
+    /// keys of the schemes it applies.
+    ///
+    /// Keys are kept verbatim, including any not declared in
+    /// `components.securitySchemes`: the client emitter rejects an unresolved key
+    /// rather than silently dropping it, while the server emitter ignores
+    /// security entirely, so an unused-by-server dangling reference never blocks
+    /// server generation.
+    fn operation_security(&self, operation: &OasOperation) -> Vec<String> {
         let effective = security::effective_requirements(operation.security.as_deref(), self.spec.global_security());
         let Some(requirements) = effective else {
             return Vec::new();
         };
-        return security::required_keys(requirements)
-            .into_iter()
-            .filter(|key| return catalogue.iter().any(|scheme| return scheme.key == *key))
-            .collect();
+        return security::required_keys(requirements);
     }
 
     /// Lower a single operation, given its path, method and path-item parameters.

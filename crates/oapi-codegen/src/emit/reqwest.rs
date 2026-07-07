@@ -83,11 +83,18 @@ fn ensure_supported(operation: &Operation, schemes: &[SecurityScheme]) -> Result
         }
     }
     for key in &operation.security {
-        let scheme = schemes.iter().find(|scheme| return scheme.key == *key);
-        if let Some(scheme) = scheme
-            && let SecuritySchemeKind::Unsupported(reason) = &scheme.kind
-        {
-            return Err(unsupported(operation, reason));
+        match schemes.iter().find(|scheme| return scheme.key == *key) {
+            None => {
+                return Err(unsupported(
+                    operation,
+                    &format!("requires security scheme `{key}`, which is not declared in `components.securitySchemes`"),
+                ));
+            }
+            Some(scheme) => {
+                if let SecuritySchemeKind::Unsupported(reason) = &scheme.kind {
+                    return Err(unsupported(operation, reason));
+                }
+            }
         }
     }
     return Ok(());
@@ -376,7 +383,7 @@ fn emit_method(operation: &Operation, schemes: &[SecurityScheme]) -> Result<Toke
     let mut mutations = Vec::new();
     mutations.extend(query_mutations(operation));
     mutations.extend(header_mutations(operation));
-    mutations.extend(cookie_mutations(operation));
+    mutations.extend(cookie_mutations(operation, schemes));
     mutations.extend(body_mutations(operation)?);
     mutations.extend(auth_mutations(operation, schemes));
 
@@ -523,25 +530,39 @@ fn header_mutations(operation: &Operation) -> Vec<TokenStream> {
     return mutations;
 }
 
-/// The request-builder mutations that collect cookie parameters into a single
-/// `Cookie` header.
-fn cookie_mutations(operation: &Operation) -> Vec<TokenStream> {
-    let Some(cookies) = &operation.cookies else {
-        return Vec::new();
-    };
-    let entries: Vec<TokenStream> = cookies
-        .params
-        .iter()
-        .map(|param| {
+/// The request-builder mutation that collects cookie parameters and any
+/// cookie-carried API-key credentials into a single `Cookie` header.
+///
+/// Auth cookies are folded in here (rather than emitted separately) so an
+/// operation with both cookie parameters and a cookie credential sends one
+/// `Cookie` header, per RFC 6265.
+fn cookie_mutations(operation: &Operation, schemes: &[SecurityScheme]) -> Vec<TokenStream> {
+    let mut entries: Vec<TokenStream> = Vec::new();
+    if let Some(cookies) = &operation.cookies {
+        for param in &cookies.params {
             let field = param.name.to_token();
             if param.required {
                 let fmt = Literal::string(&format!("{}={{}}", param.cookie_name));
-                return quote! { Some(format!(#fmt, cookies.#field)) };
+                entries.push(quote! { Some(format!(#fmt, cookies.#field)) });
+            } else {
+                let fmt = Literal::string(&format!("{}={{value}}", param.cookie_name));
+                entries.push(quote! { cookies.#field.as_ref().map(|value| format!(#fmt)) });
             }
-            let fmt = Literal::string(&format!("{}={{value}}", param.cookie_name));
-            return quote! { cookies.#field.as_ref().map(|value| format!(#fmt)) };
-        })
-        .collect();
+        }
+    }
+    for key in &operation.security {
+        let Some(scheme) = schemes.iter().find(|scheme| return scheme.key == *key) else {
+            continue;
+        };
+        if let SecuritySchemeKind::ApiKeyCookie(name) = &scheme.kind {
+            let field = scheme.field.to_token();
+            let fmt = Literal::string(&format!("{name}={{value}}"));
+            entries.push(quote! { self.#field.as_ref().map(|value| format!(#fmt)) });
+        }
+    }
+    if entries.is_empty() {
+        return Vec::new();
+    }
     return vec![quote! {
         let cookie_pairs: Vec<String> = [#(#entries),*]
             .into_iter()
@@ -577,8 +598,10 @@ fn body_mutations(operation: &Operation) -> Result<Vec<TokenStream>> {
 /// The request-builder mutations that apply the operation's security credentials.
 ///
 /// Each configured credential is optional, so an unset scheme simply sends no
-/// auth. Operations that require an [`SecuritySchemeKind::Unsupported`] scheme
-/// are rejected in [`ensure_supported`] before this runs.
+/// auth. Cookie-carried API keys are applied by [`cookie_mutations`] (folded into
+/// the single `Cookie` header), so they are skipped here. Operations that require
+/// an unresolved or [`SecuritySchemeKind::Unsupported`] scheme are rejected in
+/// [`ensure_supported`] before this runs.
 fn auth_mutations(operation: &Operation, schemes: &[SecurityScheme]) -> Vec<TokenStream> {
     let mut mutations = Vec::new();
     for key in &operation.security {
@@ -613,20 +636,15 @@ fn auth_mutations(operation: &Operation, schemes: &[SecurityScheme]) -> Vec<Toke
                     }
                 }
             }
-            SecuritySchemeKind::ApiKeyCookie(name) => {
-                let fmt = Literal::string(&format!("{name}={{value}}"));
-                quote! {
-                    if let Some(value) = &self.#field {
-                        request = request.header(reqwest::header::COOKIE, format!(#fmt));
-                    }
-                }
-            }
+            SecuritySchemeKind::ApiKeyCookie(_) => continue,
             SecuritySchemeKind::Unsupported(_) => continue,
         };
         mutations.push(mutation);
     }
     return mutations;
 }
+
+/// Emit the status-code dispatch that decodes the response into a typed variant.
 ///
 /// Fixed status codes are tried first (most specific), then ranges (`5XX`), then
 /// the `default` catch-all; an undeclared status yields `UnexpectedStatus`.
