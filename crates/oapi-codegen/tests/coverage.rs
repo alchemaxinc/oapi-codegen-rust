@@ -374,6 +374,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_form_ref_scalar_body",
     "server_unsupported_multipart_nonobject_body",
     "server_unsupported_multipart_object_field",
+    "server_unsupported_multipart_xfile_field",
     "server_unsupported_multipart_xfile_body",
 ];
 

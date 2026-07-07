@@ -977,12 +977,12 @@ impl Lowerer<'_> {
         }
     }
 
-    /// Lower a multipart object's properties into [`MultipartField`]s, mirroring
-    /// how the models pass shapes the decoded struct: a field is `Option<..>`
-    /// when it is not `required` or is `nullable`, and its identifier is the
-    /// property's `snake_case` name. Each property must resolve to a scalar (a
-    /// binary/`byte` string becomes a `Vec<u8>` file field); anything else is
-    /// rejected.
+    /// Lower a multipart object's properties into [`MultipartField`]s: a field is
+    /// `Option<..>` when it is not `required` or its schema is `nullable`, and
+    /// its identifier is the property's `snake_case` name. Each property must
+    /// resolve to a scalar (a binary/`byte` string becomes a `Vec<u8>` file
+    /// field); a same-document `$ref` is resolved first. Non-scalar properties
+    /// (nested objects/arrays) and cross-file `$ref` properties are rejected.
     fn lower_multipart_fields(&self, path: &str, method: &str, object: &ObjectType) -> Result<Vec<MultipartField>> {
         let mut fields = Vec::with_capacity(object.properties.len());
         for (wire_name, property) in &object.properties {
@@ -991,7 +991,19 @@ impl Lowerer<'_> {
             });
             let (kind, nullable) = match property {
                 ReferenceOr::Item(schema) => (schema.schema_kind.clone(), schema.schema_data.nullable),
-                ReferenceOr::Reference { reference } => (self.spec.resolve_schema(None, reference)?.schema_kind, false),
+                ReferenceOr::Reference { reference } => {
+                    if ref_file_part(reference).is_some() {
+                        return Err(Error::UnsupportedOperation {
+                            method: method.to_owned(),
+                            path: path.to_owned(),
+                            reason: format!(
+                                "multipart field `{wire_name}` uses a cross-file `$ref`, which is not supported"
+                            ),
+                        });
+                    }
+                    let resolved = self.spec.resolve_schema(None, reference)?;
+                    (resolved.schema_kind, resolved.schema_data.nullable)
+                }
             };
             let ty = scalar_type(&kind).ok_or_else(|| {
                 return Error::UnsupportedOperation {

@@ -7,7 +7,12 @@ pub struct UploadRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub attempts: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<Priority>,
 }
+
+/// A same-document scalar `$ref` field, resolved to `String`.
+pub type Priority = String;
 
 #[derive(Debug, Clone)]
 pub struct UploadMultipart {
@@ -15,6 +20,7 @@ pub struct UploadMultipart {
     pub description: String,
     pub note: Option<String>,
     pub attempts: i64,
+    pub priority: Option<String>,
 }
 
 impl<S> axum::extract::FromRequest<S> for UploadMultipart
@@ -37,6 +43,7 @@ where
         let mut description: Option<String> = None;
         let mut note: Option<String> = None;
         let mut attempts: Option<i64> = None;
+        let mut priority: Option<String> = None;
         while let Some(field) = multipart
             .next_field()
             .await
@@ -103,6 +110,18 @@ where
                     };
                     attempts = Some(value);
                 }
+                Some("priority") => {
+                    let value = field
+                        .text()
+                        .await
+                        .map_err(|error| {
+                            return (
+                                axum::http::StatusCode::BAD_REQUEST,
+                                error.to_string(),
+                            );
+                        })?;
+                    priority = Some(value);
+                }
                 _ => {}
             }
         }
@@ -123,6 +142,7 @@ where
                     axum::http::StatusCode::BAD_REQUEST,
                     "missing required multipart field `attempts`".to_owned(),
                 ))?,
+            priority,
         });
     }
 }

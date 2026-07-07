@@ -602,6 +602,7 @@ fn generated_server_handles_multipart_body() {
             let _description: String = body.description;
             let _note: Option<String> = body.note;
             let _attempts: i64 = body.attempts;
+            let _priority: Option<String> = body.priority;
             return UploadResponse::NoContent;
         }
     }

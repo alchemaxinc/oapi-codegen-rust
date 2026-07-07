@@ -196,8 +196,8 @@ faithfully rather than emit subtly wrong code.
   to an object schema.
 - A `multipart/form-data` body whose schema is not an object, whose object has a
   non-scalar property (a nested object or array), or that references a
-  cross-file/external schema (its fields cannot be enumerated to build the
-  extractor).
+  cross-file/external schema — either as the body itself or as one of its
+  properties (such fields cannot be enumerated to build the extractor).
 
 ## Coverage
 

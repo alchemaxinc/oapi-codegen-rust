@@ -31,3 +31,8 @@ components:
         attempts:
           type: integer
           format: int64
+        priority:
+          $ref: "#/components/schemas/Priority"
+    Priority:
+      type: string
+      description: A same-document scalar `$ref` field, resolved to `String`.
