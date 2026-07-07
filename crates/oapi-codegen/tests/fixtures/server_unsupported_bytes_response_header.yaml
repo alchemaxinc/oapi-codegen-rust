@@ -1,0 +1,16 @@
+openapi: 3.0.3
+info:
+  title: unsupported bytes response header
+  version: "1"
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Token:
+              schema:
+                type: string
+                format: byte

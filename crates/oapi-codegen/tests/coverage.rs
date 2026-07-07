@@ -340,6 +340,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_component_body_ref",
     "server_component_param_ref_pet",
     "server_xfile_refs",
+    "server_response_headers",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
@@ -358,6 +359,8 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_xfile_missing_component",
     "server_unsupported_xfile_no_import_mapping",
     "server_unsupported_xfile_object_path_param",
+    "server_unsupported_object_response_header",
+    "server_unsupported_bytes_response_header",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -534,6 +537,7 @@ server_generated_tests!(
     server_component_body_ref,
     server_component_param_ref_pet,
     server_xfile_refs,
+    server_response_headers,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.

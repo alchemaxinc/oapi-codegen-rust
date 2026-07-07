@@ -86,6 +86,28 @@ const JSON_MEDIA_TYPE: &str = "application/json";
 /// mechanisms rather than the parameter object (compared case-insensitively).
 const IGNORED_HEADER_NAMES: [&str; 3] = ["accept", "content-type", "authorization"];
 
+/// Check whether a header name is valid for use with `HeaderName::from_static`.
+/// Visible ASCII printable characters excluding `:` (the field-name token set
+/// per RFC 9110 §5.1). This prevents a later panic when emitting.
+fn is_valid_header_name(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    for byte in name.as_bytes() {
+        // RFC 7230 tchar. `-`..`9` (0x2D..0x39) would wrongly include `/`
+        // (0x2F), which is not a valid header-name char, so digits are their
+        // own range and `-`/`.` are listed explicitly.
+        let valid = matches!(
+            byte,
+            b'!' | b'#'..=b'\'' | b'*'..=b'+' | b'-' | b'.' | b'0'..=b'9' | b'A'..=b'Z' | b'^'..=b'z' | b'|' | b'~'
+        );
+        if !valid {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// Lower every operation in `spec` into the server IR, resolving cross-file
 /// schema references through `import_mapping`.
 pub fn generate_service(spec: &Spec, import_mapping: &BTreeMap<String, String>) -> Result<Service> {
@@ -426,6 +448,58 @@ impl Lowerer<'_> {
         });
     }
 
+    /// Map a header/response-header schema to a scalar Rust type, applying the
+    /// shared rules: reject `content`, non-scalar shapes, and `byte`/`binary`;
+    /// resolve a same-document/origin schema `$ref` to a scalar; reject a
+    /// cross-file schema `$ref`. `kind_label` is used in error messages (e.g.
+    /// "header parameter" or "response header").
+    fn scalar_from_format(
+        &self,
+        path: &str,
+        method: &str,
+        origin: Option<&str>,
+        kind_label: &str,
+        name: &str,
+        format: &ParameterSchemaOrContent,
+    ) -> Result<RustType> {
+        let schema = match format {
+            ParameterSchemaOrContent::Schema(schema) => schema,
+            ParameterSchemaOrContent::Content(_) => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("{kind_label} `{name}` uses `content`, which is not supported"),
+                });
+            }
+        };
+        let schema = match schema {
+            ReferenceOr::Item(schema) => schema.clone(),
+            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("{kind_label} `{name}` uses a cross-file `$ref`, which is not supported"),
+                });
+            }
+            ReferenceOr::Reference { reference } => self.spec.resolve_schema(origin, reference)?,
+        };
+        let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
+            return Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("{kind_label} `{name}` must be a scalar"),
+            };
+        })?;
+        if matches!(ty, RustType::Bytes) {
+            return Err(Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("{kind_label} `{name}` uses a `byte`/`binary` format, which is not supported"),
+            });
+        }
+        return Ok(ty);
+    }
+
     /// Map a header parameter's schema to a scalar Rust type. `content`,
     /// cross-file `$ref`s, non-scalar shapes (arrays/objects), and `byte`/
     /// `binary` strings (which have no `FromStr`) are rejected.
@@ -437,42 +511,7 @@ impl Lowerer<'_> {
         name: &str,
         format: &ParameterSchemaOrContent,
     ) -> Result<RustType> {
-        let schema = match format {
-            ParameterSchemaOrContent::Schema(schema) => schema,
-            ParameterSchemaOrContent::Content(_) => {
-                return Err(Error::UnsupportedOperation {
-                    method: method.to_owned(),
-                    path: path.to_owned(),
-                    reason: format!("header parameter `{name}` uses `content`, which is not supported"),
-                });
-            }
-        };
-        let schema = match schema {
-            ReferenceOr::Item(schema) => schema.clone(),
-            ReferenceOr::Reference { reference } if ref_file_part(reference).is_some() => {
-                return Err(Error::UnsupportedOperation {
-                    method: method.to_owned(),
-                    path: path.to_owned(),
-                    reason: format!("header parameter `{name}` uses a cross-file `$ref`, which is not supported"),
-                });
-            }
-            ReferenceOr::Reference { reference } => self.spec.resolve_schema(origin, reference)?,
-        };
-        let ty = scalar_type(&schema.schema_kind).ok_or_else(|| {
-            return Error::UnsupportedOperation {
-                method: method.to_owned(),
-                path: path.to_owned(),
-                reason: format!("header parameter `{name}` must be a scalar"),
-            };
-        })?;
-        if matches!(ty, RustType::Bytes) {
-            return Err(Error::UnsupportedOperation {
-                method: method.to_owned(),
-                path: path.to_owned(),
-                reason: format!("header parameter `{name}` uses a `byte`/`binary` format, which is not supported"),
-            });
-        }
-        return Ok(ty);
+        return self.scalar_from_format(path, method, origin, "header parameter", name, format);
     }
 
     /// Lower an operation's cookie parameters into a generated [`Cookies`]
@@ -676,6 +715,52 @@ impl Lowerer<'_> {
         return Ok(Some(ty));
     }
 
+    /// Lower a response's declared headers into scalar-typed [`ResponseHeader`]s.
+    /// Inline `Header` objects only; a `Header` that is itself a `$ref` is
+    /// rejected. De-duplicated by case-insensitive name, first-seen winning.
+    fn lower_response_headers(
+        &self,
+        path: &str,
+        method: &str,
+        origin: Option<&str>,
+        response: &OasResponse,
+    ) -> Result<Vec<crate::ir::ResponseHeader>> {
+        let mut headers = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
+        for (header_name, header_ref) in &response.headers {
+            let header = match header_ref {
+                ReferenceOr::Item(header) => header,
+                ReferenceOr::Reference { .. } => {
+                    return Err(Error::UnsupportedOperation {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        reason: format!("response header `{header_name}` uses a `$ref`, which is not supported"),
+                    });
+                }
+            };
+            if seen.iter().any(|other| return other.eq_ignore_ascii_case(header_name)) {
+                continue;
+            }
+            if !is_valid_header_name(header_name) {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!("response header `{header_name}` has an invalid header name"),
+                });
+            }
+            seen.push(header_name.clone());
+            let ty = self.scalar_from_format(path, method, origin, "response header", header_name, &header.format)?;
+            headers.push(crate::ir::ResponseHeader {
+                name: to_ident(header_name, Case::Snake),
+                header_name: header_name.clone(),
+                ty,
+                required: header.required,
+                doc: header.description.as_deref().and_then(trimmed),
+            });
+        }
+        return Ok(headers);
+    }
+
     /// Lower an operation's responses into typed enum variants, resolving
     /// component `$ref` responses against the document. A fixed status code
     /// becomes a reason-named variant with a compile-time status constant; a
@@ -712,10 +797,12 @@ impl Lowerer<'_> {
             };
             let response = self.resolve_response_ref(response)?;
             let body = self.response_body(path, method, response.origin.as_deref(), &response.value)?;
+            let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
                 variant,
                 status,
                 body,
+                headers,
                 doc: trimmed(&response.value.description),
             });
         }
@@ -723,10 +810,12 @@ impl Lowerer<'_> {
         if let Some(default) = &operation.responses.default {
             let response = self.resolve_response_ref(default)?;
             let body = self.response_body(path, method, response.origin.as_deref(), &response.value)?;
+            let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
                 variant: to_ident("default", Case::Pascal),
                 status: ResponseStatus::Default,
                 body,
+                headers,
                 doc: trimmed(&response.value.description),
             });
         }
@@ -902,6 +991,23 @@ fn trimmed(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn valid_header_names_accept_tokens_and_reject_separators() {
+        // Real header names with `-` and digits and `.` are accepted.
+        assert!(is_valid_header_name("X-Request-Id"));
+        assert!(is_valid_header_name("X-RateLimit-Remaining"));
+        assert!(is_valid_header_name("Sec-CH-UA-Platform-Version"));
+        assert!(is_valid_header_name("a.b"));
+        // Empty and separator characters (which would panic `from_static`) are
+        // rejected — notably `/` (0x2F), which sits between `-` (0x2D) and the
+        // digits, and `:`, space, and control-ish punctuation.
+        assert!(!is_valid_header_name(""));
+        assert!(!is_valid_header_name("X/Y"));
+        assert!(!is_valid_header_name("X:Y"));
+        assert!(!is_valid_header_name("X Y"));
+        assert!(!is_valid_header_name("X(Y)"));
+    }
 
     #[test]
     fn extracts_path_param_names_in_order() {

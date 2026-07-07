@@ -13,7 +13,7 @@
 //! `implicit_return`/`dead_code` rules are about first-party source, not
 //! generated output. The handwritten tests below are linted normally.
 
-#[allow(dead_code, clippy::implicit_return)]
+#[allow(dead_code, clippy::implicit_return, clippy::collapsible_if)]
 mod generated {
     pub mod allof_merge {
         include!("generated/allof_merge.rs");
@@ -101,6 +101,9 @@ mod generated {
     }
     pub mod server_xfile_refs {
         include!("generated/server_xfile_refs.rs");
+    }
+    pub mod server_response_headers {
+        include!("generated/server_response_headers.rs");
     }
 }
 
@@ -444,4 +447,58 @@ fn generated_server_resolves_cross_file_param_ref() {
     }
 
     let _router: axum::Router = server_xfile_refs::router(Service);
+}
+
+#[test]
+fn generated_server_writes_response_headers() {
+    use axum::response::IntoResponse;
+    use generated::server_response_headers;
+    use server_response_headers::Api;
+    use server_response_headers::GetWidgetsResponse;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn get_widgets(&self) -> GetWidgetsResponse {
+            return GetWidgetsResponse::Ok {
+                body: vec!["w1".to_owned()],
+                x_request_id: "abc-123".to_owned(),
+                x_rate_limit_remaining: Some(42),
+            };
+        }
+    }
+
+    // The `Ok` variant renders its headers into the response.
+    let response = GetWidgetsResponse::Ok {
+        body: vec!["w1".to_owned()],
+        x_request_id: "abc-123".to_owned(),
+        x_rate_limit_remaining: Some(42),
+    }
+    .into_response();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    assert_eq!(response.headers().get("x-request-id").unwrap(), "abc-123");
+    assert_eq!(response.headers().get("x-ratelimit-remaining").unwrap(), "42");
+
+    // An unset optional header is absent.
+    let response = GetWidgetsResponse::Ok {
+        body: Vec::new(),
+        x_request_id: "abc-123".to_owned(),
+        x_rate_limit_remaining: None,
+    }
+    .into_response();
+    assert!(response.headers().get("x-ratelimit-remaining").is_none());
+
+    // The dynamic `Default` variant uses the handler-supplied status.
+    let response = GetWidgetsResponse::Default {
+        status: axum::http::StatusCode::BAD_GATEWAY,
+        body: "boom".to_owned(),
+        x_request_id: "abc-123".to_owned(),
+    }
+    .into_response();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_GATEWAY);
+    assert_eq!(response.headers().get("x-request-id").unwrap(), "abc-123");
+
+    // Building the router proves the trait + handler wiring type-check.
+    let _router: axum::Router = server_response_headers::router(Service);
 }

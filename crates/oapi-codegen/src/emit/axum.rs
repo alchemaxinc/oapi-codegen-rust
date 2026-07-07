@@ -13,6 +13,8 @@ use crate::ir::Cookies;
 use crate::ir::HeaderParam;
 use crate::ir::Headers;
 use crate::ir::Operation;
+use crate::ir::ResponseCase;
+use crate::ir::ResponseHeader;
 use crate::ir::ResponseStatus;
 use crate::ir::RustType;
 use crate::ir::Service;
@@ -112,9 +114,15 @@ fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream
     for case in &operation.responses {
         let variant = case.variant.to_token();
         let doc = doc_attr(&case.doc);
-        let (variant_def, arm) = match &case.status {
-            ResponseStatus::Fixed(code) => emit_fixed_response(&name, &variant, *code, &case.body)?,
-            ResponseStatus::Default | ResponseStatus::Range(_) => emit_dynamic_response(&name, &variant, &case.body)?,
+        let (variant_def, arm) = if case.headers.is_empty() {
+            match &case.status {
+                ResponseStatus::Fixed(code) => emit_fixed_response(&name, &variant, *code, &case.body)?,
+                ResponseStatus::Default | ResponseStatus::Range(_) => {
+                    emit_dynamic_response(&name, &variant, &case.body)?
+                }
+            }
+        } else {
+            emit_response_with_headers(&name, &variant, case)?
         };
         variants.push(quote! { #doc #variant_def });
         arms.push(arm);
@@ -300,6 +308,129 @@ fn emit_handler(operation: &Operation) -> Result<TokenStream> {
             api.#method(#(#call_args),*).await
         }
     });
+}
+
+/// Emit a struct-variant definition and `IntoResponse` arm for a response that
+/// declares headers. Field order: `status` (dynamic responses only), `body`
+/// (when present), then one field per declared header (required → `T`,
+/// optional → `Option<T>`). Header values are formatted with `to_string()` and
+/// inserted best-effort — a value that cannot encode as a `HeaderValue` is
+/// skipped rather than panicking.
+fn emit_response_with_headers(
+    name: &proc_macro2::Ident,
+    variant: &proc_macro2::Ident,
+    case: &ResponseCase,
+) -> Result<(TokenStream, TokenStream)> {
+    let dynamic = !matches!(case.status, ResponseStatus::Fixed(_));
+
+    // Field definitions.
+    let mut field_defs: Vec<TokenStream> = Vec::new();
+    if dynamic {
+        field_defs.push(quote! { status: axum::http::StatusCode });
+    }
+    if let Some(body) = &case.body {
+        let ty = emit_type(body)?;
+        field_defs.push(quote! { body: #ty });
+    }
+    let mut header_field_defs = Vec::with_capacity(case.headers.len());
+    for header in &case.headers {
+        header_field_defs.push(emit_response_header_field(header)?);
+    }
+
+    let variant_def = quote! {
+        #variant {
+            #(#field_defs,)*
+            #(#header_field_defs)*
+        }
+    };
+
+    // Destructure pattern (bind every field we defined).
+    let mut binds: Vec<TokenStream> = Vec::new();
+    if dynamic {
+        binds.push(quote! { status });
+    }
+    if case.body.is_some() {
+        binds.push(quote! { body });
+    }
+    let header_idents: Vec<proc_macro2::Ident> = case.headers.iter().map(|h| return h.name.to_token()).collect();
+    for ident in &header_idents {
+        binds.push(quote! { #ident });
+    }
+
+    // Status expression: constant for fixed, bound `status` for dynamic.
+    let status_expr = match &case.status {
+        ResponseStatus::Fixed(code) => {
+            let code = proc_macro2::Literal::u16_unsuffixed(*code);
+            quote! {
+                {
+                    const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(#code) {
+                        Ok(status) => status,
+                        Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                    };
+                    STATUS
+                }
+            }
+        }
+        ResponseStatus::Default | ResponseStatus::Range(_) => quote! { status },
+    };
+
+    // Header insertions (best-effort).
+    let mut inserts = Vec::with_capacity(case.headers.len());
+    for header in &case.headers {
+        inserts.push(emit_response_header_insert(header));
+    }
+
+    let body_term = if case.body.is_some() {
+        quote! { , axum::Json(body) }
+    } else {
+        quote! {}
+    };
+
+    let arm = quote! {
+        #name::#variant { #(#binds),* } => {
+            let mut header_map = axum::http::HeaderMap::new();
+            #(#inserts)*
+            return (#status_expr, header_map #body_term).into_response();
+        }
+    };
+
+    return Ok((variant_def, arm));
+}
+
+/// Emit one struct-variant field for a response header (required → `T`,
+/// optional → `Option<T>`), with its doc attribute.
+fn emit_response_header_field(header: &ResponseHeader) -> Result<TokenStream> {
+    let ident = header.name.to_token();
+    let doc = doc_attr(&header.doc);
+    let mut ty = emit_type(&header.ty)?;
+    if !header.required {
+        ty = quote! { Option<#ty> };
+    }
+    return Ok(quote! {
+        #doc
+        #ident: #ty,
+    });
+}
+
+/// Emit the best-effort insertion of one response header into `header_map`.
+/// Uses a lowercased static header name; a value that fails to encode as a
+/// `HeaderValue` is skipped (never panics).
+fn emit_response_header_insert(header: &ResponseHeader) -> TokenStream {
+    let ident = header.name.to_token();
+    let lower_name = header.header_name.to_ascii_lowercase();
+    let insert = quote! {
+        if let Ok(value) = axum::http::HeaderValue::from_str(&#ident.to_string()) {
+            header_map.insert(axum::http::HeaderName::from_static(#lower_name), value);
+        }
+    };
+    if header.required {
+        return insert;
+    }
+    return quote! {
+        if let Some(#ident) = #ident {
+            #insert
+        }
+    };
 }
 
 /// Emit a header struct and its hand-written `FromRequestParts` implementation.

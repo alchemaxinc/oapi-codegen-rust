@@ -1,0 +1,41 @@
+openapi: 3.0.3
+info:
+  title: response headers
+  version: "1"
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      summary: List widgets with rate-limit headers.
+      responses:
+        "200":
+          description: The widgets.
+          headers:
+            X-Request-Id:
+              required: true
+              description: Correlation id echoed to the caller.
+              schema:
+                type: string
+            X-RateLimit-Remaining:
+              required: false
+              description: Remaining quota in the current window.
+              schema:
+                type: integer
+                format: int32
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        default:
+          description: An error, with a correlation id.
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: string

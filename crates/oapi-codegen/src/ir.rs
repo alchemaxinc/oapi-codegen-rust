@@ -294,7 +294,26 @@ pub struct ResponseCase {
     pub status: ResponseStatus,
     /// JSON response body type, when the response declares content.
     pub body: Option<RustType>,
+    /// Declared response headers written by the generated `IntoResponse`, in
+    /// declaration order. Empty means no headers (the pre-C5 variant shape).
+    pub headers: Vec<ResponseHeader>,
     /// Doc comment derived from the response `description`.
+    pub doc: Option<String>,
+}
+
+/// A single declared response header written by the generated `IntoResponse`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResponseHeader {
+    /// Rust field identifier (`snake_case`).
+    pub name: RustIdent,
+    /// Exact header name as written to the response (e.g. `X-Request-Id`).
+    pub header_name: String,
+    /// Scalar type serialized to a header value via `ToString`. Bare element
+    /// type even when optional; the emitter adds the `Option<..>` wrapper.
+    pub ty: RustType,
+    /// Whether the header is always written (`false` → `Option<..>` field).
+    pub required: bool,
+    /// Doc comment derived from the header `description`.
     pub doc: Option<String>,
 }
 

@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: unsupported object response header
+  version: "1"
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Meta:
+              schema:
+                type: object
+                properties:
+                  page:
+                    type: integer
