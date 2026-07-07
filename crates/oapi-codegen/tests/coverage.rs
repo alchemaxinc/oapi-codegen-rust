@@ -363,6 +363,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_bytes_response_header",
     "server_unsupported_colliding_response_headers",
     "server_unsupported_ref_response_header",
+    "server_unsupported_reserved_response_header",
 ];
 
 /// Absolute path to the crate's `tests` directory.

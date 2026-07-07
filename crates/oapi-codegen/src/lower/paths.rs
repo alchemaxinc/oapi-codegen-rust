@@ -86,6 +86,12 @@ const JSON_MEDIA_TYPE: &str = "application/json";
 /// mechanisms rather than the parameter object (compared case-insensitively).
 const IGNORED_HEADER_NAMES: [&str; 3] = ["accept", "content-type", "authorization"];
 
+/// Rust field names the response emitter injects into a header-bearing struct
+/// variant (`status` for dynamic responses, `body` when a body is present). A
+/// declared response header whose `snake_case` identifier equals one of these
+/// would collide, so such headers are rejected during lowering.
+const RESERVED_RESPONSE_FIELDS: [&str; 2] = ["status", "body"];
+
 /// Check whether a header name is valid for use with `HeaderName::from_static`.
 /// Enforces the HTTP `tchar` token set (RFC 9110 §5.6.2 / RFC 7230): ASCII
 /// alphanumerics plus ``!#$%&'*+-.^_`|~``. This prevents a later panic when
@@ -751,6 +757,20 @@ impl Lowerer<'_> {
                 });
             }
             let ident = to_ident(header_name, Case::Snake);
+            // The response emitter injects `status` (dynamic responses) and
+            // `body` (responses with a body) fields into the struct variant. A
+            // header whose Rust field name collides with one of those would emit
+            // duplicate fields. Reject rather than mis-generate.
+            if RESERVED_RESPONSE_FIELDS.contains(&ident.logical()) {
+                return Err(Error::UnsupportedOperation {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    reason: format!(
+                        "response header `{header_name}` maps to the reserved Rust field name `{}`",
+                        ident.logical()
+                    ),
+                });
+            }
             // Distinct header names can collapse to the same Rust field
             // identifier (e.g. `X-Foo` and `X_Foo` both → `x_foo`), which would
             // emit a struct with duplicate fields. Reject rather than
