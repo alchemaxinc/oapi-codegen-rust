@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: unsupported non-string text body
+  version: "1"
+paths:
+  /n:
+    post:
+      operationId: n
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: integer
+      responses:
+        "204":
+          description: ok

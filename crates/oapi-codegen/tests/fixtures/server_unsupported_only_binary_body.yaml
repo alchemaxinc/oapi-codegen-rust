@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: unsupported binary-only body
+  version: "1"
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: ok

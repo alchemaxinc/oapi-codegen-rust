@@ -1,0 +1,21 @@
+openapi: 3.0.3
+info:
+  title: text body
+  version: "1"
+paths:
+  /echo:
+    post:
+      operationId: echo
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: The echoed text.
+          content:
+            text/plain:
+              schema:
+                type: string
