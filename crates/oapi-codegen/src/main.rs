@@ -54,8 +54,8 @@ fn run(cli: &Cli) -> Result<()> {
     if config.generate.embedded_spec {
         return Err(Error::Unimplemented("embedded-spec".to_owned()));
     }
-    if !config.generate.models && !config.generate.std_http_server {
-        eprintln!("nothing to generate: enable `models` or `std-http-server` in the config");
+    if !config.generate.models && !config.generate.std_http_server && !config.generate.client {
+        eprintln!("nothing to generate: enable `models`, `std-http-server`, or `client` in the config");
         return Ok(());
     }
 

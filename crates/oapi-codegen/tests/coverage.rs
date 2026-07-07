@@ -381,6 +381,20 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_multipart_combined",
 ];
 
+/// Client fixtures whose generated blocking `reqwest` client is compile-checked
+/// against a committed file. These exercise the client generator: path/query/
+/// header/cookie inputs, single-content request bodies, and typed responses.
+const CLIENT_FIXTURES: &[&str] = &["client_widgets"];
+
+/// Client fixtures whose generation must fail with a documented error, covering
+/// the request/response shapes the client generator does not support yet.
+const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
+    "client_unsupported_multipart_request",
+    "client_unsupported_negotiated_request",
+    "client_unsupported_negotiated_response",
+    "client_unsupported_form_response",
+];
+
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {
     return Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -590,6 +604,93 @@ fn server_unsupported_features_are_rejected() {
     }
 }
 
+/// Configuration that enables the blocking `reqwest` client generator.
+fn client_config() -> oapi_codegen::Config {
+    return oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            client: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+}
+
+/// Regenerate `stem`'s client output and assert it matches the committed file.
+///
+/// Refresh the committed files after an intentional change with
+/// `make update-generated`
+/// (`UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage`).
+fn assert_client_generated_matches(stem: &str) {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+    let generated_file = dir.join("generated").join(format!("{stem}.rs"));
+
+    let generated = oapi_codegen::generate(&fixture, &client_config()).unwrap_or_else(|err| {
+        panic!("generating client `{stem}` failed: {err}");
+    });
+
+    if std::env::var_os("UPDATE_GENERATED").is_some() {
+        std::fs::write(&generated_file, &generated).unwrap_or_else(|err| {
+            panic!("writing `{stem}` failed: {err}");
+        });
+        return;
+    }
+
+    let expected = std::fs::read_to_string(&generated_file).unwrap_or_else(|err| {
+        panic!("reading `{stem}` failed (run `make update-generated`): {err}");
+    });
+    assert_eq!(
+        generated, expected,
+        "generated client output for `{stem}` drifted from tests/generated/{stem}.rs; \
+         run `make update-generated` if this change is intentional",
+    );
+}
+
+/// Emit one `#[test]` per client fixture (so each shows in the test output) plus
+/// a `CLIENT_GENERATED_TEST_STEMS` catalogue used to guard against drift. The
+/// stem list must match [`CLIENT_FIXTURES`] — enforced by
+/// [`client_generated_tests_cover_client_fixtures`].
+macro_rules! client_generated_tests {
+    ($($stem:ident),+ $(,)?) => {
+        $(
+            #[test]
+            fn $stem() {
+                assert_client_generated_matches(stringify!($stem));
+            }
+        )+
+
+        const CLIENT_GENERATED_TEST_STEMS: &[&str] = &[$(stringify!($stem)),+];
+    };
+}
+
+client_generated_tests!(client_widgets);
+
+/// The client `#[test]`s must cover exactly the supported client fixtures.
+#[test]
+fn client_generated_tests_cover_client_fixtures() {
+    let covered: BTreeSet<&str> = CLIENT_GENERATED_TEST_STEMS.iter().copied().collect();
+    let expected: BTreeSet<&str> = CLIENT_FIXTURES.iter().copied().collect();
+    assert_eq!(
+        covered, expected,
+        "the `client_generated_tests!` list is out of sync with CLIENT_FIXTURES",
+    );
+}
+
+/// Unsupported client fixtures must be rejected with an error, never silently
+/// mishandled — covering the request/response shapes the client cannot emit yet.
+#[test]
+fn client_unsupported_features_are_rejected() {
+    let dir = tests_dir();
+    for stem in CLIENT_UNSUPPORTED_FIXTURES {
+        let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+        let result = oapi_codegen::generate(&fixture, &client_config());
+        assert!(
+            result.is_err(),
+            "`{stem}` is catalogued as unsupported but client generation succeeded",
+        );
+    }
+}
+
 /// Every supported generated file must be `include!`d by
 /// `tests/generated_compiles.rs` so its emitted code is type-checked against
 /// real serde/chrono/uuid.
@@ -598,7 +699,8 @@ fn generated_outputs_are_compile_checked() {
     let source = include_str!("generated_compiles.rs");
     let stems = fixtures_with(Status::Supported)
         .into_iter()
-        .chain(SERVER_FIXTURES.iter().copied());
+        .chain(SERVER_FIXTURES.iter().copied())
+        .chain(CLIENT_FIXTURES.iter().copied());
     for stem in stems {
         let needle = format!("include!(\"generated/{stem}.rs\")");
         assert!(
@@ -638,6 +740,8 @@ fn fixtures_and_test_table_agree() {
         })
         .chain(SERVER_FIXTURES.iter().copied())
         .chain(SERVER_UNSUPPORTED_FIXTURES.iter().copied())
+        .chain(CLIENT_FIXTURES.iter().copied())
+        .chain(CLIENT_UNSUPPORTED_FIXTURES.iter().copied())
         .collect();
 
     for stem in &referenced {

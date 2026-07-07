@@ -1,0 +1,219 @@
+openapi: 3.0.3
+info:
+  title: Widget client
+  version: 1.0.0
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      summary: List widgets, filtered by query parameters.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Free-text search term.
+          schema:
+            type: string
+        - name: tags
+          in: query
+          required: false
+          description: Only return widgets carrying every given tag.
+          schema:
+            type: array
+            items:
+              type: string
+        - name: limit
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int32
+        - name: region
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The matching widgets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Widget"
+    post:
+      operationId: createWidget
+      summary: Create a widget.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Unique key so a retried create is not duplicated.
+          schema:
+            type: string
+        - name: X-Trace-Id
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewWidget"
+      responses:
+        "201":
+          description: The widget was created.
+          headers:
+            Location:
+              description: URL of the created widget.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+        "400":
+          description: The request was malformed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        default:
+          description: An unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      summary: Fetch a single widget by id.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The requested widget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+        "404":
+          description: No widget matched the id.
+        "5XX":
+          description: A server-side error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: replaceWidget
+      summary: Replace a widget from a form submission.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/NewWidget"
+      responses:
+        "200":
+          description: The updated widget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+    delete:
+      operationId: deleteWidget
+      summary: Delete a widget, authenticated by a session cookie.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: session
+          in: cookie
+          required: true
+          description: Opaque session token.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: The widget was deleted.
+  /widgets/{id}/notes:
+    post:
+      operationId: addNote
+      summary: Attach a plain-text note to a widget.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "201":
+          description: The note was stored; its rendering is returned as text.
+          headers:
+            X-Note-Id:
+              description: Identifier assigned to the stored note.
+              schema:
+                type: string
+          content:
+            text/plain:
+              schema:
+                type: string
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    NewWidget:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string

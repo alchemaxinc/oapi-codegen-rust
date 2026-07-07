@@ -123,6 +123,9 @@ mod generated {
     pub mod server_multi_content_response {
         include!("generated/server_multi_content_response.rs");
     }
+    pub mod client_widgets {
+        include!("generated/client_widgets.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -617,4 +620,274 @@ fn generated_server_handles_multipart_body() {
     // struct satisfies axum's `FromRequest` (driving `axum::extract::Multipart`),
     // which is how the handler consumes the `multipart/form-data` body.
     let _router: axum::Router = server_multipart_body::router(Service);
+}
+
+/// Drive the generated blocking client against a tiny canned HTTP server to
+/// prove its request building and response decoding behave at runtime (not just
+/// compile). Each response sets `Connection: close` so the blocking client opens
+/// a fresh socket per call, letting the mock accept them in order; the mock also
+/// captures each raw request so the generated request-building can be asserted.
+///
+/// Coverage: query building, JSON request bodies + request headers, JSON
+/// responses, a bodyless `404`, a `5XX` range dispatch carrying the status and a
+/// decoded body, form request bodies, cookie headers, and a `text/plain` request
+/// whose response carries a decoded body plus a parsed response header.
+#[test]
+fn generated_client_drives_requests_and_decodes_responses() {
+    use std::net::TcpListener;
+
+    use client_widgets::AddNoteResponse;
+    use client_widgets::Client;
+    use client_widgets::CreateWidgetHeaders;
+    use client_widgets::CreateWidgetResponse;
+    use client_widgets::DeleteWidgetCookies;
+    use client_widgets::DeleteWidgetResponse;
+    use client_widgets::GetWidgetResponse;
+    use client_widgets::ListWidgetsQuery;
+    use client_widgets::ListWidgetsResponse;
+    use client_widgets::NewWidget;
+    use client_widgets::ReplaceWidgetResponse;
+    use generated::client_widgets;
+
+    fn read_request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::BufRead;
+        use std::io::Read;
+
+        let mut reader = std::io::BufReader::new(stream);
+        let mut head = String::new();
+        loop {
+            let mut line = String::new();
+            let read = reader.read_line(&mut line).expect("read request line");
+            if read == 0 {
+                break;
+            }
+            let blank = line == "\r\n";
+            head.push_str(&line);
+            if blank {
+                break;
+            }
+        }
+        let content_length = head
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.trim().eq_ignore_ascii_case("content-length") {
+                    return value.trim().parse::<usize>().ok();
+                }
+                return None;
+            })
+            .unwrap_or(0);
+        let mut body = vec![0u8; content_length];
+        if content_length > 0 {
+            reader.read_exact(&mut body).expect("read request body");
+        }
+        return format!("{head}{}", String::from_utf8_lossy(&body));
+    }
+
+    fn response(status: &str, content_type: Option<&str>, extra: &[(&str, &str)], body: &str) -> String {
+        let mut out = format!(
+            "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {len}\r\n",
+            len = body.len(),
+        );
+        if let Some(content_type) = content_type {
+            out.push_str(&format!("Content-Type: {content_type}\r\n"));
+        }
+        for (name, value) in extra {
+            out.push_str(&format!("{name}: {value}\r\n"));
+        }
+        out.push_str("\r\n");
+        out.push_str(body);
+        return out;
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let base_url = format!("http://{addr}");
+
+    let responses = vec![
+        response(
+            "200 OK",
+            Some("application/json"),
+            &[],
+            r#"[{"id":"w9","name":"Chair"}]"#,
+        ),
+        response(
+            "201 Created",
+            Some("application/json"),
+            &[("Location", "/widgets/w10")],
+            r#"{"id":"w10","name":"Gizmo"}"#,
+        ),
+        response(
+            "200 OK",
+            Some("application/json"),
+            &[],
+            r#"{"id":"w1","name":"Widget One"}"#,
+        ),
+        response("404 Not Found", None, &[], ""),
+        response(
+            "503 Service Unavailable",
+            Some("application/json"),
+            &[],
+            r#"{"code":"upstream","message":"down"}"#,
+        ),
+        response(
+            "200 OK",
+            Some("application/json"),
+            &[],
+            r#"{"id":"w1","name":"Renamed"}"#,
+        ),
+        response("204 No Content", None, &[], ""),
+        response("201 Created", Some("text/plain"), &[("X-Note-Id", "note-7")], "stored"),
+    ];
+
+    let server = std::thread::spawn(move || {
+        use std::io::Write;
+
+        let mut received = Vec::with_capacity(responses.len());
+        for response in &responses {
+            let (mut stream, _) = listener.accept().expect("accept mock connection");
+            received.push(read_request(&mut stream));
+            stream.write_all(response.as_bytes()).expect("write mock response");
+            stream.flush().expect("flush mock response");
+        }
+        return received;
+    });
+
+    let client = Client::new(base_url).expect("build client");
+
+    let query = ListWidgetsQuery {
+        q: Some("chair".to_owned()),
+        tags: Some(vec!["a".to_owned(), "b".to_owned()]),
+        limit: 10,
+        region: "eu".to_owned(),
+    };
+    match client.list_widgets(query).expect("list call succeeds") {
+        ListWidgetsResponse::Ok(widgets) => {
+            assert_eq!(widgets.len(), 1);
+            assert_eq!(widgets[0].id, "w9");
+        }
+    }
+
+    let headers = CreateWidgetHeaders {
+        idempotency_key: "key-1".to_owned(),
+        x_trace_id: Some("trace-1".to_owned()),
+    };
+    let new_widget = NewWidget {
+        name: "Gizmo".to_owned(),
+        tags: Some(vec!["red".to_owned()]),
+    };
+    match client.create_widget(headers, new_widget).expect("create call succeeds") {
+        CreateWidgetResponse::Created { body, location } => {
+            assert_eq!(body.id, "w10");
+            assert_eq!(location.as_deref(), Some("/widgets/w10"));
+        }
+        _ => panic!("expected CreateWidgetResponse::Created for a 201 response"),
+    }
+
+    match client.get_widget("w1".to_owned()).expect("200 call succeeds") {
+        GetWidgetResponse::Ok(widget) => {
+            assert_eq!(widget.id, "w1");
+            assert_eq!(widget.name, "Widget One");
+        }
+        _ => panic!("expected GetWidgetResponse::Ok for a 200 response"),
+    }
+
+    match client.get_widget("missing".to_owned()).expect("404 call succeeds") {
+        GetWidgetResponse::NotFound => {}
+        _ => panic!("expected GetWidgetResponse::NotFound for a 404 response"),
+    }
+
+    match client.get_widget("boom".to_owned()).expect("503 call succeeds") {
+        GetWidgetResponse::Status5xx(status, error) => {
+            assert_eq!(status.as_u16(), 503);
+            assert_eq!(error.code, "upstream");
+        }
+        _ => panic!("expected GetWidgetResponse::Status5xx for a 503 response"),
+    }
+
+    let replacement = NewWidget {
+        name: "Renamed".to_owned(),
+        tags: None,
+    };
+    match client
+        .replace_widget("w1".to_owned(), replacement)
+        .expect("replace call succeeds")
+    {
+        ReplaceWidgetResponse::Ok(widget) => assert_eq!(widget.name, "Renamed"),
+    }
+
+    let cookies = DeleteWidgetCookies {
+        session: "abc123".to_owned(),
+    };
+    match client
+        .delete_widget("w1".to_owned(), cookies)
+        .expect("delete call succeeds")
+    {
+        DeleteWidgetResponse::NoContent => {}
+    }
+
+    match client
+        .add_note("w1".to_owned(), "hello note".to_owned())
+        .expect("note call succeeds")
+    {
+        AddNoteResponse::Created { body, x_note_id } => {
+            assert_eq!(body, "stored");
+            assert_eq!(x_note_id.as_deref(), Some("note-7"));
+        }
+    }
+
+    let received = server.join().expect("mock server thread");
+
+    let list_request = &received[0];
+    assert!(list_request.starts_with("GET /widgets?"), "list path: {list_request}");
+    for pair in ["q=chair", "tags=a", "tags=b", "limit=10", "region=eu"] {
+        assert!(
+            list_request.contains(pair),
+            "list query missing `{pair}`: {list_request}"
+        );
+    }
+
+    let create_request = &received[1];
+    let create_lower = create_request.to_lowercase();
+    assert!(
+        create_request.starts_with("POST /widgets "),
+        "create path: {create_request}"
+    );
+    assert!(create_lower.contains("idempotency-key: key-1"));
+    assert!(create_lower.contains("x-trace-id: trace-1"));
+    assert!(create_lower.contains("content-type: application/json"));
+    assert!(
+        create_request.contains(r#""name":"Gizmo""#),
+        "create body: {create_request}"
+    );
+
+    let replace_request = &received[5];
+    assert!(
+        replace_request.starts_with("PUT /widgets/w1 "),
+        "replace path: {replace_request}"
+    );
+    assert!(
+        replace_request
+            .to_lowercase()
+            .contains("content-type: application/x-www-form-urlencoded")
+    );
+    assert!(
+        replace_request.contains("name=Renamed"),
+        "replace body: {replace_request}"
+    );
+
+    let delete_request = &received[6];
+    assert!(
+        delete_request.starts_with("DELETE /widgets/w1 "),
+        "delete path: {delete_request}"
+    );
+    assert!(delete_request.to_lowercase().contains("cookie: session=abc123"));
+
+    let note_request = &received[7];
+    assert!(
+        note_request.starts_with("POST /widgets/w1/notes "),
+        "note path: {note_request}"
+    );
+    assert!(note_request.to_lowercase().contains("content-type: text/plain"));
+    assert!(note_request.contains("hello note"), "note body: {note_request}");
 }

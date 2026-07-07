@@ -23,7 +23,8 @@ package: apimodel # informational
 output: models.rs # output path (overridden by -o)
 generate:
   models: true
-  std-http-server: true # also emit an axum server interface
+  std-http-server: true # emit an axum server interface, or…
+  client: true # …a blocking reqwest client (server wins if both are set)
 ```
 
 `import-mapping` maps a referenced spec file to the Rust module its schemas are
@@ -215,6 +216,62 @@ faithfully rather than emit subtly wrong code.
   the same operation (multipart needs its own extractor and cannot join the
   `Content-Type` dispatch).
 
+## Client generation
+
+Setting `generate.client` emits a blocking [`reqwest`] client alongside the
+models. Like the server, the output is typed-only and driven by the same
+internal representation, but it depends solely on `reqwest`, `serde`, and the
+generated models — never `axum`:
+
+- a `struct Client` holding a `base_url` and a `reqwest::blocking::Client`, with
+  `Client::new(base_url)` (builds a default HTTP client) and
+  `Client::with_client(base_url, http)` (accepts a preconfigured client, e.g.
+  with timeouts);
+- one method per operation returning `Result<<Op>Response, ClientError>`, whose
+  arguments are the path parameters, a generated query-parameter struct, a
+  generated header-parameter struct, a generated cookie-parameter struct, and the
+  request body (each present only when the operation declares it);
+- a response `enum` per operation with one variant per documented status code
+  (mirroring the server's shape but carrying `reqwest::StatusCode` for
+  `default`/range variants), plus a `ClientError` enum (`Http(reqwest::Error)`
+  for transport/decoding failures, `UnexpectedStatus(reqwest::StatusCode)` for a
+  status the operation does not declare).
+
+Because the client cannot assume the server honoured the contract, response
+header fields are always `Option<T>` and parsed best-effort, even for headers the
+spec marks required.
+
+A client crate needs `reqwest = { version = "0.12", features = ["blocking",
+"json"] }`. The `json` feature is required when an operation sends a JSON request
+body and/or decodes a JSON response body.
+
+**Supported**
+
+- **Path, query, header, and cookie parameters** — the same scalar/array rules as
+  the server. Query scalars and arrays (repeated keys, `style: form`,
+  `explode: true`) are appended per field; headers and cookies are set from the
+  generated input structs.
+- **Request bodies** — JSON (via `reqwest`'s `.json()`), form
+  (`application/x-www-form-urlencoded`, via `.form()`), and `text/plain` (a raw
+  string body with an explicit `Content-Type`).
+- **Responses** — fixed status codes, `default`, and ranges (`5XX`), decoding a
+  JSON or `text/plain` body into the matching enum variant, along with declared
+  response headers.
+
+**Rejected / deferred** (an error, never mis-generated)
+
+- A `multipart/form-data` request body (no multipart client encoder yet).
+- A request body that declares two or more content types (negotiated request
+  bodies are server-only for now).
+- A response that declares two or more content types (negotiated responses are
+  server-only for now).
+- A form (`application/x-www-form-urlencoded`) _response_ body.
+
+Enabling both `std-http-server` and `client` emits the server (the client is a
+follow-up once multipart and negotiated bodies are supported on the client side).
+Path parameters are substituted verbatim without percent-encoding, which is safe
+for the scalar values the generator accepts.
+
 ## Coverage
 
 Every OpenAPI 3 schema element is deliberately catalogued — supported, ignored,
@@ -239,3 +296,4 @@ the unknown.
 [`quote`]: https://crates.io/crates/quote
 [`syn`]: https://crates.io/crates/syn
 [`prettyplease`]: https://crates.io/crates/prettyplease
+[`reqwest`]: https://crates.io/crates/reqwest
