@@ -23,6 +23,10 @@ const MAX_REF_DEPTH: usize = 32;
 /// Shared empty schema map returned when a document has no components.
 static EMPTY_SCHEMAS: std::sync::OnceLock<IndexMap<String, ReferenceOr<Schema>>> = std::sync::OnceLock::new();
 
+/// Shared empty security-scheme map returned when a document has no components.
+static EMPTY_SECURITY_SCHEMES: std::sync::OnceLock<IndexMap<String, ReferenceOr<openapiv3::SecurityScheme>>> =
+    std::sync::OnceLock::new();
+
 /// A resolved structural object plus the referenced file it came from.
 #[derive(Debug, Clone)]
 pub struct Resolved<T> {
@@ -122,6 +126,27 @@ impl Spec {
     /// The paths (operations) declared in the document, in document order.
     pub fn paths(&self) -> &openapiv3::Paths {
         return &self.inner.paths;
+    }
+
+    /// The document's global `security` requirements, if declared. An operation
+    /// with no `security` of its own inherits these.
+    pub fn global_security(&self) -> Option<&[openapiv3::SecurityRequirement]> {
+        return self.inner.security.as_deref();
+    }
+
+    /// The security schemes declared under `components.securitySchemes`, in
+    /// document order.
+    pub fn security_schemes(&self) -> &IndexMap<String, ReferenceOr<openapiv3::SecurityScheme>> {
+        let empty = EMPTY_SECURITY_SCHEMES.get_or_init(IndexMap::new);
+        let schemes = self
+            .inner
+            .components
+            .as_ref()
+            .map(|c| {
+                return &c.security_schemes;
+            })
+            .unwrap_or(empty);
+        return schemes;
     }
 
     /// Resolve a `#/components/responses/<name>` (possibly cross-file)

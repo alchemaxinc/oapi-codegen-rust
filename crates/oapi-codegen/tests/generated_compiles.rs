@@ -126,6 +126,9 @@ mod generated {
     pub mod client_widgets {
         include!("generated/client_widgets.rs");
     }
+    pub mod client_auth {
+        include!("generated/client_auth.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -890,4 +893,147 @@ fn generated_client_drives_requests_and_decodes_responses() {
     );
     assert!(note_request.to_lowercase().contains("content-type: text/plain"));
     assert!(note_request.contains("hello note"), "note body: {note_request}");
+}
+
+/// Drive the generated auth client against a canned HTTP server to prove each
+/// security scheme places its credential on the wire, that an operation with
+/// `security: []` sends none, and that an unset credential is simply omitted.
+///
+/// Coverage: global bearer auth, an unauthenticated operation, a per-operation
+/// HTTP basic override, and API-key credentials carried in a header, a query
+/// parameter, and a cookie.
+#[test]
+fn generated_client_applies_security_credentials() {
+    use std::net::TcpListener;
+
+    use client_auth::Client;
+    use client_auth::GetAdminResponse;
+    use client_auth::GetProfileResponse;
+    use client_auth::GetPublicResponse;
+    use client_auth::GetReportsResponse;
+    use client_auth::GetSessionResponse;
+    use client_auth::SearchQuery;
+    use client_auth::SearchResponse;
+    use generated::client_auth;
+
+    fn read_request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::BufRead;
+
+        let mut reader = std::io::BufReader::new(stream);
+        let mut head = String::new();
+        loop {
+            let mut line = String::new();
+            let read = reader.read_line(&mut line).expect("read request line");
+            if read == 0 || line == "\r\n" {
+                break;
+            }
+            head.push_str(&line);
+        }
+        return head;
+    }
+
+    fn response(body: &str) -> String {
+        return format!(
+            "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {len}\r\n\r\n{body}",
+            len = body.len(),
+        );
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let base_url = format!("http://{addr}");
+
+    let server = std::thread::spawn(move || {
+        use std::io::Write;
+
+        let mut received = Vec::with_capacity(6);
+        for _ in 0..6 {
+            let (mut stream, _) = listener.accept().expect("accept mock connection");
+            received.push(read_request(&mut stream));
+            let body = r#"{"text":"ok"}"#;
+            stream
+                .write_all(response(body).as_bytes())
+                .expect("write mock response");
+            stream.flush().expect("flush mock response");
+        }
+        return received;
+    });
+
+    let client = Client::new(base_url)
+        .expect("build client")
+        .with_bearer_auth("tok-123")
+        .with_basic_auth("user", "pass")
+        .with_api_key_header("header-key")
+        .with_api_key_query("query-key")
+        .with_api_key_cookie("cookie-key");
+
+    match client.get_profile().expect("profile call succeeds") {
+        GetProfileResponse::Ok(message) => assert_eq!(message.text, "ok"),
+    }
+    match client.get_public().expect("public call succeeds") {
+        GetPublicResponse::Ok(message) => assert_eq!(message.text, "ok"),
+    }
+    match client.get_admin().expect("admin call succeeds") {
+        GetAdminResponse::Ok(message) => assert_eq!(message.text, "ok"),
+    }
+    match client.get_reports().expect("reports call succeeds") {
+        GetReportsResponse::Ok(message) => assert_eq!(message.text, "ok"),
+    }
+    let query = SearchQuery { q: "chair".to_owned() };
+    match client.search(query).expect("search call succeeds") {
+        SearchResponse::Ok(message) => assert_eq!(message.text, "ok"),
+    }
+    match client.get_session().expect("session call succeeds") {
+        GetSessionResponse::Ok(message) => assert_eq!(message.text, "ok"),
+    }
+
+    let received = server.join().expect("mock server thread");
+
+    let profile_request = received[0].to_lowercase();
+    assert!(
+        received[0].starts_with("GET /profile "),
+        "profile path: {}",
+        received[0]
+    );
+    assert!(
+        profile_request.contains("authorization: bearer tok-123"),
+        "profile auth: {}",
+        received[0]
+    );
+
+    let public_request = received[1].to_lowercase();
+    assert!(received[1].starts_with("GET /public "), "public path: {}", received[1]);
+    assert!(
+        !public_request.contains("authorization:"),
+        "public request must carry no auth: {}",
+        received[1]
+    );
+
+    let admin_request = received[2].to_lowercase();
+    assert!(
+        admin_request.contains("authorization: basic ") && received[2].contains("Basic dXNlcjpwYXNz"),
+        "admin basic auth: {}",
+        received[2]
+    );
+
+    let reports_request = received[3].to_lowercase();
+    assert!(
+        reports_request.contains("x-api-key: header-key"),
+        "reports header key: {}",
+        received[3]
+    );
+
+    assert!(received[4].starts_with("GET /search?"), "search path: {}", received[4]);
+    assert!(
+        received[4].contains("q=chair") && received[4].contains("api_key=query-key"),
+        "search query key: {}",
+        received[4]
+    );
+
+    let session_request = received[5].to_lowercase();
+    assert!(
+        session_request.contains("cookie: session=cookie-key"),
+        "session cookie key: {}",
+        received[5]
+    );
 }

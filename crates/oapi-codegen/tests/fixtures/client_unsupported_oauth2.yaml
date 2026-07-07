@@ -1,0 +1,36 @@
+openapi: 3.0.3
+info:
+  title: OAuth2 client (unsupported)
+  version: 1.0.0
+paths:
+  /me:
+    get:
+      operationId: getMe
+      summary: Fetch the caller, authenticated by an unsupported OAuth2 scheme.
+      security:
+        - oauth2: [read]
+      responses:
+        "200":
+          description: The caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/oauth/authorize
+          tokenUrl: https://example.com/oauth/token
+          scopes:
+            read: Read access.
+  schemas:
+    Message:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string

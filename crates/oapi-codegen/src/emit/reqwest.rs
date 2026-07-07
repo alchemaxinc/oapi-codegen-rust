@@ -24,6 +24,8 @@ use crate::ir::ResponseBody;
 use crate::ir::ResponseCase;
 use crate::ir::ResponseStatus;
 use crate::ir::RustType;
+use crate::ir::SecurityScheme;
+use crate::ir::SecuritySchemeKind;
 use crate::ir::Service;
 
 /// The blocking `reqwest` client emitter.
@@ -47,7 +49,7 @@ fn unsupported(operation: &Operation, reason: &str) -> Error {
 /// Reject the operation shapes the client generator does not handle yet, so a
 /// spec that uses them fails loudly rather than generating a client that silently
 /// drops the body.
-fn ensure_supported(operation: &Operation) -> Result<()> {
+fn ensure_supported(operation: &Operation, schemes: &[SecurityScheme]) -> Result<()> {
     match &operation.request {
         Some(RequestPayload::Multipart(_)) => {
             return Err(unsupported(
@@ -80,6 +82,21 @@ fn ensure_supported(operation: &Operation) -> Result<()> {
             _ => {}
         }
     }
+    for key in &operation.security {
+        match schemes.iter().find(|scheme| return scheme.key == *key) {
+            None => {
+                return Err(unsupported(
+                    operation,
+                    &format!("requires security scheme `{key}`, which is not declared in `components.securitySchemes`"),
+                ));
+            }
+            Some(scheme) => {
+                if let SecuritySchemeKind::Unsupported(reason) = &scheme.kind {
+                    return Err(unsupported(operation, reason));
+                }
+            }
+        }
+    }
     return Ok(());
 }
 
@@ -87,7 +104,7 @@ fn ensure_supported(operation: &Operation) -> Result<()> {
 /// the `Client` struct, and its inherent `impl` with one method per operation.
 fn client_items(service: &Service) -> Result<Vec<TokenStream>> {
     for operation in &service.operations {
-        ensure_supported(operation)?;
+        ensure_supported(operation, &service.security_schemes)?;
     }
 
     let mut items = vec![client_error()];
@@ -103,7 +120,7 @@ fn client_items(service: &Service) -> Result<Vec<TokenStream>> {
         }
         items.push(emit_response_enum(operation)?);
     }
-    items.push(client_struct());
+    items.push(client_struct(&service.security_schemes));
     items.push(emit_client_impl(service)?);
     return Ok(items);
 }
@@ -148,8 +165,10 @@ fn client_error() -> TokenStream {
     };
 }
 
-/// Emit the `Client` struct holding the base URL and blocking `reqwest` client.
-fn client_struct() -> TokenStream {
+/// Emit the `Client` struct holding the base URL, blocking `reqwest` client, and
+/// one optional credential field per configured security scheme.
+fn client_struct(schemes: &[SecurityScheme]) -> TokenStream {
+    let credentials = credential_fields(schemes);
     return quote! {
         /// A blocking HTTP client for the API.
         ///
@@ -159,6 +178,7 @@ fn client_struct() -> TokenStream {
         pub struct Client {
             base_url: String,
             http: reqwest::blocking::Client,
+            #(#credentials,)*
         }
     };
 }
@@ -233,26 +253,32 @@ fn emit_response_enum(operation: &Operation) -> Result<TokenStream> {
     });
 }
 
-/// Emit the `impl Client` block: the constructors plus one method per operation.
+/// Emit the `impl Client` block: the constructors, the `with_<scheme>` credential
+/// setters, then one method per operation.
 fn emit_client_impl(service: &Service) -> Result<TokenStream> {
-    let mut methods = Vec::with_capacity(service.operations.len() + 2);
+    let schemes = &service.security_schemes;
+    let inits = credential_inits(schemes);
+    let mut methods = Vec::with_capacity(service.operations.len() + schemes.len() + 2);
     methods.push(quote! {
         /// Build a client targeting `base_url` with a default blocking
         /// `reqwest::blocking::Client`.
         pub fn new(base_url: impl Into<String>) -> Result<Self, ClientError> {
             let http = reqwest::blocking::Client::builder().build()?;
-            return Ok(Self { base_url: base_url.into(), http });
+            return Ok(Self { base_url: base_url.into(), http, #(#inits,)* });
         }
     });
     methods.push(quote! {
         /// Build a client targeting `base_url` with a caller-provided
         /// `reqwest::blocking::Client` (e.g. preconfigured with timeouts).
         pub fn with_client(base_url: impl Into<String>, http: reqwest::blocking::Client) -> Self {
-            return Self { base_url: base_url.into(), http };
+            return Self { base_url: base_url.into(), http, #(#inits,)* };
         }
     });
+    for setter in credential_setters(schemes) {
+        methods.push(setter);
+    }
     for operation in &service.operations {
-        methods.push(emit_method(operation)?);
+        methods.push(emit_method(operation, schemes)?);
     }
     return Ok(quote! {
         impl Client {
@@ -261,9 +287,90 @@ fn emit_client_impl(service: &Service) -> Result<TokenStream> {
     });
 }
 
+/// The credential fields added to the `Client` struct, one per supported scheme.
+fn credential_fields(schemes: &[SecurityScheme]) -> Vec<TokenStream> {
+    let mut fields = Vec::new();
+    for scheme in schemes {
+        let Some(ty) = credential_field_type(&scheme.kind) else {
+            continue;
+        };
+        let field = scheme.field.to_token();
+        let doc = doc_attr(&scheme.doc);
+        fields.push(quote! { #doc #field: #ty });
+    }
+    return fields;
+}
+
+/// The `<field>: None` initializers the constructors use to start every
+/// credential unset.
+fn credential_inits(schemes: &[SecurityScheme]) -> Vec<TokenStream> {
+    let mut inits = Vec::new();
+    for scheme in schemes {
+        if credential_field_type(&scheme.kind).is_none() {
+            continue;
+        }
+        let field = scheme.field.to_token();
+        inits.push(quote! { #field: None });
+    }
+    return inits;
+}
+
+/// The builder-style `with_<scheme>` setters, one per supported scheme.
+fn credential_setters(schemes: &[SecurityScheme]) -> Vec<TokenStream> {
+    let mut setters = Vec::new();
+    for scheme in schemes {
+        let field = scheme.field.to_token();
+        let setter = format_ident!("with_{}", scheme.field.logical());
+        let setter = match &scheme.kind {
+            SecuritySchemeKind::HttpBasic => {
+                let doc = format!(
+                    " Set the username and password for the `{}` HTTP basic scheme.",
+                    scheme.key
+                );
+                quote! {
+                    #[doc = #doc]
+                    pub fn #setter(mut self, username: impl Into<String>, password: impl Into<String>) -> Self {
+                        self.#field = Some((username.into(), password.into()));
+                        return self;
+                    }
+                }
+            }
+            SecuritySchemeKind::HttpBearer
+            | SecuritySchemeKind::ApiKeyHeader(_)
+            | SecuritySchemeKind::ApiKeyQuery(_)
+            | SecuritySchemeKind::ApiKeyCookie(_) => {
+                let doc = format!(" Set the credential for the `{}` security scheme.", scheme.key);
+                quote! {
+                    #[doc = #doc]
+                    pub fn #setter(mut self, credential: impl Into<String>) -> Self {
+                        self.#field = Some(credential.into());
+                        return self;
+                    }
+                }
+            }
+            SecuritySchemeKind::Unsupported(_) => continue,
+        };
+        setters.push(setter);
+    }
+    return setters;
+}
+
+/// The stored credential type for a scheme, or `None` for schemes the client
+/// cannot carry (which are rejected before emit for any operation that uses one).
+fn credential_field_type(kind: &SecuritySchemeKind) -> Option<TokenStream> {
+    return match kind {
+        SecuritySchemeKind::HttpBasic => Some(quote! { Option<(String, String)> }),
+        SecuritySchemeKind::HttpBearer
+        | SecuritySchemeKind::ApiKeyHeader(_)
+        | SecuritySchemeKind::ApiKeyQuery(_)
+        | SecuritySchemeKind::ApiKeyCookie(_) => Some(quote! { Option<String> }),
+        SecuritySchemeKind::Unsupported(_) => None,
+    };
+}
+
 /// Emit one operation method: build the request from the typed inputs, send it,
 /// and decode the response into the operation's typed response enum.
-fn emit_method(operation: &Operation) -> Result<TokenStream> {
+fn emit_method(operation: &Operation, schemes: &[SecurityScheme]) -> Result<TokenStream> {
     let name = operation.name.to_token();
     let doc = doc_attr(&operation.doc);
     let response = operation.response_enum.to_token();
@@ -276,8 +383,9 @@ fn emit_method(operation: &Operation) -> Result<TokenStream> {
     let mut mutations = Vec::new();
     mutations.extend(query_mutations(operation));
     mutations.extend(header_mutations(operation));
-    mutations.extend(cookie_mutations(operation));
+    mutations.extend(cookie_mutations(operation, schemes));
     mutations.extend(body_mutations(operation)?);
+    mutations.extend(auth_mutations(operation, schemes));
 
     let send = if mutations.is_empty() {
         quote! { let response = #builder.send()?; }
@@ -422,25 +530,39 @@ fn header_mutations(operation: &Operation) -> Vec<TokenStream> {
     return mutations;
 }
 
-/// The request-builder mutations that collect cookie parameters into a single
-/// `Cookie` header.
-fn cookie_mutations(operation: &Operation) -> Vec<TokenStream> {
-    let Some(cookies) = &operation.cookies else {
-        return Vec::new();
-    };
-    let entries: Vec<TokenStream> = cookies
-        .params
-        .iter()
-        .map(|param| {
+/// The request-builder mutation that collects cookie parameters and any
+/// cookie-carried API-key credentials into a single `Cookie` header.
+///
+/// Auth cookies are folded in here (rather than emitted separately) so an
+/// operation with both cookie parameters and a cookie credential sends one
+/// `Cookie` header, per RFC 6265.
+fn cookie_mutations(operation: &Operation, schemes: &[SecurityScheme]) -> Vec<TokenStream> {
+    let mut entries: Vec<TokenStream> = Vec::new();
+    if let Some(cookies) = &operation.cookies {
+        for param in &cookies.params {
             let field = param.name.to_token();
             if param.required {
                 let fmt = Literal::string(&format!("{}={{}}", param.cookie_name));
-                return quote! { Some(format!(#fmt, cookies.#field)) };
+                entries.push(quote! { Some(format!(#fmt, cookies.#field)) });
+            } else {
+                let fmt = Literal::string(&format!("{}={{value}}", param.cookie_name));
+                entries.push(quote! { cookies.#field.as_ref().map(|value| format!(#fmt)) });
             }
-            let fmt = Literal::string(&format!("{}={{value}}", param.cookie_name));
-            return quote! { cookies.#field.as_ref().map(|value| format!(#fmt)) };
-        })
-        .collect();
+        }
+    }
+    for key in &operation.security {
+        let Some(scheme) = schemes.iter().find(|scheme| return scheme.key == *key) else {
+            continue;
+        };
+        if let SecuritySchemeKind::ApiKeyCookie(name) = &scheme.kind {
+            let field = scheme.field.to_token();
+            let fmt = Literal::string(&format!("{name}={{value}}"));
+            entries.push(quote! { self.#field.as_ref().map(|value| format!(#fmt)) });
+        }
+    }
+    if entries.is_empty() {
+        return Vec::new();
+    }
     return vec![quote! {
         let cookie_pairs: Vec<String> = [#(#entries),*]
             .into_iter()
@@ -471,6 +593,55 @@ fn body_mutations(operation: &Operation) -> Result<Vec<TokenStream>> {
         None => return Ok(Vec::new()),
     };
     return Ok(vec![mutation]);
+}
+
+/// The request-builder mutations that apply the operation's security credentials.
+///
+/// Each configured credential is optional, so an unset scheme simply sends no
+/// auth. Cookie-carried API keys are applied by [`cookie_mutations`] (folded into
+/// the single `Cookie` header), so they are skipped here. Operations that require
+/// an unresolved or [`SecuritySchemeKind::Unsupported`] scheme are rejected in
+/// [`ensure_supported`] before this runs.
+fn auth_mutations(operation: &Operation, schemes: &[SecurityScheme]) -> Vec<TokenStream> {
+    let mut mutations = Vec::new();
+    for key in &operation.security {
+        let Some(scheme) = schemes.iter().find(|scheme| return scheme.key == *key) else {
+            continue;
+        };
+        let field = scheme.field.to_token();
+        let mutation = match &scheme.kind {
+            SecuritySchemeKind::HttpBearer => quote! {
+                if let Some(token) = &self.#field {
+                    request = request.bearer_auth(token);
+                }
+            },
+            SecuritySchemeKind::HttpBasic => quote! {
+                if let Some((username, password)) = &self.#field {
+                    request = request.basic_auth(username, Some(password));
+                }
+            },
+            SecuritySchemeKind::ApiKeyHeader(name) => {
+                let header = Literal::string(name);
+                quote! {
+                    if let Some(value) = &self.#field {
+                        request = request.header(#header, value.as_str());
+                    }
+                }
+            }
+            SecuritySchemeKind::ApiKeyQuery(name) => {
+                let param = Literal::string(name);
+                quote! {
+                    if let Some(value) = &self.#field {
+                        request = request.query(&[(#param, value.as_str())]);
+                    }
+                }
+            }
+            SecuritySchemeKind::ApiKeyCookie(_) => continue,
+            SecuritySchemeKind::Unsupported(_) => continue,
+        };
+        mutations.push(mutation);
+    }
+    return mutations;
 }
 
 /// Emit the status-code dispatch that decodes the response into a typed variant.

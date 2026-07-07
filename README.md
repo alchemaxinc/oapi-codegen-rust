@@ -241,6 +241,20 @@ Because the client cannot assume the server honoured the contract, response
 header fields are always `Option<T>` and parsed best-effort, even for headers the
 spec marks required.
 
+When the document declares `securitySchemes`, the `Client` grows one optional
+credential field per scheme with a matching builder setter, and each operation
+automatically applies the credentials its effective security requirement names
+(its own `security`, else the document-level `security`; an empty `security: []`
+disables auth for that operation). Credentials are optional — an unset scheme
+simply sends no auth:
+
+```rust
+let client = Client::new("https://api.example.com")?
+    .with_bearer_auth("a-token")
+    .with_basic_auth("user", "pass")
+    .with_api_key_header("a-key");
+```
+
 A client crate needs `reqwest = { version = "0.12", features = ["blocking",
 "json"] }`. The `json` feature is required when an operation sends a JSON request
 body and/or decodes a JSON response body.
@@ -257,6 +271,10 @@ body and/or decodes a JSON response body.
 - **Responses** — fixed status codes, `default`, and ranges (`5XX`), decoding a
   JSON or `text/plain` body into the matching enum variant, along with declared
   response headers.
+- **Security schemes** — HTTP `bearer` (via `.bearer_auth()`), HTTP `basic` (via
+  `.basic_auth()`), and `apiKey` credentials carried in a header, a query
+  parameter, or a cookie. Each becomes a `with_<scheme>` builder setter and is
+  applied per operation from its effective security requirement.
 
 **Rejected / deferred** (an error, never mis-generated)
 
@@ -266,6 +284,8 @@ body and/or decodes a JSON response body.
 - A response that declares two or more content types (negotiated responses are
   server-only for now).
 - A form (`application/x-www-form-urlencoded`) _response_ body.
+- An operation requiring an `oauth2` or `openIdConnect` security scheme (only
+  bearer, basic, and API-key credentials are carried by the client).
 
 Enabling both `std-http-server` and `client` emits the server (the client is a
 follow-up once multipart and negotiated bodies are supported on the client side).
@@ -287,8 +307,10 @@ the unknown.
 - **Partly supported** (the axum server generator, see above): `paths`,
   `parameters` (path, query, and header), `requestBody` (JSON), and `responses`
   (explicit status codes, the `default` catch-all, and ranges such as `5XX`).
-- **Planned** (the remaining server/client surface): `securitySchemes`,
-  `servers`, `callbacks`, and `links`.
+  The reqwest client generator additionally applies `securitySchemes` (HTTP
+  bearer/basic and API-key credentials).
+- **Planned** (the remaining server/client surface): `servers`, `callbacks`, and
+  `links`.
 
 [`axum`]: https://crates.io/crates/axum
 [`axum-extra`]: https://crates.io/crates/axum-extra
