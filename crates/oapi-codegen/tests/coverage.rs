@@ -349,6 +349,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_json_charset",
     "server_multi_content_request",
     "server_multi_content_response",
+    "server_prune",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
@@ -582,6 +583,7 @@ server_generated_tests!(
     server_json_charset,
     server_multi_content_request,
     server_multi_content_response,
+    server_prune,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.
@@ -608,6 +610,31 @@ fn server_unsupported_features_are_rejected() {
             "`{stem}` is catalogued as unsupported but server generation succeeded",
         );
     }
+}
+
+/// Unused component schemas are pruned by default, but retained when
+/// `output-options.skip-prune` is set — mirroring `oapi-codegen`'s pruning.
+#[test]
+fn skip_prune_retains_unused_schemas() {
+    let fixture = tests_dir().join("fixtures").join("server_prune.yaml");
+
+    let pruned = oapi_codegen::generate(&fixture, &server_config()).expect("generating pruned server output failed");
+    assert!(
+        pruned.contains("struct Thing") && pruned.contains("struct Child"),
+        "schemas reachable from an operation must survive pruning",
+    );
+    assert!(
+        !pruned.contains("Unreferenced") && !pruned.contains("OnlyViaUnreferenced"),
+        "schemas no operation references must be pruned by default",
+    );
+
+    let mut config = server_config();
+    config.output_options.skip_prune = true;
+    let unpruned = oapi_codegen::generate(&fixture, &config).expect("generating unpruned server output failed");
+    assert!(
+        unpruned.contains("struct Unreferenced") && unpruned.contains("struct OnlyViaUnreferenced"),
+        "skip-prune must retain schemas no operation references",
+    );
 }
 
 /// Configuration that enables the blocking `reqwest` client generator.

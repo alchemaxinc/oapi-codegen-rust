@@ -163,9 +163,11 @@ Eagerly implement common traits where appropriate:
 - Keep `main.rs` or `lib.rs` minimal - move logic to modules.
 - When a single module file grows too large, split it into a directory module with a `mod.rs` re-exporting its sub-modules. This keeps the public API identical while improving internal organization.
 
-## README Maintenance
+## Documentation
 
-- **Always keep `README.md` up to date** when adding, changing, or removing CLI flags, supported OpenAPI features, or generated output formats. The README is the canonical reference for how the generator is invoked and what it supports.
+- **Do not update `README.md` as the capabilities/support spec.** The README is being reworked into a user-facing guide by the maintainer; do not add feature-support matrices, capability bullets, or "Supported/Rejected" lists to it.
+- When adding, changing, or removing generator features, focus on **code and tests** (fixtures + snapshots + coverage). Do not write capability/support documentation into `README.md`.
+- Deeper technical details about what the generator supports (and doesn't) will live in a separate doc (a nested `README.md` or a `CONTRIBUTING` doc) — the location is undecided and the maintainer will reorganize docs. Leave capability documentation to that step unless explicitly asked.
 
 ## Quality Checklist
 

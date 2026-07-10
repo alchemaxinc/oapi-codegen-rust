@@ -31,17 +31,23 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     let spec = Spec::load(spec_path)?;
     let want_server = config.generate.std_http_server;
     let want_client = config.generate.client;
-    let module = if config.generate.models || want_server || want_client {
+    let mut module = if config.generate.models || want_server || want_client {
         lower::generate_models(&spec)?
     } else {
         Module::default()
     };
     if want_server {
         let service = lower::generate_service(&spec, &config.import_mapping)?;
+        if !config.output_options.skip_prune {
+            lower::prune_unused_models(&mut module, &service);
+        }
         return emit::emit_with_service(&module, &service);
     }
     if want_client {
         let service = lower::generate_service(&spec, &config.import_mapping)?;
+        if !config.output_options.skip_prune {
+            lower::prune_unused_models(&mut module, &service);
+        }
         return emit::emit_with_client(&module, &service);
     }
     return emit::emit_module(&module);

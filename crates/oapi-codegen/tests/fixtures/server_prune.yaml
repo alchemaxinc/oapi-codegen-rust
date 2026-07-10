@@ -1,0 +1,44 @@
+openapi: 3.0.3
+info:
+  title: Prune server
+  version: 1.0.0
+paths:
+  /things:
+    get:
+      operationId: listThings
+      summary: List things.
+      responses:
+        "200":
+          description: The things.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thing"
+components:
+  schemas:
+    Thing:
+      type: object
+      required: [id, child]
+      properties:
+        id:
+          type: string
+        child:
+          $ref: "#/components/schemas/Child"
+    Child:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+    Unreferenced:
+      type: object
+      required: [orphan]
+      properties:
+        orphan:
+          $ref: "#/components/schemas/OnlyViaUnreferenced"
+    OnlyViaUnreferenced:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
