@@ -123,6 +123,9 @@ mod generated {
     pub mod server_multi_content_response {
         include!("generated/server_multi_content_response.rs");
     }
+    pub mod server_prune {
+        include!("generated/server_prune.rs");
+    }
     pub mod client_widgets {
         include!("generated/client_widgets.rs");
     }

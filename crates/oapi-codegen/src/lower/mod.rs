@@ -4,8 +4,10 @@
 //! lowers operations into an [`crate::ir::Service`]. Both feed the emit pass.
 
 pub mod paths;
+pub mod prune;
 pub mod schema;
 pub mod security;
 
 pub use crate::lower::paths::generate_service;
+pub use crate::lower::prune::prune_unused_models;
 pub use crate::lower::schema::generate_models;
