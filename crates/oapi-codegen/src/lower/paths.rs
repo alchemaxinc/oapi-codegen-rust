@@ -318,6 +318,7 @@ impl Lowerer<'_> {
         return Ok(Some(Struct {
             name,
             doc: None,
+            deprecated: None,
             fields,
             additional_properties: None,
         }));
@@ -343,8 +344,11 @@ impl Lowerer<'_> {
             name: ident,
             rename,
             doc: data.description.as_deref().and_then(trimmed),
+            deprecated: None,
             ty,
             required: data.required,
+            omit_empty: None,
+            serde_skip: false,
         });
     }
 

@@ -15,6 +15,7 @@ use openapiv3::VariantOrUnknownOrEmpty;
 use crate::error::Error;
 use crate::error::Result;
 use crate::ir::Alias;
+use crate::ir::Deprecation;
 use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
@@ -31,11 +32,27 @@ use crate::naming::to_ident;
 
 /// The `x-rust-type` extension: emit a verbatim Rust type expression.
 const X_RUST_TYPE: &str = "x-rust-type";
+/// The `x-rust-name` extension: override a generated type or field identifier.
+const X_RUST_NAME: &str = "x-rust-name";
+/// The `x-rust-serde-skip` extension: drop a field via `#[serde(skip)]`.
+const X_RUST_SERDE_SKIP: &str = "x-rust-serde-skip";
+/// The `x-omitempty` extension: force `skip_serializing_if` on/off for a field.
+const X_OMITEMPTY: &str = "x-omitempty";
+/// The `x-order` extension: explicitly order struct fields (1-indexed).
+const X_ORDER: &str = "x-order";
+/// The `x-deprecated-reason` extension: the note for a `#[deprecated]` item.
+const X_DEPRECATED_REASON: &str = "x-deprecated-reason";
+/// The `x-enum-varnames` extension: override generated enum variant identifiers.
+const X_ENUM_VARNAMES: &str = "x-enum-varnames";
+/// The `x-enumNames` extension: alias of [`X_ENUM_VARNAMES`].
+const X_ENUM_NAMES: &str = "x-enumNames";
 
 /// Lower every component schema in `spec` into a module of Rust items.
 pub fn generate_models(spec: &Spec) -> Result<Module> {
+    let renames = crate::lower::rename::type_renames(spec);
     let mut mapper = Mapper {
         spec,
+        renames: &renames,
         extra: Vec::new(),
     };
     let mut items = Vec::new();
@@ -55,30 +72,42 @@ pub fn generate_models(spec: &Spec) -> Result<Module> {
                 items.push(Item::Alias(Alias {
                     name: to_ident(name, Case::Pascal),
                     doc: None,
+                    deprecated: None,
                     ty: RustType::Named(target.to_owned()),
                 }));
             }
         }
     }
     items.append(&mut mapper.extra);
-    return Ok(Module { items });
+    let mut module = Module { items };
+    crate::lower::rename::rewrite_module(&mut module, &renames);
+    return Ok(module);
 }
 
 /// Lowers schemas into IR items, accumulating hoisted inline types in `extra`.
 struct Mapper<'a> {
     spec: &'a Spec,
+    /// `x-rust-name` overrides keyed by original schema name.
+    renames: &'a std::collections::HashMap<String, String>,
     extra: Vec<Item>,
 }
 
 impl Mapper<'_> {
+    /// The identifier for a top-level type, honouring an `x-rust-name` override.
+    fn type_name_ident(&self, name: &str) -> crate::naming::RustIdent {
+        let effective = self.renames.get(name).map(String::as_str).unwrap_or(name);
+        return to_ident(effective, Case::Pascal);
+    }
+
     /// Lower a top-level named schema into a single item.
     fn named_to_item(&mut self, name: &str, schema: &Schema) -> Result<Item> {
         let data = &schema.schema_data;
 
         if let Some(verbatim) = extension_str(data, X_RUST_TYPE) {
             return Ok(Item::Alias(Alias {
-                name: to_ident(name, Case::Pascal),
+                name: self.type_name_ident(name),
                 doc: doc_of(data),
+                deprecated: deprecation_of(data),
                 ty: RustType::Verbatim(verbatim.to_owned()),
             }));
         }
@@ -95,14 +124,16 @@ impl Mapper<'_> {
             SchemaKind::Type(_) => {
                 let ty = self.type_from_schema(name, schema)?;
                 Item::Alias(Alias {
-                    name: to_ident(name, Case::Pascal),
+                    name: self.type_name_ident(name),
                     doc: doc_of(data),
+                    deprecated: deprecation_of(data),
                     ty,
                 })
             }
             SchemaKind::Any(_) => Item::Alias(Alias {
-                name: to_ident(name, Case::Pascal),
+                name: self.type_name_ident(name),
                 doc: doc_of(data),
+                deprecated: deprecation_of(data),
                 ty: RustType::Value,
             }),
             SchemaKind::Not { .. } => {
@@ -121,8 +152,9 @@ impl Mapper<'_> {
         if obj.properties.is_empty() {
             let element = self.additional_properties_type(name, obj)?;
             return Ok(Item::Alias(Alias {
-                name: to_ident(name, Case::Pascal),
+                name: self.type_name_ident(name),
                 doc: doc_of(data),
+                deprecated: deprecation_of(data),
                 ty: RustType::Map(Box::new(element)),
             }));
         }
@@ -132,14 +164,16 @@ impl Mapper<'_> {
 
     /// Build a struct from an object schema's properties.
     fn object_to_struct(&mut self, name: &str, obj: &ObjectType, data: &SchemaData) -> Result<Struct> {
-        let mut fields = Vec::with_capacity(obj.properties.len());
+        let mut ordered = Vec::with_capacity(obj.properties.len());
         for (prop_name, prop) in &obj.properties {
             let required = obj.required.iter().any(|r| {
                 return r == prop_name;
             });
+            let order = prop_order(prop);
             let field = self.field_from_prop(name, prop_name, prop, required)?;
-            fields.push(field);
+            ordered.push((order, field));
         }
+        let fields = sort_by_order(ordered);
 
         let additional_properties = match &obj.additional_properties {
             Some(AdditionalProperties::Schema(schema)) => {
@@ -151,8 +185,9 @@ impl Mapper<'_> {
         };
 
         return Ok(Struct {
-            name: to_ident(name, Case::Pascal),
+            name: self.type_name_ident(name),
             doc: doc_of(data),
+            deprecated: deprecation_of(data),
             fields,
             additional_properties,
         });
@@ -169,27 +204,38 @@ impl Mapper<'_> {
         let hint = format!("{parent}_{wire}");
         let mut ty = self.type_from_schema_ref(&hint, prop)?;
 
-        let nullable = match prop {
-            ReferenceOr::Item(schema) => schema.schema_data.nullable,
-            ReferenceOr::Reference { .. } => false,
+        let data = match prop {
+            ReferenceOr::Item(schema) => Some(&schema.schema_data),
+            ReferenceOr::Reference { .. } => None,
         };
+
+        let nullable = data.map(|data| return data.nullable).unwrap_or(false);
         if !required || nullable {
             ty = ty.optional();
         }
 
-        let doc = match prop {
-            ReferenceOr::Item(schema) => doc_of(&schema.schema_data),
-            ReferenceOr::Reference { .. } => None,
-        };
+        let doc = data.and_then(doc_of);
+        let deprecated = data.and_then(deprecation_of);
+        let serde_skip = data
+            .and_then(|data| return extension_bool(data, X_RUST_SERDE_SKIP))
+            .unwrap_or(false);
+        let omit_empty = data.and_then(|data| return extension_bool(data, X_OMITEMPTY));
 
-        let ident = to_ident(wire, Case::Snake);
+        let rust_name = data.and_then(|data| return extension_str(data, X_RUST_NAME));
+        let ident = match rust_name {
+            Some(custom) => to_ident(custom, Case::Snake),
+            None => to_ident(wire, Case::Snake),
+        };
         let rename = crate::naming::rename_for(wire, &ident);
         return Ok(Field {
             name: ident,
             rename,
             doc,
+            deprecated,
             ty,
             required,
+            omit_empty,
+            serde_skip,
         });
     }
 
@@ -199,18 +245,21 @@ impl Mapper<'_> {
         let mut merged = MergedObject::default();
         self.absorb_members(name, members, &mut merged)?;
 
-        let mut fields = Vec::with_capacity(merged.properties.len());
+        let mut ordered = Vec::with_capacity(merged.properties.len());
         for (wire, prop) in &merged.properties {
             let required = merged.required.iter().any(|r| {
                 return r == wire;
             });
+            let order = prop_order(prop);
             let field = self.field_from_prop(name, wire, prop, required)?;
-            fields.push(field);
+            ordered.push((order, field));
         }
+        let fields = sort_by_order(ordered);
 
         return Ok(Struct {
-            name: to_ident(name, Case::Pascal),
+            name: self.type_name_ident(name),
             doc: doc_of(data),
+            deprecated: deprecation_of(data),
             fields,
             additional_properties: None,
         });
@@ -247,8 +296,9 @@ impl Mapper<'_> {
             Some(_) | None => self.union_variants_from_members(name, members)?,
         };
         return Ok(Enum {
-            name: to_ident(name, Case::Pascal),
+            name: self.type_name_ident(name),
             doc: doc_of(data),
+            deprecated: deprecation_of(data),
             kind: EnumKind::Union(variants),
         });
     }
@@ -307,10 +357,18 @@ impl Mapper<'_> {
     }
 
     /// Build a string enum from an OpenAPI string `enum`.
+    ///
+    /// `x-enum-varnames` / `x-enumNames` override variant identifiers positionally
+    /// (in declaration order); the wire value is preserved via `#[serde(rename)]`.
     fn string_enum(&self, name: &str, values: &[Option<String>], data: &SchemaData) -> Enum {
+        let varnames =
+            extension_str_array(data, X_ENUM_VARNAMES).or_else(|| return extension_str_array(data, X_ENUM_NAMES));
         let mut variants = Vec::new();
-        for value in values.iter().flatten() {
-            let ident = to_ident(value, Case::Pascal);
+        for (index, value) in values.iter().flatten().enumerate() {
+            let ident = match varnames.as_ref().and_then(|names| return names.get(index)) {
+                Some(custom) => to_ident(custom, Case::Pascal),
+                None => to_ident(value, Case::Pascal),
+            };
             let rename = crate::naming::rename_for(value, &ident);
             variants.push(StringVariant {
                 name: ident,
@@ -319,8 +377,9 @@ impl Mapper<'_> {
             });
         }
         return Enum {
-            name: to_ident(name, Case::Pascal),
+            name: self.type_name_ident(name),
             doc: doc_of(data),
+            deprecated: deprecation_of(data),
             kind: EnumKind::Strings(variants),
         };
     }
@@ -487,6 +546,54 @@ pub(crate) fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat
 fn extension_str<'a>(data: &'a SchemaData, key: &str) -> Option<&'a str> {
     let value = data.extensions.get(key)?;
     return value.as_str();
+}
+
+/// Extract a boolean-valued extension (e.g. `x-omitempty`) from schema data.
+fn extension_bool(data: &SchemaData, key: &str) -> Option<bool> {
+    let value = data.extensions.get(key)?;
+    return value.as_bool();
+}
+
+/// Extract an integer-valued extension (e.g. `x-order`) from schema data.
+fn extension_i64(data: &SchemaData, key: &str) -> Option<i64> {
+    let value = data.extensions.get(key)?;
+    return value.as_i64();
+}
+
+/// The `x-order` value of a property, if it carries one (only inline schemas can).
+fn prop_order(prop: &ReferenceOr<Box<Schema>>) -> Option<i64> {
+    return match prop {
+        ReferenceOr::Item(schema) => extension_i64(&schema.schema_data, X_ORDER),
+        ReferenceOr::Reference { .. } => None,
+    };
+}
+
+/// Order fields by their `x-order` (ascending), keeping fields without one in
+/// their original declaration order after the ordered ones (a stable sort with
+/// unordered fields treated as coming last).
+fn sort_by_order(mut fields: Vec<(Option<i64>, Field)>) -> Vec<Field> {
+    fields.sort_by_key(|(order, _)| {
+        return order.unwrap_or(i64::MAX);
+    });
+    return fields.into_iter().map(|(_, field)| return field).collect();
+}
+
+/// Extract a string-array extension (e.g. `x-enum-varnames`); `None` if the
+/// value is not an array of strings.
+fn extension_str_array<'a>(data: &'a SchemaData, key: &str) -> Option<Vec<&'a str>> {
+    let array = data.extensions.get(key)?.as_array()?;
+    return array.iter().map(|value| return value.as_str()).collect();
+}
+
+/// Derive a `#[deprecated]` annotation from `deprecated: true` and an optional
+/// `x-deprecated-reason` note. Returns `None` unless the schema is deprecated,
+/// so a lone `x-deprecated-reason` is a no-op (matching `oapi-codegen`).
+fn deprecation_of(data: &SchemaData) -> Option<Deprecation> {
+    if !data.deprecated {
+        return None;
+    }
+    let note = extension_str(data, X_DEPRECATED_REASON).map(str::to_owned);
+    return Some(Deprecation { note });
 }
 
 /// Trim and normalise a schema `description` into a doc comment.

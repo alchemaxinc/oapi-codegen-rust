@@ -7,6 +7,7 @@ use crate::emit::doc_attr;
 use crate::emit::emit_type;
 use crate::error::Result;
 use crate::ir::Alias;
+use crate::ir::Deprecation;
 use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
@@ -32,10 +33,20 @@ fn derives() -> TokenStream {
     };
 }
 
+/// Render a `#[deprecated]` / `#[deprecated(note = "...")]` attribute, if any.
+fn deprecated_attr(deprecated: &Option<Deprecation>) -> TokenStream {
+    return match deprecated {
+        None => quote! {},
+        Some(Deprecation { note: None }) => quote! { #[deprecated] },
+        Some(Deprecation { note: Some(note) }) => quote! { #[deprecated(note = #note)] },
+    };
+}
+
 /// Render a `struct` item.
 pub(crate) fn emit_struct(strukt: &Struct) -> Result<TokenStream> {
     let name = strukt.name.to_token();
     let doc = doc_attr(&strukt.doc);
+    let deprecated = deprecated_attr(&strukt.deprecated);
     let derives = derives();
 
     let mut fields = Vec::with_capacity(strukt.fields.len());
@@ -57,6 +68,7 @@ pub(crate) fn emit_struct(strukt: &Struct) -> Result<TokenStream> {
     return Ok(quote! {
         #doc
         #derives
+        #deprecated
         pub struct #name {
             #(#fields)*
             #additional
@@ -69,13 +81,19 @@ fn emit_field(field: &Field) -> Result<TokenStream> {
     let name = field.name.to_token();
     let ty = emit_type(&field.ty)?;
     let doc = doc_attr(&field.doc);
+    let deprecated = deprecated_attr(&field.deprecated);
 
     let mut metas: Vec<TokenStream> = Vec::new();
-    if let Some(rename) = &field.rename {
-        metas.push(quote! { rename = #rename });
-    }
-    if !field.required {
-        metas.push(quote! { skip_serializing_if = "Option::is_none" });
+    if field.serde_skip {
+        metas.push(quote! { skip });
+    } else {
+        if let Some(rename) = &field.rename {
+            metas.push(quote! { rename = #rename });
+        }
+        let omit_empty = field.omit_empty.unwrap_or(!field.required);
+        if omit_empty && field.ty.is_option() {
+            metas.push(quote! { skip_serializing_if = "Option::is_none" });
+        }
     }
     let serde_attr = if metas.is_empty() {
         quote! {}
@@ -86,6 +104,7 @@ fn emit_field(field: &Field) -> Result<TokenStream> {
     return Ok(quote! {
         #doc
         #serde_attr
+        #deprecated
         pub #name: #ty,
     });
 }
@@ -94,6 +113,7 @@ fn emit_field(field: &Field) -> Result<TokenStream> {
 fn emit_enum(enom: &Enum) -> Result<TokenStream> {
     let name = enom.name.to_token();
     let doc = doc_attr(&enom.doc);
+    let deprecated = deprecated_attr(&enom.deprecated);
     let derives = derives();
 
     let tokens = match &enom.kind {
@@ -103,6 +123,7 @@ fn emit_enum(enom: &Enum) -> Result<TokenStream> {
             quote! {
                 #doc
                 #derives
+                #deprecated
                 pub enum #name {
                     #(#rendered)*
                 }
@@ -117,6 +138,7 @@ fn emit_enum(enom: &Enum) -> Result<TokenStream> {
                 #doc
                 #derives
                 #[serde(untagged)]
+                #deprecated
                 pub enum #name {
                     #(#rendered)*
                 }
@@ -155,8 +177,10 @@ fn emit_alias(alias: &Alias) -> Result<TokenStream> {
     let name = alias.name.to_token();
     let ty = emit_type(&alias.ty)?;
     let doc = doc_attr(&alias.doc);
+    let deprecated = deprecated_attr(&alias.deprecated);
     return Ok(quote! {
         #doc
+        #deprecated
         pub type #name = #ty;
     });
 }

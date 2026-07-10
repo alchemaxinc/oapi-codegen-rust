@@ -44,6 +44,8 @@ pub struct Struct {
     pub name: RustIdent,
     /// Doc comment derived from the schema `description`.
     pub doc: Option<String>,
+    /// `#[deprecated]` annotation from `deprecated: true` (+ `x-deprecated-reason`).
+    pub deprecated: Option<Deprecation>,
     /// Named fields, in deterministic order.
     pub fields: Vec<Field>,
     /// When set, the struct captures unknown keys into a flattened map of this
@@ -60,11 +62,19 @@ pub struct Field {
     pub rename: Option<String>,
     /// Doc comment derived from the property `description`.
     pub doc: Option<String>,
+    /// `#[deprecated]` annotation from `deprecated: true` (+ `x-deprecated-reason`).
+    pub deprecated: Option<Deprecation>,
     /// Field type (already wrapped in `Option<..>` when optional).
     pub ty: RustType,
     /// Whether the property is required. Optional fields get
-    /// `#[serde(skip_serializing_if = "Option::is_none")]`.
+    /// `#[serde(skip_serializing_if = "Option::is_none")]` unless [`Self::omit_empty`]
+    /// overrides it.
     pub required: bool,
+    /// `x-omitempty` override: `Some(true)`/`Some(false)` forces the
+    /// `skip_serializing_if` on/off; `None` keeps the default (skip when optional).
+    pub omit_empty: Option<bool>,
+    /// `x-rust-serde-skip`: drop the field from (de)serialization via `#[serde(skip)]`.
+    pub serde_skip: bool,
 }
 
 /// A generated `enum`.
@@ -74,6 +84,8 @@ pub struct Enum {
     pub name: RustIdent,
     /// Doc comment derived from the schema `description`.
     pub doc: Option<String>,
+    /// `#[deprecated]` annotation from `deprecated: true` (+ `x-deprecated-reason`).
+    pub deprecated: Option<Deprecation>,
     /// The flavour of enum to emit.
     pub kind: EnumKind,
 }
@@ -119,8 +131,18 @@ pub struct Alias {
     pub name: RustIdent,
     /// Doc comment, if any.
     pub doc: Option<String>,
+    /// `#[deprecated]` annotation from `deprecated: true` (+ `x-deprecated-reason`).
+    pub deprecated: Option<Deprecation>,
     /// Aliased type.
     pub ty: RustType,
+}
+
+/// A `#[deprecated]` annotation derived from `deprecated: true`, optionally
+/// carrying the `x-deprecated-reason` text as the `note`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Deprecation {
+    /// The `x-deprecated-reason` text, emitted as `#[deprecated(note = "...")]`.
+    pub note: Option<String>,
 }
 
 /// A Rust type expression usable in field/alias position.
@@ -171,6 +193,12 @@ impl RustType {
     pub fn is_nullable_container(&self) -> bool {
         let nullable = matches!(self, RustType::Vec(_) | RustType::Map(_));
         return nullable;
+    }
+
+    /// Whether this type is an `Option<..>` (for which `skip_serializing_if =
+    /// "Option::is_none"` is valid).
+    pub fn is_option(&self) -> bool {
+        return matches!(self, RustType::Option(_));
     }
 }
 

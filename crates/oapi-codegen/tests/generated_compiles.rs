@@ -24,6 +24,9 @@ mod generated {
     pub mod array_types {
         include!("generated/array_types.rs");
     }
+    pub mod ext_vendor_extensions {
+        include!("generated/ext_vendor_extensions.rs");
+    }
     pub mod ext_x_rust_type {
         include!("generated/ext_x_rust_type.rs");
     }
