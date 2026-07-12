@@ -709,7 +709,7 @@ fn filter_include_tags_keeps_only_tagged_operations() {
         oapi_codegen::generate(&filtering_fixture(), &config).expect("generating filtered server output failed");
     assert!(
         generated.contains("fn list_pets"),
-        "operations with an included tag must be kept"
+        "operations with an included tag must be kept",
     );
     assert!(
         !generated.contains("fn get_stats") && !generated.contains("fn health_check"),
@@ -745,7 +745,7 @@ fn filter_include_operation_ids_keeps_only_named_operations() {
         oapi_codegen::generate(&filtering_fixture(), &config).expect("generating filtered server output failed");
     assert!(
         generated.contains("fn list_pets"),
-        "operations named in include-operation-ids must be kept"
+        "operations named in include-operation-ids must be kept",
     );
     assert!(
         !generated.contains("fn get_stats") && !generated.contains("fn health_check"),

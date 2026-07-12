@@ -69,7 +69,10 @@ pub struct OutputOptions {
     /// Skip operations whose `operationId` is one of these.
     #[serde(default)]
     pub exclude_operation_ids: Vec<String>,
-    /// Skip generating models for these component-schema names.
+    /// Remove these component schemas from the spec before lowering, so their
+    /// models are not generated. Filtering runs before pruning; if an excluded
+    /// schema is still referenced by a retained operation or schema, generation
+    /// may fail or emit a reference to a type that is not declared.
     #[serde(default)]
     pub exclude_schemas: Vec<String>,
 }
