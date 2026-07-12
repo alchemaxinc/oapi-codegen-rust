@@ -1,0 +1,54 @@
+openapi: 3.0.3
+info:
+  title: Filtering
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+  /admin/stats:
+    get:
+      operationId: getStats
+      tags: [admin]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+  /health:
+    get:
+      operationId: healthCheck
+      responses:
+        "200":
+          description: ok
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+    Stats:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+          format: int64
+    Standalone:
+      type: object
+      required: [note]
+      properties:
+        note:
+          type: string

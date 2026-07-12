@@ -380,6 +380,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_multi_content_request",
     "server_multi_content_response",
     "server_prune",
+    "server_filtering",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
@@ -615,6 +616,7 @@ server_generated_tests!(
     server_multi_content_request,
     server_multi_content_response,
     server_prune,
+    server_filtering,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.
@@ -665,6 +667,116 @@ fn skip_prune_retains_unused_schemas() {
     assert!(
         unpruned.contains("struct Unreferenced") && unpruned.contains("struct OnlyViaUnreferenced"),
         "skip-prune must retain schemas no operation references",
+    );
+}
+
+/// Path to the shared filtering fixture (three tagged/untagged operations).
+fn filtering_fixture() -> PathBuf {
+    return tests_dir().join("fixtures").join("server_filtering.yaml");
+}
+
+/// `exclude-tags` drops operations carrying an excluded tag, and pruning then
+/// removes any component schema the dropped operation uniquely referenced.
+#[test]
+fn filter_exclude_tags_drops_tagged_operations() {
+    let mut config = server_config();
+    config.output_options.exclude_tags = vec!["admin".to_owned()];
+
+    let generated =
+        oapi_codegen::generate(&filtering_fixture(), &config).expect("generating filtered server output failed");
+    assert!(
+        generated.contains("fn list_pets") && generated.contains("fn health_check"),
+        "operations without the excluded tag must be kept",
+    );
+    assert!(
+        !generated.contains("fn get_stats"),
+        "operations carrying an excluded tag must be dropped",
+    );
+    assert!(
+        generated.contains("struct Pet") && !generated.contains("struct Stats"),
+        "a schema referenced only by a dropped operation must be pruned",
+    );
+}
+
+/// `include-tags` keeps only operations carrying one of the included tags;
+/// untagged operations are dropped.
+#[test]
+fn filter_include_tags_keeps_only_tagged_operations() {
+    let mut config = server_config();
+    config.output_options.include_tags = vec!["pets".to_owned()];
+
+    let generated =
+        oapi_codegen::generate(&filtering_fixture(), &config).expect("generating filtered server output failed");
+    assert!(
+        generated.contains("fn list_pets"),
+        "operations with an included tag must be kept"
+    );
+    assert!(
+        !generated.contains("fn get_stats") && !generated.contains("fn health_check"),
+        "operations without an included tag (including untagged) must be dropped",
+    );
+}
+
+/// `exclude-operation-ids` drops operations by `operationId`; the rest survive.
+#[test]
+fn filter_exclude_operation_ids_drops_named_operations() {
+    let mut config = server_config();
+    config.output_options.exclude_operation_ids = vec!["healthCheck".to_owned()];
+
+    let generated =
+        oapi_codegen::generate(&filtering_fixture(), &config).expect("generating filtered server output failed");
+    assert!(
+        generated.contains("fn list_pets") && generated.contains("fn get_stats"),
+        "operations not named in exclude-operation-ids must be kept",
+    );
+    assert!(
+        !generated.contains("fn health_check"),
+        "operations named in exclude-operation-ids must be dropped",
+    );
+}
+
+/// `include-operation-ids` keeps only operations whose `operationId` is listed.
+#[test]
+fn filter_include_operation_ids_keeps_only_named_operations() {
+    let mut config = server_config();
+    config.output_options.include_operation_ids = vec!["listPets".to_owned()];
+
+    let generated =
+        oapi_codegen::generate(&filtering_fixture(), &config).expect("generating filtered server output failed");
+    assert!(
+        generated.contains("fn list_pets"),
+        "operations named in include-operation-ids must be kept"
+    );
+    assert!(
+        !generated.contains("fn get_stats") && !generated.contains("fn health_check"),
+        "operations not named in include-operation-ids must be dropped",
+    );
+}
+
+/// `exclude-schemas` removes named component schemas from models generation,
+/// leaving the rest intact.
+#[test]
+fn filter_exclude_schemas_removes_named_models() {
+    let config = oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            models: true,
+            ..Default::default()
+        },
+        output_options: oapi_codegen::config::OutputOptions {
+            exclude_schemas: vec!["Standalone".to_owned()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let generated = oapi_codegen::generate(&filtering_fixture(), &config).expect("generating filtered models failed");
+    assert!(
+        generated.contains("struct Pet") && generated.contains("struct Stats"),
+        "schemas not named in exclude-schemas must be generated",
+    );
+    assert!(
+        !generated.contains("struct Standalone"),
+        "schemas named in exclude-schemas must not be generated",
     );
 }
 

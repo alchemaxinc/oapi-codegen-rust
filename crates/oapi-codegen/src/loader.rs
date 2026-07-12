@@ -109,6 +109,12 @@ impl Spec {
         return &self.source;
     }
 
+    /// Apply the configured operation and schema filters, mutating the spec in
+    /// place before lowering (see [`crate::filter`]).
+    pub fn apply_filters(&mut self, opts: &crate::config::OutputOptions) {
+        crate::filter::apply(&mut self.inner, opts);
+    }
+
     /// The component schemas declared in the document, in document order.
     pub fn schemas(&self) -> &IndexMap<String, ReferenceOr<Schema>> {
         let empty = EMPTY_SCHEMAS.get_or_init(IndexMap::new);

@@ -56,6 +56,22 @@ pub struct OutputOptions {
     /// Keep schemas that are not referenced (no pruning).
     #[serde(default)]
     pub skip_prune: bool,
+    /// Only generate operations tagged with one of these tags (empty = all).
+    #[serde(default)]
+    pub include_tags: Vec<String>,
+    /// Skip operations tagged with any of these tags.
+    #[serde(default)]
+    pub exclude_tags: Vec<String>,
+    /// Only generate operations whose `operationId` is one of these
+    /// (empty = all).
+    #[serde(default)]
+    pub include_operation_ids: Vec<String>,
+    /// Skip operations whose `operationId` is one of these.
+    #[serde(default)]
+    pub exclude_operation_ids: Vec<String>,
+    /// Skip generating models for these component-schema names.
+    #[serde(default)]
+    pub exclude_schemas: Vec<String>,
 }
 
 impl Config {
