@@ -754,21 +754,35 @@ fn filter_include_operation_ids_keeps_only_named_operations() {
 }
 
 /// `exclude-schemas` removes named component schemas from models generation,
-/// leaving the rest intact.
+/// leaving the rest intact. Models-only generation never prunes, so a negative
+/// control (generation without the option) proves the removal is attributable to
+/// `exclude-schemas` and not to pruning.
 #[test]
 fn filter_exclude_schemas_removes_named_models() {
+    let models_only = oapi_codegen::config::Generate {
+        models: true,
+        ..Default::default()
+    };
+
+    let baseline = oapi_codegen::Config {
+        generate: models_only.clone(),
+        ..Default::default()
+    };
+    let unfiltered =
+        oapi_codegen::generate(&filtering_fixture(), &baseline).expect("generating baseline models failed");
+    assert!(
+        unfiltered.contains("struct Standalone"),
+        "without exclude-schemas the schema must be generated (models-only never prunes)",
+    );
+
     let config = oapi_codegen::Config {
-        generate: oapi_codegen::config::Generate {
-            models: true,
-            ..Default::default()
-        },
+        generate: models_only,
         output_options: oapi_codegen::config::OutputOptions {
             exclude_schemas: vec!["Standalone".to_owned()],
             ..Default::default()
         },
         ..Default::default()
     };
-
     let generated = oapi_codegen::generate(&filtering_fixture(), &config).expect("generating filtered models failed");
     assert!(
         generated.contains("struct Pet") && generated.contains("struct Stats"),
