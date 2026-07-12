@@ -8,6 +8,7 @@
 pub mod config;
 pub mod emit;
 pub mod error;
+pub mod filter;
 pub mod ir;
 pub mod loader;
 pub mod lower;
@@ -28,7 +29,8 @@ use crate::loader::Spec;
 /// server interface is appended when `generate.std-http-server` is set; the
 /// blocking `reqwest` client is appended when `generate.client` is set.
 pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
-    let spec = Spec::load(spec_path)?;
+    let mut spec = Spec::load(spec_path)?;
+    spec.apply_filters(&config.output_options);
     let want_server = config.generate.std_http_server;
     let want_client = config.generate.client;
     let mut module = if config.generate.models || want_server || want_client {
