@@ -274,6 +274,36 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("ext_x_rust_type"),
     },
     Feature {
+        element: "ext.x-rust-name",
+        status: Status::Supported,
+        fixture: Some("ext_vendor_extensions"),
+    },
+    Feature {
+        element: "ext.x-rust-serde-skip",
+        status: Status::Supported,
+        fixture: Some("ext_vendor_extensions"),
+    },
+    Feature {
+        element: "ext.x-order",
+        status: Status::Supported,
+        fixture: Some("ext_vendor_extensions"),
+    },
+    Feature {
+        element: "ext.x-enum-varnames",
+        status: Status::Supported,
+        fixture: Some("ext_vendor_extensions"),
+    },
+    Feature {
+        element: "ext.x-deprecated-reason",
+        status: Status::Supported,
+        fixture: Some("ext_vendor_extensions"),
+    },
+    Feature {
+        element: "ext.x-omitempty",
+        status: Status::Supported,
+        fixture: Some("ext_vendor_extensions"),
+    },
+    Feature {
         element: "ext.x-go-*",
         status: Status::Ignored,
         fixture: None,
@@ -472,6 +502,7 @@ generated_tests!(
     allof_merge,
     anyof_untagged,
     array_types,
+    ext_vendor_extensions,
     ext_x_rust_type,
     freeform_any,
     integer_formats,

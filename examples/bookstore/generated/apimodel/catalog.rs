@@ -2,9 +2,9 @@
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Book {
-    pub id: String,
     pub title: String,
     pub author: String,
+    pub id: String,
     /// Price in minor currency units (e.g. cents).
     pub price_cents: i64,
     #[serde(skip_serializing_if = "Option::is_none")]

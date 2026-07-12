@@ -37,14 +37,16 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         Module::default()
     };
     if want_server {
-        let service = lower::generate_service(&spec, &config.import_mapping)?;
+        let mut service = lower::generate_service(&spec, &config.import_mapping)?;
+        lower::rewrite_service(&mut service, &lower::type_renames(&spec));
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
         return emit::emit_with_service(&module, &service);
     }
     if want_client {
-        let service = lower::generate_service(&spec, &config.import_mapping)?;
+        let mut service = lower::generate_service(&spec, &config.import_mapping)?;
+        lower::rewrite_service(&mut service, &lower::type_renames(&spec));
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
