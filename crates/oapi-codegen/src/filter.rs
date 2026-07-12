@@ -8,6 +8,7 @@
 
 use openapiv3::OpenAPI;
 use openapiv3::Operation;
+use openapiv3::PathItem;
 use openapiv3::ReferenceOr;
 
 use crate::config::OutputOptions;
@@ -35,16 +36,7 @@ fn filter_operations(doc: &mut OpenAPI, opts: &OutputOptions) {
         let ReferenceOr::Item(item) = entry else {
             continue;
         };
-        for slot in [
-            &mut item.get,
-            &mut item.put,
-            &mut item.post,
-            &mut item.delete,
-            &mut item.options,
-            &mut item.head,
-            &mut item.patch,
-            &mut item.trace,
-        ] {
+        for slot in operation_slots(item) {
             let remove = slot.as_ref().is_some_and(|op| {
                 return is_filtered_out(op, opts);
             });
@@ -53,6 +45,22 @@ fn filter_operations(doc: &mut OpenAPI, opts: &OutputOptions) {
             }
         }
     }
+}
+
+/// Mutable references to every operation slot on a path item, in a stable
+/// verb order (`get`, `put`, `post`, `delete`, `options`, `head`, `patch`,
+/// `trace`).
+fn operation_slots(item: &mut PathItem) -> [&mut Option<Operation>; 8] {
+    return [
+        &mut item.get,
+        &mut item.put,
+        &mut item.post,
+        &mut item.delete,
+        &mut item.options,
+        &mut item.head,
+        &mut item.patch,
+        &mut item.trace,
+    ];
 }
 
 /// Whether `operation` should be dropped given the configured filters.
@@ -106,5 +114,45 @@ fn exclude_schemas(doc: &mut OpenAPI, exclude: &[String]) {
         components.schemas.retain(|name, _| {
             return !exclude.contains(name);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `operation_slots` must reference every operation verb openapiv3
+    /// recognises: nulling all slots must leave the path item with no
+    /// operations. This cross-checks our hand-listed slots against openapiv3's
+    /// authoritative `PathItem::iter`, catching drift if a verb is ever added.
+    #[test]
+    fn operation_slots_cover_every_verb() {
+        let populated = || {
+            return Some(Operation::default());
+        };
+        let mut item = PathItem {
+            get: populated(),
+            put: populated(),
+            post: populated(),
+            delete: populated(),
+            options: populated(),
+            head: populated(),
+            patch: populated(),
+            trace: populated(),
+            ..Default::default()
+        };
+        assert_eq!(
+            item.iter().count(),
+            operation_slots(&mut item).len(),
+            "every populated verb should map to one slot"
+        );
+        for slot in operation_slots(&mut item) {
+            *slot = None;
+        }
+        assert_eq!(
+            item.iter().count(),
+            0,
+            "operation_slots must cover every verb reported by openapiv3's PathItem::iter",
+        );
     }
 }
