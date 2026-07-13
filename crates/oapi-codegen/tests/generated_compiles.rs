@@ -144,6 +144,15 @@ mod generated {
     pub mod client_multipart_request {
         include!("generated/client_multipart_request.rs");
     }
+    pub mod client_negotiated_request {
+        include!("generated/client_negotiated_request.rs");
+    }
+    pub mod client_negotiated_response {
+        include!("generated/client_negotiated_response.rs");
+    }
+    pub mod client_form_response {
+        include!("generated/client_form_response.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
@@ -908,6 +917,203 @@ fn generated_client_drives_requests_and_decodes_responses() {
     );
     assert!(note_request.to_lowercase().contains("content-type: text/plain"));
     assert!(note_request.contains("hello note"), "note body: {note_request}");
+}
+
+/// Drive the generated clients for the multi-content body shapes against a canned
+/// HTTP server, proving the request encoders and response decoders added for
+/// multipart requests, negotiated request/response bodies, and form responses
+/// work on the wire.
+///
+/// Coverage: a multipart request (file + optional text + scalar parts), a
+/// negotiated request sent as JSON and as form, a negotiated response decoded by
+/// `Content-Type` (JSON and text), and a form-urlencoded response body.
+#[test]
+fn generated_client_encodes_and_decodes_body_shapes() {
+    use std::net::TcpListener;
+
+    fn read_request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::BufRead;
+        use std::io::Read;
+
+        let mut reader = std::io::BufReader::new(stream);
+        let mut head = String::new();
+        loop {
+            let mut line = String::new();
+            let read = reader.read_line(&mut line).expect("read request line");
+            if read == 0 {
+                break;
+            }
+            let blank = line == "\r\n";
+            head.push_str(&line);
+            if blank {
+                break;
+            }
+        }
+        let content_length = head
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.trim().eq_ignore_ascii_case("content-length") {
+                    return value.trim().parse::<usize>().ok();
+                }
+                return None;
+            })
+            .unwrap_or(0);
+        let mut body = vec![0u8; content_length];
+        if content_length > 0 {
+            reader.read_exact(&mut body).expect("read request body");
+        }
+        return format!("{head}{}", String::from_utf8_lossy(&body));
+    }
+
+    fn response(status: &str, content_type: Option<&str>, body: &str) -> String {
+        let mut out = format!(
+            "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {len}\r\n",
+            len = body.len(),
+        );
+        if let Some(content_type) = content_type {
+            out.push_str(&format!("Content-Type: {content_type}\r\n"));
+        }
+        out.push_str("\r\n");
+        out.push_str(body);
+        return out;
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let base_url = format!("http://{addr}");
+
+    let responses = vec![
+        response("204 No Content", None, ""),
+        response("204 No Content", None, ""),
+        response("204 No Content", None, ""),
+        response("200 OK", Some("application/json"), r#"{"id":"r1"}"#),
+        response("200 OK", Some("text/plain"), "plain report"),
+        response("200 OK", Some("application/x-www-form-urlencoded"), "name=Ada"),
+    ];
+
+    let server = std::thread::spawn(move || {
+        use std::io::Write;
+
+        let mut received = Vec::with_capacity(responses.len());
+        for response in &responses {
+            let (mut stream, _) = listener.accept().expect("accept mock connection");
+            received.push(read_request(&mut stream));
+            stream.write_all(response.as_bytes()).expect("write mock response");
+            stream.flush().expect("flush mock response");
+        }
+        return received;
+    });
+
+    {
+        use generated::client_multipart_request::Client;
+        use generated::client_multipart_request::UploadMultipart;
+        use generated::client_multipart_request::UploadResponse;
+
+        let client = Client::new(&base_url).expect("build multipart client");
+        let body = UploadMultipart {
+            image: b"\x89PNG".to_vec(),
+            caption: Some("a cat".to_owned()),
+            attempts: 3,
+        };
+        match client.upload(body).expect("multipart upload succeeds") {
+            UploadResponse::NoContent => {}
+        }
+    }
+
+    {
+        use generated::client_negotiated_request::Client;
+        use generated::client_negotiated_request::CreateThingRequestBody;
+        use generated::client_negotiated_request::CreateThingResponse;
+        use generated::client_negotiated_request::Thing;
+
+        let client = Client::new(&base_url).expect("build negotiated-request client");
+        let json_body = CreateThingRequestBody::Json(Thing {
+            name: "as-json".to_owned(),
+        });
+        match client.create_thing(json_body).expect("json create succeeds") {
+            CreateThingResponse::NoContent => {}
+        }
+        let form_body = CreateThingRequestBody::Form(Thing {
+            name: "as-form".to_owned(),
+        });
+        match client.create_thing(form_body).expect("form create succeeds") {
+            CreateThingResponse::NoContent => {}
+        }
+    }
+
+    {
+        use generated::client_negotiated_response::Client;
+        use generated::client_negotiated_response::GetReportResponse;
+        use generated::client_negotiated_response::GetReportResponseOkBody;
+
+        let client = Client::new(&base_url).expect("build negotiated-response client");
+        match client.get_report().expect("json report succeeds") {
+            GetReportResponse::Ok(GetReportResponseOkBody::Json(report)) => {
+                assert_eq!(report.id, "r1");
+            }
+            _ => panic!("expected a JSON-decoded report for an application/json response"),
+        }
+        match client.get_report().expect("text report succeeds") {
+            GetReportResponse::Ok(GetReportResponseOkBody::Text(text)) => {
+                assert_eq!(text, "plain report");
+            }
+            _ => panic!("expected a text-decoded report for a text/plain response"),
+        }
+    }
+
+    {
+        use generated::client_form_response::Client;
+        use generated::client_form_response::GetFormResponse;
+
+        let client = Client::new(&base_url).expect("build form-response client");
+        match client.get_form().expect("form response succeeds") {
+            GetFormResponse::Ok(form) => {
+                assert_eq!(form.name, "Ada");
+            }
+        }
+    }
+
+    let received = server.join().expect("mock server thread");
+
+    let upload_request = &received[0];
+    assert!(
+        upload_request.starts_with("POST /upload "),
+        "upload path: {upload_request}"
+    );
+    assert!(
+        upload_request
+            .to_lowercase()
+            .contains("content-type: multipart/form-data"),
+        "upload content type: {upload_request}"
+    );
+    assert!(
+        upload_request.contains("name=\"image\""),
+        "upload parts: {upload_request}"
+    );
+    assert!(
+        upload_request.contains("name=\"caption\""),
+        "upload parts: {upload_request}"
+    );
+    assert!(
+        upload_request.contains("name=\"attempts\""),
+        "upload parts: {upload_request}"
+    );
+
+    let json_request = &received[1];
+    assert!(json_request.to_lowercase().contains("content-type: application/json"));
+    assert!(
+        json_request.contains(r#""name":"as-json""#),
+        "json body: {json_request}"
+    );
+
+    let form_request = &received[2];
+    assert!(
+        form_request
+            .to_lowercase()
+            .contains("content-type: application/x-www-form-urlencoded")
+    );
+    assert!(form_request.contains("name=as-form"), "form body: {form_request}");
 }
 
 /// Drive the generated auth client against a canned HTTP server to prove each

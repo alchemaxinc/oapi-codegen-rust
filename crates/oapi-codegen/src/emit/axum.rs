@@ -95,18 +95,7 @@ fn negotiated_response_arms(body: &NegotiatedBody, status: &TokenStream, with_he
 /// representation, carrying that representation's decoded type. The generated
 /// `IntoResponse` renders whichever variant the handler returned.
 fn emit_response_body_enum(body: &NegotiatedBody) -> Result<TokenStream> {
-    let name = body.name.to_token();
-    let mut variants = Vec::with_capacity(body.variants.len());
-    for variant in &body.variants {
-        let ident = variant.variant.to_token();
-        let ty = emit_type(&variant.body.ty)?;
-        variants.push(quote! { #ident(#ty) });
-    }
-    return Ok(quote! {
-        pub enum #name {
-            #(#variants),*
-        }
-    });
+    return crate::emit::emit_negotiated_body_enum(body);
 }
 
 /// Emit the axum server interface: the `Api` trait, per-operation response
@@ -936,20 +925,12 @@ fn emit_multipart_init(field: &MultipartField) -> TokenStream {
 fn emit_request_body(request: &NegotiatedBody) -> Result<Vec<TokenStream>> {
     let name = request.name.to_token();
 
-    let mut variants = Vec::with_capacity(request.variants.len());
     let mut arms = Vec::with_capacity(request.variants.len());
     for variant in &request.variants {
-        let ident = variant.variant.to_token();
-        let ty = emit_type(&variant.body.ty)?;
-        variants.push(quote! { #ident(#ty) });
         arms.push(emit_request_body_arm(&name, variant)?);
     }
 
-    let enum_def = quote! {
-        pub enum #name {
-            #(#variants),*
-        }
-    };
+    let enum_def = crate::emit::emit_negotiated_body_enum(request)?;
 
     let impl_block = quote! {
         impl<S> axum::extract::FromRequest<S> for #name

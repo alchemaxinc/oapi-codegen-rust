@@ -420,14 +420,18 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// against a committed file. These exercise the client generator: path/query/
 /// header/cookie inputs, single-content request bodies, typed responses, and
 /// security schemes (bearer, basic, and API-key credentials).
-const CLIENT_FIXTURES: &[&str] = &["client_widgets", "client_auth", "client_multipart_request"];
+const CLIENT_FIXTURES: &[&str] = &[
+    "client_widgets",
+    "client_auth",
+    "client_multipart_request",
+    "client_negotiated_request",
+    "client_negotiated_response",
+    "client_form_response",
+];
 
 /// Client fixtures whose generation must fail with a documented error, covering
 /// the request/response shapes the client generator does not support yet.
 const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
-    "client_unsupported_negotiated_request",
-    "client_unsupported_negotiated_response",
-    "client_unsupported_form_response",
     "client_unsupported_oauth2",
     "client_unsupported_ref_scheme",
     "client_unsupported_undeclared_scheme",
@@ -906,7 +910,14 @@ macro_rules! client_generated_tests {
     };
 }
 
-client_generated_tests!(client_widgets, client_auth, client_multipart_request);
+client_generated_tests!(
+    client_widgets,
+    client_auth,
+    client_multipart_request,
+    client_negotiated_request,
+    client_negotiated_response,
+    client_form_response,
+);
 
 /// The client `#[test]`s must cover exactly the supported client fixtures.
 #[test]

@@ -19,6 +19,7 @@ use crate::ir::BodyKind;
 use crate::ir::Cookies;
 use crate::ir::Headers;
 use crate::ir::Multipart;
+use crate::ir::NegotiatedBody;
 use crate::ir::Operation;
 use crate::ir::RequestPayload;
 use crate::ir::ResponseBody;
@@ -51,32 +52,6 @@ fn unsupported(operation: &Operation, reason: &str) -> Error {
 /// spec that uses them fails loudly rather than generating a client that silently
 /// drops the body.
 fn ensure_supported(operation: &Operation, schemes: &[SecurityScheme]) -> Result<()> {
-    match &operation.request {
-        Some(RequestPayload::Negotiated(_)) => {
-            return Err(unsupported(
-                operation,
-                "multi-content-type (negotiated) request bodies are not supported by the client generator yet",
-            ));
-        }
-        Some(RequestPayload::Multipart(_)) | Some(RequestPayload::Single(_)) | None => {}
-    }
-    for case in &operation.responses {
-        match &case.body {
-            Some(ResponseBody::Negotiated(_)) => {
-                return Err(unsupported(
-                    operation,
-                    "multi-content-type (negotiated) response bodies are not supported by the client generator yet",
-                ));
-            }
-            Some(ResponseBody::Single(body)) if body.kind == BodyKind::Form => {
-                return Err(unsupported(
-                    operation,
-                    "form (`application/x-www-form-urlencoded`) response bodies are not supported by the client generator yet",
-                ));
-            }
-            _ => {}
-        }
-    }
     for key in &operation.security {
         match schemes.iter().find(|scheme| return scheme.key == *key) {
             None => {
@@ -116,6 +91,14 @@ fn client_items(service: &Service) -> Result<Vec<TokenStream>> {
         if let Some(RequestPayload::Multipart(multipart)) = &operation.request {
             items.push(crate::emit::emit_multipart_struct(multipart)?);
         }
+        if let Some(RequestPayload::Negotiated(request)) = &operation.request {
+            items.push(crate::emit::emit_negotiated_body_enum(request)?);
+        }
+        for case in &operation.responses {
+            if let Some(ResponseBody::Negotiated(body)) = &case.body {
+                items.push(crate::emit::emit_negotiated_body_enum(body)?);
+            }
+        }
         items.push(emit_response_enum(operation)?);
     }
     items.push(client_struct(&service.security_schemes));
@@ -133,6 +116,12 @@ fn client_error() -> TokenStream {
             Http(reqwest::Error),
             /// The server returned a status code the operation does not declare.
             UnexpectedStatus(reqwest::StatusCode),
+            /// The response `Content-Type` matched none of the representations the
+            /// operation declares for its status.
+            UnexpectedContentType(String),
+            /// A response body failed to deserialize (e.g. malformed
+            /// form-urlencoded content).
+            Decode(String),
         }
 
         impl std::fmt::Display for ClientError {
@@ -142,6 +131,12 @@ fn client_error() -> TokenStream {
                     ClientError::UnexpectedStatus(status) => {
                         return write!(f, "unexpected response status: {status}");
                     }
+                    ClientError::UnexpectedContentType(content_type) => {
+                        return write!(f, "unexpected response content type: {content_type}");
+                    }
+                    ClientError::Decode(message) => {
+                        return write!(f, "failed to decode response body: {message}");
+                    }
                 }
             }
         }
@@ -150,7 +145,9 @@ fn client_error() -> TokenStream {
             fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
                 match self {
                     ClientError::Http(error) => return Some(error),
-                    ClientError::UnexpectedStatus(_) => return None,
+                    ClientError::UnexpectedStatus(_)
+                    | ClientError::UnexpectedContentType(_)
+                    | ClientError::Decode(_) => return None,
                 }
             }
         }
@@ -438,7 +435,11 @@ fn method_args(operation: &Operation) -> Result<Vec<TokenStream>> {
             let ty = multipart.name.to_token();
             args.push(quote! { body: #ty });
         }
-        Some(RequestPayload::Negotiated(_)) | None => {}
+        Some(RequestPayload::Negotiated(request)) => {
+            let ty = request.name.to_token();
+            args.push(quote! { body: #ty });
+        }
+        None => {}
     }
     return Ok(args);
 }
@@ -593,12 +594,35 @@ fn body_mutations(operation: &Operation) -> Result<Vec<TokenStream>> {
             }
         },
         Some(RequestPayload::Multipart(multipart)) => return Ok(multipart_form_mutations(multipart)),
-        Some(_) => {
-            return Err(unsupported(operation, "unsupported request body is rejected earlier"));
-        }
+        Some(RequestPayload::Negotiated(request)) => return Ok(negotiated_body_mutations(request)),
         None => return Ok(Vec::new()),
     };
     return Ok(vec![mutation]);
+}
+
+/// Build the request from a negotiated (multi-content-type) body enum: match on
+/// the caller-selected representation and apply the matching `reqwest` builder,
+/// mirroring the single-body content-type handling per variant.
+fn negotiated_body_mutations(request: &NegotiatedBody) -> Vec<TokenStream> {
+    let name = request.name.to_token();
+    let mut arms = Vec::with_capacity(request.variants.len());
+    for variant in &request.variants {
+        let ident = variant.variant.to_token();
+        let apply = match variant.body.kind {
+            BodyKind::Json => quote! { request = request.json(&value); },
+            BodyKind::Form => quote! { request = request.form(&value); },
+            BodyKind::Text => quote! {
+                request = request.header(reqwest::header::CONTENT_TYPE, "text/plain").body(value);
+            },
+            BodyKind::Multipart => quote! {},
+        };
+        arms.push(quote! { #name::#ident(value) => { #apply } });
+    }
+    return vec![quote! {
+        match body {
+            #(#arms)*
+        }
+    }];
 }
 
 /// Build the `reqwest::blocking::multipart::Form` from the typed `<Op>Multipart`
@@ -734,15 +758,8 @@ fn decode_response(operation: &Operation) -> Result<TokenStream> {
 fn response_case(name: &proc_macro2::Ident, case: &ResponseCase) -> Result<(TokenStream, TokenStream)> {
     let variant = case.variant.to_token();
     let dynamic = !matches!(case.status, ResponseStatus::Fixed(_));
-    let body_ty = match &case.body {
-        Some(ResponseBody::Single(body)) => Some(emit_type(&body.ty)?),
-        _ => None,
-    };
-    let body_kind = match &case.body {
-        Some(ResponseBody::Single(body)) => Some(body.kind),
-        _ => None,
-    };
-    let decode_body = body_decode(body_kind, &body_ty);
+    let body_ty = response_body_type(&case.body)?;
+    let decode_body = body_decode(&case.body)?;
 
     if case.headers.is_empty() {
         let variant_def = match (&body_ty, dynamic) {
@@ -799,12 +816,90 @@ fn response_case(name: &proc_macro2::Ident, case: &ResponseCase) -> Result<(Toke
     return Ok((variant_def, build));
 }
 
-/// The statement that decodes the response body into `body`, or nothing when the
-/// response declares no body.
-fn body_decode(kind: Option<BodyKind>, ty: &Option<TokenStream>) -> TokenStream {
-    return match (kind, ty) {
-        (Some(BodyKind::Json), Some(ty)) => quote! { let body: #ty = response.json()?; },
-        (Some(BodyKind::Text), _) => quote! { let body = response.text()?; },
-        _ => quote! {},
+/// The Rust type a response variant carries for its body, if any: the decoded
+/// type for a single-content body, or the negotiated enum type for a
+/// multi-content body.
+fn response_body_type(body: &Option<ResponseBody>) -> Result<Option<TokenStream>> {
+    return Ok(match body {
+        Some(ResponseBody::Single(body)) => Some(emit_type(&body.ty)?),
+        Some(ResponseBody::Negotiated(negotiated)) => {
+            let ident = negotiated.name.to_token();
+            Some(quote! { #ident })
+        }
+        None => None,
+    });
+}
+
+/// The statement(s) that decode the response body into `body`, or nothing when
+/// the response declares no body.
+///
+/// JSON and text use `reqwest`'s built-in decoders; form bodies are decoded with
+/// `serde_urlencoded` (`reqwest` has no form decoder); negotiated bodies dispatch
+/// on the response `Content-Type` (see [`negotiated_response_decode`]).
+fn body_decode(body: &Option<ResponseBody>) -> Result<TokenStream> {
+    return Ok(match body {
+        Some(ResponseBody::Single(body)) => {
+            let ty = emit_type(&body.ty)?;
+            match body.kind {
+                BodyKind::Json => quote! { let body: #ty = response.json()?; },
+                BodyKind::Text => quote! { let body = response.text()?; },
+                BodyKind::Form => quote! {
+                    let text = response.text()?;
+                    let body: #ty = serde_urlencoded::from_str(&text)
+                        .map_err(|error| return ClientError::Decode(error.to_string()))?;
+                },
+                BodyKind::Multipart => quote! {},
+            }
+        }
+        Some(ResponseBody::Negotiated(negotiated)) => negotiated_response_decode(negotiated),
+        None => quote! {},
+    });
+}
+
+/// Decode a negotiated response body: read the response `Content-Type` and pick
+/// the matching representation, wrapping the decoded value in the negotiated
+/// enum. An unrecognised content type yields [`ClientError::UnexpectedContentType`].
+fn negotiated_response_decode(negotiated: &NegotiatedBody) -> TokenStream {
+    let name = negotiated.name.to_token();
+    let mut arms = Vec::with_capacity(negotiated.variants.len());
+    for variant in &negotiated.variants {
+        let ident = variant.variant.to_token();
+        let test = response_content_type_test(variant.body.kind);
+        let decode = match variant.body.kind {
+            BodyKind::Json => quote! { #name::#ident(response.json()?) },
+            BodyKind::Text => quote! { #name::#ident(response.text()?) },
+            BodyKind::Form => quote! {
+                #name::#ident({
+                    let text = response.text()?;
+                    serde_urlencoded::from_str(&text)
+                        .map_err(|error| return ClientError::Decode(error.to_string()))?
+                })
+            },
+            BodyKind::Multipart => quote! {},
+        };
+        arms.push(quote! { if #test { #decode } else });
+    }
+    return quote! {
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| return value.to_str().ok())
+            .map(|value| return value.split(';').next().unwrap_or(value).trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        let body = #(#arms)* {
+            return Err(ClientError::UnexpectedContentType(content_type));
+        };
+    };
+}
+
+/// The boolean test matching a response `Content-Type` (lower-cased, parameters
+/// stripped) to a body kind — the client-side mirror of the server extractor's
+/// content-type dispatch.
+fn response_content_type_test(kind: BodyKind) -> TokenStream {
+    return match kind {
+        BodyKind::Json => quote! { content_type == "application/json" || content_type.ends_with("+json") },
+        BodyKind::Form => quote! { content_type == "application/x-www-form-urlencoded" },
+        BodyKind::Text => quote! { content_type == "text/plain" },
+        BodyKind::Multipart => quote! { false },
     };
 }
