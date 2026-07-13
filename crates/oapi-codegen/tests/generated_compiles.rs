@@ -949,19 +949,46 @@ fn generated_client_encodes_and_decodes_body_shapes() {
                 break;
             }
         }
-        let content_length = head
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(':')?;
-                if name.trim().eq_ignore_ascii_case("content-length") {
-                    return value.trim().parse::<usize>().ok();
+        let transfer_encoding = head.lines().find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.trim().eq_ignore_ascii_case("transfer-encoding") {
+                return Some(value.trim().to_ascii_lowercase());
+            }
+            return None;
+        });
+        let mut body = Vec::new();
+        if matches!(transfer_encoding.as_deref(), Some(encoding) if encoding.contains("chunked")) {
+            loop {
+                let mut size_line = String::new();
+                reader.read_line(&mut size_line).expect("read chunk size");
+                let size_str = size_line.trim_end_matches("\r\n").split(';').next().unwrap_or("");
+                let size = usize::from_str_radix(size_str.trim(), 16).expect("parse chunk size");
+                if size == 0 {
+                    let mut crlf = [0u8; 2];
+                    reader.read_exact(&mut crlf).expect("read final chunk crlf");
+                    break;
                 }
-                return None;
-            })
-            .unwrap_or(0);
-        let mut body = vec![0u8; content_length];
-        if content_length > 0 {
-            reader.read_exact(&mut body).expect("read request body");
+                let mut chunk = vec![0u8; size];
+                reader.read_exact(&mut chunk).expect("read chunk body");
+                body.extend_from_slice(&chunk);
+                let mut crlf = [0u8; 2];
+                reader.read_exact(&mut crlf).expect("read chunk crlf");
+            }
+        } else {
+            let content_length = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    if name.trim().eq_ignore_ascii_case("content-length") {
+                        return value.trim().parse::<usize>().ok();
+                    }
+                    return None;
+                })
+                .unwrap_or(0);
+            body.resize(content_length, 0u8);
+            if content_length > 0 {
+                reader.read_exact(&mut body).expect("read request body");
+            }
         }
         return format!("{head}{}", String::from_utf8_lossy(&body));
     }
