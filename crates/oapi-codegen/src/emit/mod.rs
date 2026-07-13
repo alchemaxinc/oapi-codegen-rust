@@ -15,6 +15,7 @@ use quote::quote;
 use crate::error::Error;
 use crate::error::Result;
 use crate::ir::Module;
+use crate::ir::Multipart;
 use crate::ir::RustType;
 use crate::ir::ServerUrls;
 use crate::ir::Service;
@@ -165,4 +166,29 @@ pub(crate) fn emit_type(ty: &RustType) -> Result<TokenStream> {
         }
     };
     return Ok(tokens);
+}
+
+/// Emit the plain per-operation multipart struct (`<Op>Multipart`) shared by the
+/// server extractor and the client request builder: one public field per part,
+/// wrapped in `Option` when the part is optional. The server augments this with a
+/// `FromRequest` impl; the client reads the fields to build a `reqwest` form.
+pub(crate) fn emit_multipart_struct(multipart: &Multipart) -> Result<TokenStream> {
+    let name = multipart.name.to_token();
+    let mut field_defs = Vec::with_capacity(multipart.fields.len());
+    for field in &multipart.fields {
+        let ident = field.rust_name.to_token();
+        let ty = emit_type(&field.ty)?;
+        let field_ty = if field.optional {
+            quote! { Option<#ty> }
+        } else {
+            quote! { #ty }
+        };
+        field_defs.push(quote! { pub #ident: #field_ty, });
+    }
+    return Ok(quote! {
+        #[derive(Debug, Clone)]
+        pub struct #name {
+            #(#field_defs)*
+        }
+    });
 }

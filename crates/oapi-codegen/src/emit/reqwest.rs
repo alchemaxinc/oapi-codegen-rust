@@ -18,6 +18,7 @@ use crate::error::Result;
 use crate::ir::BodyKind;
 use crate::ir::Cookies;
 use crate::ir::Headers;
+use crate::ir::Multipart;
 use crate::ir::Operation;
 use crate::ir::RequestPayload;
 use crate::ir::ResponseBody;
@@ -51,19 +52,13 @@ fn unsupported(operation: &Operation, reason: &str) -> Error {
 /// drops the body.
 fn ensure_supported(operation: &Operation, schemes: &[SecurityScheme]) -> Result<()> {
     match &operation.request {
-        Some(RequestPayload::Multipart(_)) => {
-            return Err(unsupported(
-                operation,
-                "multipart/form-data request bodies are not supported by the client generator yet",
-            ));
-        }
         Some(RequestPayload::Negotiated(_)) => {
             return Err(unsupported(
                 operation,
                 "multi-content-type (negotiated) request bodies are not supported by the client generator yet",
             ));
         }
-        Some(RequestPayload::Single(_)) | None => {}
+        Some(RequestPayload::Multipart(_)) | Some(RequestPayload::Single(_)) | None => {}
     }
     for case in &operation.responses {
         match &case.body {
@@ -117,6 +112,9 @@ fn client_items(service: &Service) -> Result<Vec<TokenStream>> {
         }
         if let Some(cookies) = &operation.cookies {
             items.push(emit_cookies_struct(cookies)?);
+        }
+        if let Some(RequestPayload::Multipart(multipart)) = &operation.request {
+            items.push(crate::emit::emit_multipart_struct(multipart)?);
         }
         items.push(emit_response_enum(operation)?);
     }
@@ -431,9 +429,16 @@ fn method_args(operation: &Operation) -> Result<Vec<TokenStream>> {
         let ty = cookies.name.to_token();
         args.push(quote! { cookies: #ty });
     }
-    if let Some(RequestPayload::Single(body)) = &operation.request {
-        let ty = emit_type(&body.ty)?;
-        args.push(quote! { body: #ty });
+    match &operation.request {
+        Some(RequestPayload::Single(body)) => {
+            let ty = emit_type(&body.ty)?;
+            args.push(quote! { body: #ty });
+        }
+        Some(RequestPayload::Multipart(multipart)) => {
+            let ty = multipart.name.to_token();
+            args.push(quote! { body: #ty });
+        }
+        Some(RequestPayload::Negotiated(_)) | None => {}
     }
     return Ok(args);
 }
@@ -587,12 +592,47 @@ fn body_mutations(operation: &Operation) -> Result<Vec<TokenStream>> {
                 return Err(unsupported(operation, "multipart request bodies are rejected earlier"));
             }
         },
+        Some(RequestPayload::Multipart(multipart)) => return Ok(multipart_form_mutations(multipart)),
         Some(_) => {
             return Err(unsupported(operation, "unsupported request body is rejected earlier"));
         }
         None => return Ok(Vec::new()),
     };
     return Ok(vec![mutation]);
+}
+
+/// Build the `reqwest::blocking::multipart::Form` from the typed `<Op>Multipart`
+/// body: scalar parts are sent as text (their `Display`), binary/file parts as
+/// raw bytes with a filename, and optional parts are only attached when present.
+fn multipart_form_mutations(multipart: &Multipart) -> Vec<TokenStream> {
+    let mut mutations = vec![quote! {
+        let mut form = reqwest::blocking::multipart::Form::new();
+    }];
+    for field in &multipart.fields {
+        let ident = field.rust_name.to_token();
+        let wire = Literal::string(&field.wire_name);
+        let mutation = match (field.is_file, field.optional) {
+            (true, false) => quote! {
+                form = form.part(#wire, reqwest::blocking::multipart::Part::bytes(body.#ident).file_name(#wire));
+            },
+            (true, true) => quote! {
+                if let Some(value) = body.#ident {
+                    form = form.part(#wire, reqwest::blocking::multipart::Part::bytes(value).file_name(#wire));
+                }
+            },
+            (false, false) => quote! {
+                form = form.text(#wire, body.#ident.to_string());
+            },
+            (false, true) => quote! {
+                if let Some(value) = &body.#ident {
+                    form = form.text(#wire, value.to_string());
+                }
+            },
+        };
+        mutations.push(mutation);
+    }
+    mutations.push(quote! { request = request.multipart(form); });
+    return mutations;
 }
 
 /// The request-builder mutations that apply the operation's security credentials.

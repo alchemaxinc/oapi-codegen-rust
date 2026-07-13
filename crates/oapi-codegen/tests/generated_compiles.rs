@@ -141,6 +141,9 @@ mod generated {
     pub mod client_auth {
         include!("generated/client_auth.rs");
     }
+    pub mod client_multipart_request {
+        include!("generated/client_multipart_request.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`

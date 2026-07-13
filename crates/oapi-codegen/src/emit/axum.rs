@@ -816,30 +816,18 @@ fn emit_cookie_binding(param: &CookieParam) -> Result<TokenStream> {
 fn emit_multipart(multipart: &Multipart) -> Result<Vec<TokenStream>> {
     let name = multipart.name.to_token();
 
-    let mut field_defs = Vec::with_capacity(multipart.fields.len());
     let mut accumulators = Vec::with_capacity(multipart.fields.len());
     let mut arms = Vec::with_capacity(multipart.fields.len());
     let mut inits = Vec::with_capacity(multipart.fields.len());
     for field in &multipart.fields {
         let ident = field.rust_name.to_token();
         let ty = emit_type(&field.ty)?;
-        let field_ty = if field.optional {
-            quote! { Option<#ty> }
-        } else {
-            quote! { #ty }
-        };
-        field_defs.push(quote! { pub #ident: #field_ty, });
         accumulators.push(quote! { let mut #ident: Option<#ty> = None; });
         arms.push(emit_multipart_arm(field)?);
         inits.push(emit_multipart_init(field));
     }
 
-    let struct_def = quote! {
-        #[derive(Debug, Clone)]
-        pub struct #name {
-            #(#field_defs)*
-        }
-    };
+    let struct_def = crate::emit::emit_multipart_struct(multipart)?;
 
     let impl_block = quote! {
         impl<S> axum::extract::FromRequest<S> for #name
