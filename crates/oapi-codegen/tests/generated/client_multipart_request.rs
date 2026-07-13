@@ -3,7 +3,8 @@
 /// Errors returned by the generated client.
 #[derive(Debug)]
 pub enum ClientError {
-    /// The request failed to send, or the response body failed to decode.
+    /// The `reqwest` request failed to send or complete, including any
+    /// body decoding `reqwest` performs internally (such as JSON).
     Http(reqwest::Error),
     /// The server returned a status code the operation does not declare.
     UnexpectedStatus(reqwest::StatusCode),
