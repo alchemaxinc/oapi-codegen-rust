@@ -132,6 +132,9 @@ mod generated {
     pub mod server_filtering {
         include!("generated/server_filtering.rs");
     }
+    pub mod server_urls {
+        include!("generated/server_urls.rs");
+    }
     pub mod client_widgets {
         include!("generated/client_widgets.rs");
     }

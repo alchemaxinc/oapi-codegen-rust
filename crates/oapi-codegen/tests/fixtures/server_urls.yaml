@@ -1,0 +1,38 @@
+openapi: 3.0.3
+info:
+  title: Server URLs
+  description: Exercises the `server-urls` generator across every server shape.
+  version: "1.0.0"
+servers:
+  - url: https://api.example.com/v1
+    description: Production
+  - url: https://{tenant}.example.com:{port}/{basePath}
+    description: Regional
+    variables:
+      tenant:
+        default: acme
+        description: The customer tenant subdomain.
+      port:
+        default: "443"
+        enum:
+          - "443"
+          - "8443"
+      unused:
+        default: ignored
+        description: Declared but never referenced in the URL, so it is skipped.
+  - url: https://sandbox.example.com/{version}
+    x-rust-name: Sandbox
+    variables:
+      version:
+        default: v2
+        enum:
+          - v1
+          - v2
+paths:
+  /ping:
+    get:
+      operationId: ping
+      summary: Liveness probe.
+      responses:
+        "204":
+          description: The service is reachable.

@@ -6,6 +6,18 @@ info:
     Rust project with oapi-codegen-rust: per-schema model modules plus an axum
     server whose cross-file `$ref`s resolve through `import-mapping`.
   version: "1.0.0"
+servers:
+  - url: https://api.bookstore.example.com/v1
+    description: Production
+  - url: https://{region}.api.bookstore.example.com/v1
+    description: Regional
+    variables:
+      region:
+        default: us
+        description: The regional deployment to target.
+        enum:
+          - us
+          - eu
 components:
   responses:
     BadRequest:

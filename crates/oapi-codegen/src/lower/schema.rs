@@ -617,7 +617,7 @@ mod tests {
         let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse spec");
         let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
         let module = generate_models(&spec).expect("map schemas");
-        return crate::emit::emit_module(&module).expect("emit module");
+        return crate::emit::emit_module(&module, None).expect("emit module");
     }
 
     const PREAMBLE: &str = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n";

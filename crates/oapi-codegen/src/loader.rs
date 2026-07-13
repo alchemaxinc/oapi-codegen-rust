@@ -134,6 +134,11 @@ impl Spec {
         return &self.inner.paths;
     }
 
+    /// The top-level `servers` declared in the document, in document order.
+    pub fn servers(&self) -> &[openapiv3::Server] {
+        return &self.inner.servers;
+    }
+
     /// The document's global `security` requirements, if declared. An operation
     /// with no `security` of its own inherits these.
     pub fn global_security(&self) -> Option<&[openapiv3::SecurityRequirement]> {

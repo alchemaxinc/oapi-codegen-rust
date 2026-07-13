@@ -18,6 +18,12 @@ pub fn to_upper_camel_case(s: &str) -> String {
     return out;
 }
 
+/// Convert `s` to `SCREAMING_SNAKE_CASE`, the idiomatic Rust `const`/`static`
+/// casing.
+pub fn to_screaming_snake_case(s: &str) -> String {
+    return to_snake_case(s).to_uppercase();
+}
+
 /// Case of the last cased character seen in the current word.
 #[derive(Clone, Copy, PartialEq)]
 enum WordMode {

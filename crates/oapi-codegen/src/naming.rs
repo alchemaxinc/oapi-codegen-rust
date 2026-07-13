@@ -44,6 +44,8 @@ pub enum Case {
     Pascal,
     /// `snake_case` — used for struct fields.
     Snake,
+    /// `SCREAMING_SNAKE_CASE` — used for `const`/`static` items.
+    ScreamingSnake,
 }
 
 /// Convert an arbitrary OpenAPI name into a valid Rust identifier in the
@@ -52,6 +54,7 @@ pub fn to_ident(name: &str, case: Case) -> RustIdent {
     let cased = match case {
         Case::Pascal => casing::to_upper_camel_case(name),
         Case::Snake => casing::to_snake_case(name),
+        Case::ScreamingSnake => casing::to_screaming_snake_case(name),
     };
 
     let cased = if cased.is_empty() { "Unnamed".to_owned() } else { cased };
