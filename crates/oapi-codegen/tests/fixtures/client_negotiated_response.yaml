@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Client negotiated response (unsupported)
+  title: Client negotiated response
   version: 1.0.0
 paths:
   /report:

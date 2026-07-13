@@ -16,6 +16,7 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::ir::Module;
 use crate::ir::Multipart;
+use crate::ir::NegotiatedBody;
 use crate::ir::RustType;
 use crate::ir::ServerUrls;
 use crate::ir::Service;
@@ -189,6 +190,26 @@ pub(crate) fn emit_multipart_struct(multipart: &Multipart) -> Result<TokenStream
         #[derive(Debug, Clone)]
         pub struct #name {
             #(#field_defs)*
+        }
+    });
+}
+
+/// Emit the plain enum backing a negotiated (multi-content-type) body: one
+/// variant per content representation, carrying that representation's decoded
+/// type. Shared by the server (which augments the request enum with a
+/// `FromRequest` impl and renders the response enum with `IntoResponse`) and the
+/// client (which matches on it to build a request or decode a response).
+pub(crate) fn emit_negotiated_body_enum(body: &NegotiatedBody) -> Result<TokenStream> {
+    let name = body.name.to_token();
+    let mut variants = Vec::with_capacity(body.variants.len());
+    for variant in &body.variants {
+        let ident = variant.variant.to_token();
+        let ty = emit_type(&variant.body.ty)?;
+        variants.push(quote! { #ident(#ty) });
+    }
+    return Ok(quote! {
+        pub enum #name {
+            #(#variants),*
         }
     });
 }
