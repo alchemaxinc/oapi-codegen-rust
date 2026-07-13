@@ -649,6 +649,92 @@ fn generated_server_handles_multipart_body() {
     let _router: axum::Router = server_multipart_body::router(Service);
 }
 
+/// Read a full HTTP/1.1 request (head and body) from a mock-server connection,
+/// returning it as a lossy UTF-8 string so tests can assert on the request line,
+/// headers, and body. Handles both `Content-Length` and `Transfer-Encoding:
+/// chunked` framing, since `reqwest` may stream some bodies (e.g. multipart)
+/// without declaring a length up front.
+fn read_request(stream: &mut std::net::TcpStream) -> String {
+    use std::io::BufRead;
+    use std::io::Read;
+
+    let mut reader = std::io::BufReader::new(stream);
+    let mut head = String::new();
+    loop {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line).expect("read request line");
+        if read == 0 {
+            break;
+        }
+        let blank = line == "\r\n";
+        head.push_str(&line);
+        if blank {
+            break;
+        }
+    }
+    let transfer_encoding = head.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name.trim().eq_ignore_ascii_case("transfer-encoding") {
+            return Some(value.trim().to_ascii_lowercase());
+        }
+        return None;
+    });
+    let mut body = Vec::new();
+    if matches!(transfer_encoding.as_deref(), Some(encoding) if encoding.contains("chunked")) {
+        loop {
+            let mut size_line = String::new();
+            reader.read_line(&mut size_line).expect("read chunk size");
+            let size_str = size_line.trim_end_matches("\r\n").split(';').next().unwrap_or("");
+            let size = usize::from_str_radix(size_str.trim(), 16).expect("parse chunk size");
+            if size == 0 {
+                let mut crlf = [0u8; 2];
+                reader.read_exact(&mut crlf).expect("read final chunk crlf");
+                break;
+            }
+            let mut chunk = vec![0u8; size];
+            reader.read_exact(&mut chunk).expect("read chunk body");
+            body.extend_from_slice(&chunk);
+            let mut crlf = [0u8; 2];
+            reader.read_exact(&mut crlf).expect("read chunk crlf");
+        }
+    } else {
+        let content_length = head
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.trim().eq_ignore_ascii_case("content-length") {
+                    return value.trim().parse::<usize>().ok();
+                }
+                return None;
+            })
+            .unwrap_or(0);
+        body.resize(content_length, 0u8);
+        if content_length > 0 {
+            reader.read_exact(&mut body).expect("read request body");
+        }
+    }
+    return format!("{head}{}", String::from_utf8_lossy(&body));
+}
+
+/// Build a canned HTTP/1.1 response with `Connection: close` (so the blocking
+/// client opens a fresh socket per call), an optional `Content-Type`, any extra
+/// headers, and a body whose length sets `Content-Length`.
+fn response(status: &str, content_type: Option<&str>, extra: &[(&str, &str)], body: &str) -> String {
+    let mut out = format!(
+        "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {len}\r\n",
+        len = body.len(),
+    );
+    if let Some(content_type) = content_type {
+        out.push_str(&format!("Content-Type: {content_type}\r\n"));
+    }
+    for (name, value) in extra {
+        out.push_str(&format!("{name}: {value}\r\n"));
+    }
+    out.push_str("\r\n");
+    out.push_str(body);
+    return out;
+}
+
 /// Drive the generated blocking client against a tiny canned HTTP server to
 /// prove its request building and response decoding behave at runtime (not just
 /// compile). Each response sets `Connection: close` so the blocking client opens
@@ -675,57 +761,6 @@ fn generated_client_drives_requests_and_decodes_responses() {
     use client_widgets::NewWidget;
     use client_widgets::ReplaceWidgetResponse;
     use generated::client_widgets;
-
-    fn read_request(stream: &mut std::net::TcpStream) -> String {
-        use std::io::BufRead;
-        use std::io::Read;
-
-        let mut reader = std::io::BufReader::new(stream);
-        let mut head = String::new();
-        loop {
-            let mut line = String::new();
-            let read = reader.read_line(&mut line).expect("read request line");
-            if read == 0 {
-                break;
-            }
-            let blank = line == "\r\n";
-            head.push_str(&line);
-            if blank {
-                break;
-            }
-        }
-        let content_length = head
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(':')?;
-                if name.trim().eq_ignore_ascii_case("content-length") {
-                    return value.trim().parse::<usize>().ok();
-                }
-                return None;
-            })
-            .unwrap_or(0);
-        let mut body = vec![0u8; content_length];
-        if content_length > 0 {
-            reader.read_exact(&mut body).expect("read request body");
-        }
-        return format!("{head}{}", String::from_utf8_lossy(&body));
-    }
-
-    fn response(status: &str, content_type: Option<&str>, extra: &[(&str, &str)], body: &str) -> String {
-        let mut out = format!(
-            "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {len}\r\n",
-            len = body.len(),
-        );
-        if let Some(content_type) = content_type {
-            out.push_str(&format!("Content-Type: {content_type}\r\n"));
-        }
-        for (name, value) in extra {
-            out.push_str(&format!("{name}: {value}\r\n"));
-        }
-        out.push_str("\r\n");
-        out.push_str(body);
-        return out;
-    }
 
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("mock server addr");
@@ -931,92 +966,17 @@ fn generated_client_drives_requests_and_decodes_responses() {
 fn generated_client_encodes_and_decodes_body_shapes() {
     use std::net::TcpListener;
 
-    fn read_request(stream: &mut std::net::TcpStream) -> String {
-        use std::io::BufRead;
-        use std::io::Read;
-
-        let mut reader = std::io::BufReader::new(stream);
-        let mut head = String::new();
-        loop {
-            let mut line = String::new();
-            let read = reader.read_line(&mut line).expect("read request line");
-            if read == 0 {
-                break;
-            }
-            let blank = line == "\r\n";
-            head.push_str(&line);
-            if blank {
-                break;
-            }
-        }
-        let transfer_encoding = head.lines().find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            if name.trim().eq_ignore_ascii_case("transfer-encoding") {
-                return Some(value.trim().to_ascii_lowercase());
-            }
-            return None;
-        });
-        let mut body = Vec::new();
-        if matches!(transfer_encoding.as_deref(), Some(encoding) if encoding.contains("chunked")) {
-            loop {
-                let mut size_line = String::new();
-                reader.read_line(&mut size_line).expect("read chunk size");
-                let size_str = size_line.trim_end_matches("\r\n").split(';').next().unwrap_or("");
-                let size = usize::from_str_radix(size_str.trim(), 16).expect("parse chunk size");
-                if size == 0 {
-                    let mut crlf = [0u8; 2];
-                    reader.read_exact(&mut crlf).expect("read final chunk crlf");
-                    break;
-                }
-                let mut chunk = vec![0u8; size];
-                reader.read_exact(&mut chunk).expect("read chunk body");
-                body.extend_from_slice(&chunk);
-                let mut crlf = [0u8; 2];
-                reader.read_exact(&mut crlf).expect("read chunk crlf");
-            }
-        } else {
-            let content_length = head
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    if name.trim().eq_ignore_ascii_case("content-length") {
-                        return value.trim().parse::<usize>().ok();
-                    }
-                    return None;
-                })
-                .unwrap_or(0);
-            body.resize(content_length, 0u8);
-            if content_length > 0 {
-                reader.read_exact(&mut body).expect("read request body");
-            }
-        }
-        return format!("{head}{}", String::from_utf8_lossy(&body));
-    }
-
-    fn response(status: &str, content_type: Option<&str>, body: &str) -> String {
-        let mut out = format!(
-            "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {len}\r\n",
-            len = body.len(),
-        );
-        if let Some(content_type) = content_type {
-            out.push_str(&format!("Content-Type: {content_type}\r\n"));
-        }
-        out.push_str("\r\n");
-        out.push_str(body);
-        return out;
-    }
-
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("mock server addr");
     let base_url = format!("http://{addr}");
 
     let responses = vec![
-        response("204 No Content", None, ""),
-        response("204 No Content", None, ""),
-        response("204 No Content", None, ""),
-        response("200 OK", Some("application/json"), r#"{"id":"r1"}"#),
-        response("200 OK", Some("text/plain"), "plain report"),
-        response("200 OK", Some("application/x-www-form-urlencoded"), "name=Ada"),
+        response("204 No Content", None, &[], ""),
+        response("204 No Content", None, &[], ""),
+        response("204 No Content", None, &[], ""),
+        response("200 OK", Some("application/json"), &[], r#"{"id":"r1"}"#),
+        response("200 OK", Some("text/plain"), &[], "plain report"),
+        response("200 OK", Some("application/x-www-form-urlencoded"), &[], "name=Ada"),
     ];
 
     let server = std::thread::spawn(move || {
@@ -1164,29 +1124,6 @@ fn generated_client_applies_security_credentials() {
     use client_auth::SearchResponse;
     use generated::client_auth;
 
-    fn read_request(stream: &mut std::net::TcpStream) -> String {
-        use std::io::BufRead;
-
-        let mut reader = std::io::BufReader::new(stream);
-        let mut head = String::new();
-        loop {
-            let mut line = String::new();
-            let read = reader.read_line(&mut line).expect("read request line");
-            if read == 0 || line == "\r\n" {
-                break;
-            }
-            head.push_str(&line);
-        }
-        return head;
-    }
-
-    fn response(body: &str) -> String {
-        return format!(
-            "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {len}\r\n\r\n{body}",
-            len = body.len(),
-        );
-    }
-
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("mock server addr");
     let base_url = format!("http://{addr}");
@@ -1200,7 +1137,7 @@ fn generated_client_applies_security_credentials() {
             received.push(read_request(&mut stream));
             let body = r#"{"text":"ok"}"#;
             stream
-                .write_all(response(body).as_bytes())
+                .write_all(response("200 OK", Some("application/json"), &[], body).as_bytes())
                 .expect("write mock response");
             stream.flush().expect("flush mock response");
         }
