@@ -532,3 +532,95 @@ pub enum ResponseStatus {
     /// the handler supplies a concrete code within the class.
     Range(u8),
 }
+
+/// The lowered `servers:` block: constants and builder functions for each
+/// declared server URL, plus the enum types their variables reference.
+///
+/// Emitted when `generate.server-urls` is set. A server whose URL has no
+/// `{placeholder}` becomes a `const`; one with placeholders becomes a builder
+/// function that substitutes each variable and validates the result.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerUrls {
+    /// Enum types for the enum-constrained server variables, emitted before the
+    /// builder functions that reference them.
+    pub enums: Vec<ServerUrlEnum>,
+    /// One entry per declared server, in document order.
+    pub servers: Vec<ServerUrl>,
+}
+
+/// A single lowered server URL: either a constant or a builder function.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ServerUrl {
+    /// A server URL with no variables: `pub const <NAME>: &str = "<url>";`.
+    Const(ServerUrlConst),
+    /// A server URL with `{placeholder}`s: a builder function substituting them.
+    Builder(ServerUrlBuilder),
+}
+
+/// A variable-free server URL emitted as a string constant.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerUrlConst {
+    /// `SCREAMING_SNAKE_CASE` constant name.
+    pub name: RustIdent,
+    /// Doc comment derived from the server `description`.
+    pub doc: Option<String>,
+    /// The literal server URL.
+    pub url: String,
+}
+
+/// A server URL with `{placeholder}`s emitted as a builder function that
+/// substitutes each variable and returns the resulting URL.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerUrlBuilder {
+    /// `snake_case` function name.
+    pub name: RustIdent,
+    /// Doc comment derived from the server `description`.
+    pub doc: Option<String>,
+    /// The URL template, retaining its `{placeholder}` tokens.
+    pub url_template: String,
+    /// Parameters, sorted by placeholder name for a deterministic signature.
+    pub params: Vec<ServerUrlParam>,
+}
+
+/// One parameter of a [`ServerUrlBuilder`], bound to a URL placeholder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerUrlParam {
+    /// `snake_case` parameter identifier.
+    pub ident: RustIdent,
+    /// The placeholder name as it appears in the URL (without braces).
+    pub placeholder: String,
+    /// How the parameter is typed and turned into its substituted string.
+    pub ty: ServerUrlParamType,
+}
+
+/// The type of a [`ServerUrlParam`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum ServerUrlParamType {
+    /// A free-form `&str` parameter (a non-enum or undeclared variable).
+    Str,
+    /// An enum-constrained parameter of the named [`ServerUrlEnum`] type.
+    Enum(RustIdent),
+}
+
+/// An enum type generated for an enum-constrained server variable.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerUrlEnum {
+    /// `PascalCase` enum type name (`<Server><Variable>`).
+    pub name: RustIdent,
+    /// Doc comment naming the server variable this enum constrains.
+    pub doc: Option<String>,
+    /// The permitted values, in declaration order.
+    pub variants: Vec<ServerUrlEnumVariant>,
+    /// The variant identifier used for the `Default` impl (the OpenAPI
+    /// `default`), when the variable declares one.
+    pub default: Option<RustIdent>,
+}
+
+/// One variant of a [`ServerUrlEnum`]: a Rust identifier and its wire value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerUrlEnumVariant {
+    /// `PascalCase` variant identifier.
+    pub name: RustIdent,
+    /// The wire value substituted into the URL.
+    pub value: String,
+}

@@ -33,6 +33,11 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     spec.apply_filters(&config.output_options);
     let want_server = config.generate.std_http_server;
     let want_client = config.generate.client;
+    let server_urls = if config.generate.server_urls {
+        lower::lower_server_urls(&spec)?
+    } else {
+        None
+    };
     let mut module = if config.generate.models || want_server || want_client {
         lower::generate_models(&spec)?
     } else {
@@ -44,7 +49,7 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
-        return emit::emit_with_service(&module, &service);
+        return emit::emit_with_service(&module, &service, server_urls.as_ref());
     }
     if want_client {
         let mut service = lower::generate_service(&spec, &config.import_mapping)?;
@@ -52,9 +57,9 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
-        return emit::emit_with_client(&module, &service);
+        return emit::emit_with_client(&module, &service, server_urls.as_ref());
     }
-    return emit::emit_module(&module);
+    return emit::emit_module(&module, server_urls.as_ref());
 }
 
 /// Generate Rust from a spec file according to `config` and write it to
@@ -68,7 +73,7 @@ pub fn generate_to_file(spec_path: &Path, config: &Config, output_path: &Path) -
 pub fn generate_models_string(spec_path: &Path) -> Result<String> {
     let spec = Spec::load(spec_path)?;
     let module = lower::generate_models(&spec)?;
-    let code = emit::emit_module(&module)?;
+    let code = emit::emit_module(&module, None)?;
     return Ok(code);
 }
 

@@ -3,6 +3,7 @@ output: generated/restapi.rs
 generate:
   std-http-server: true
   models: false
+  server-urls: true
 import-mapping:
   schemas/common.yaml: crate::apimodel::common
   schemas/catalog.yaml: crate::apimodel::catalog

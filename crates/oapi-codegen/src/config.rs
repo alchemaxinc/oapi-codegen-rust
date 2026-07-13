@@ -47,6 +47,9 @@ pub struct Generate {
     /// Embed the spec into the generated code (not yet implemented).
     #[serde(default)]
     pub embedded_spec: bool,
+    /// Emit constants and builder functions for the spec's `servers` URLs.
+    #[serde(default)]
+    pub server_urls: bool,
 }
 
 /// Output tuning options.

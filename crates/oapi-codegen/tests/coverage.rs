@@ -381,6 +381,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_multi_content_response",
     "server_prune",
     "server_filtering",
+    "server_urls",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
@@ -542,6 +543,7 @@ fn server_config() -> oapi_codegen::Config {
     return oapi_codegen::Config {
         generate: oapi_codegen::config::Generate {
             std_http_server: true,
+            server_urls: true,
             ..Default::default()
         },
         import_mapping,
@@ -617,6 +619,7 @@ server_generated_tests!(
     server_multi_content_response,
     server_prune,
     server_filtering,
+    server_urls,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.
@@ -791,6 +794,57 @@ fn filter_exclude_schemas_removes_named_models() {
     assert!(
         !generated.contains("struct Standalone"),
         "schemas named in exclude-schemas must not be generated",
+    );
+}
+
+/// Path to the shared server-URLs fixture (three servers: a const, a builder
+/// with an enum variable, and an `x-rust-name` server).
+fn server_urls_fixture() -> PathBuf {
+    return tests_dir().join("fixtures").join("server_urls.yaml");
+}
+
+/// `server-urls` is opt-in: without the flag no server constants or builders are
+/// emitted, even when the spec declares `servers:`.
+#[test]
+fn server_urls_are_not_emitted_without_the_flag() {
+    let config = oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            std_http_server: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let generated = oapi_codegen::generate(&server_urls_fixture(), &config).expect("generating server output failed");
+    assert!(
+        !generated.contains("SERVER_URL_PRODUCTION") && !generated.contains("fn server_url_regional"),
+        "server URLs must not be emitted unless `generate.server-urls` is set",
+    );
+}
+
+/// `server-urls` is independent of the models/server/client artifacts: it is
+/// emitted for a models-only configuration too.
+#[test]
+fn server_urls_emit_in_models_only_mode() {
+    let config = oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            models: true,
+            server_urls: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let generated = oapi_codegen::generate(&server_urls_fixture(), &config).expect("generating models output failed");
+    assert!(
+        generated.contains("pub const SERVER_URL_PRODUCTION: &str = \"https://api.example.com/v1\";"),
+        "the variable-free server must emit a string constant",
+    );
+    assert!(
+        generated.contains("pub fn server_url_regional(") && generated.contains("port: ServerUrlRegionalPort"),
+        "a server with an enum variable must emit a builder taking the enum type",
+    );
+    assert!(
+        generated.contains("pub fn sandbox("),
+        "`x-rust-name` overrides the derived server identifier",
     );
 }
 
