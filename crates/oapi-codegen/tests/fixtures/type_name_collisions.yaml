@@ -24,13 +24,13 @@ components:
       type: object
       properties:
         item:
-          $ref: '#/components/schemas/orderItem'
+          $ref: "#/components/schemas/orderItem"
     # A `oneOf` whose members reference both colliding schemas, exercising union
     # variant de-confliction (and variant-type resolution).
     reference:
       oneOf:
-        - $ref: '#/components/schemas/order-item'
-        - $ref: '#/components/schemas/orderItem'
+        - $ref: "#/components/schemas/order-item"
+        - $ref: "#/components/schemas/orderItem"
     # A string enum whose values collapse onto the same variant identifier
     # (`InProgress`); the wire values are preserved via `#[serde(rename)]`.
     stage:
