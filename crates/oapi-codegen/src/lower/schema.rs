@@ -70,7 +70,7 @@ pub fn generate_models(spec: &Spec) -> Result<Module> {
                     };
                 })?;
                 items.push(Item::Alias(Alias {
-                    name: to_ident(name, Case::Pascal),
+                    name: mapper.type_name_ident(name),
                     doc: None,
                     deprecated: None,
                     ty: RustType::Named(target.to_owned()),
@@ -306,6 +306,7 @@ impl Mapper<'_> {
     /// Variant list derived from a discriminator mapping (value -> $ref).
     fn union_variants_from_mapping(&self, disc: &Discriminator) -> Result<Vec<UnionVariant>> {
         let mut variants = Vec::with_capacity(disc.mapping.len());
+        let mut seen = std::collections::HashSet::new();
         for (value, reference) in &disc.mapping {
             let target = ref_target_name(reference).ok_or_else(|| {
                 return Error::UnsupportedRef {
@@ -314,7 +315,7 @@ impl Mapper<'_> {
                 };
             })?;
             variants.push(UnionVariant {
-                name: to_ident(value, Case::Pascal),
+                name: crate::naming::deconflict_ident(to_ident(value, Case::Pascal), &mut seen),
                 ty: RustType::Named(target.to_owned()),
             });
         }
@@ -328,6 +329,7 @@ impl Mapper<'_> {
         members: &[ReferenceOr<Schema>],
     ) -> Result<Vec<UnionVariant>> {
         let mut variants = Vec::with_capacity(members.len());
+        let mut seen = std::collections::HashSet::new();
         for (index, member) in members.iter().enumerate() {
             let variant = match member {
                 ReferenceOr::Reference { reference } => {
@@ -338,7 +340,7 @@ impl Mapper<'_> {
                         };
                     })?;
                     UnionVariant {
-                        name: to_ident(target, Case::Pascal),
+                        name: crate::naming::deconflict_ident(to_ident(target, Case::Pascal), &mut seen),
                         ty: RustType::Named(target.to_owned()),
                     }
                 }
@@ -346,7 +348,7 @@ impl Mapper<'_> {
                     let hint = format!("{name}_variant_{index}");
                     let ty = self.type_from_schema(&hint, schema)?;
                     UnionVariant {
-                        name: to_ident(&hint, Case::Pascal),
+                        name: crate::naming::deconflict_ident(to_ident(&hint, Case::Pascal), &mut seen),
                         ty,
                     }
                 }
@@ -364,11 +366,13 @@ impl Mapper<'_> {
         let varnames =
             extension_str_array(data, X_ENUM_VARNAMES).or_else(|| return extension_str_array(data, X_ENUM_NAMES));
         let mut variants = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         for (index, value) in values.iter().flatten().enumerate() {
-            let ident = match varnames.as_ref().and_then(|names| return names.get(index)) {
+            let base = match varnames.as_ref().and_then(|names| return names.get(index)) {
                 Some(custom) => to_ident(custom, Case::Pascal),
                 None => to_ident(value, Case::Pascal),
             };
+            let ident = crate::naming::deconflict_ident(base, &mut seen);
             let rename = crate::naming::rename_for(value, &ident);
             variants.push(StringVariant {
                 name: ident,

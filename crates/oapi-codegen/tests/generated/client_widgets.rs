@@ -68,6 +68,12 @@ impl From<reqwest::Error> for ClientError {
     }
 }
 
+const PATH_PARAM_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ListWidgetsQuery {
     /// Free-text search term.
@@ -81,6 +87,7 @@ pub struct ListWidgetsQuery {
 }
 
 /// List widgets, filtered by query parameters.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ListWidgetsResponse {
     /// The matching widgets.
     Ok(Vec<Widget>),
@@ -93,6 +100,7 @@ pub struct CreateWidgetHeaders {
 }
 
 /// Create a widget.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CreateWidgetResponse {
     /// The widget was created.
     Created {
@@ -107,6 +115,7 @@ pub enum CreateWidgetResponse {
 }
 
 /// Fetch a single widget by id.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetWidgetResponse {
     /// The requested widget.
     Ok(Widget),
@@ -117,6 +126,7 @@ pub enum GetWidgetResponse {
 }
 
 /// Replace a widget from a form submission.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ReplaceWidgetResponse {
     /// The updated widget.
     Ok(Widget),
@@ -128,12 +138,14 @@ pub struct DeleteWidgetCookies {
 }
 
 /// Delete a widget, authenticated by a session cookie.
+#[derive(Debug, Clone, PartialEq)]
 pub enum DeleteWidgetResponse {
     /// The widget was deleted.
     NoContent,
 }
 
 /// Attach a plain-text note to a widget.
+#[derive(Debug, Clone, PartialEq)]
 pub enum AddNoteResponse {
     /// The note was stored; its rendering is returned as text.
     Created {
@@ -147,7 +159,7 @@ pub enum AddNoteResponse {
 ///
 /// `base_url` is used as a prefix for every request path and should not
 /// carry a trailing slash (e.g. `https://api.example.com`).
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Client {
     base_url: String,
     http: reqwest::blocking::Client,
@@ -235,7 +247,10 @@ impl Client {
     }
     /// Fetch a single widget by id.
     pub fn get_widget(&self, id: String) -> Result<GetWidgetResponse, ClientError> {
-        let url = format!("{}/widgets/{}", self.base_url, id);
+        let url = format!(
+            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(& id
+            .to_string(), PATH_PARAM_ENCODE_SET)
+        );
         let response = self.http.request(reqwest::Method::GET, url).send()?;
         let status = response.status();
         if status.as_u16() == 200 {
@@ -257,7 +272,10 @@ impl Client {
         id: String,
         body: NewWidget,
     ) -> Result<ReplaceWidgetResponse, ClientError> {
-        let url = format!("{}/widgets/{}", self.base_url, id);
+        let url = format!(
+            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(& id
+            .to_string(), PATH_PARAM_ENCODE_SET)
+        );
         let mut request = self.http.request(reqwest::Method::PUT, url);
         request = request.form(&body);
         let response = request.send()?;
@@ -274,7 +292,10 @@ impl Client {
         id: String,
         cookies: DeleteWidgetCookies,
     ) -> Result<DeleteWidgetResponse, ClientError> {
-        let url = format!("{}/widgets/{}", self.base_url, id);
+        let url = format!(
+            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(& id
+            .to_string(), PATH_PARAM_ENCODE_SET)
+        );
         let mut request = self.http.request(reqwest::Method::DELETE, url);
         let cookie_pairs: Vec<String> = [Some(format!("session={}", cookies.session))]
             .into_iter()
@@ -296,7 +317,10 @@ impl Client {
         id: String,
         body: String,
     ) -> Result<AddNoteResponse, ClientError> {
-        let url = format!("{}/widgets/{}/notes", self.base_url, id);
+        let url = format!(
+            "{}/widgets/{}/notes", self.base_url, percent_encoding::utf8_percent_encode(&
+            id.to_string(), PATH_PARAM_ENCODE_SET)
+        );
         let mut request = self.http.request(reqwest::Method::POST, url);
         request = request.header(reqwest::header::CONTENT_TYPE, "text/plain").body(body);
         let response = request.send()?;

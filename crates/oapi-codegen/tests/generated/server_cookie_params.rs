@@ -55,6 +55,7 @@ pub trait Api: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<Output = GetWidgetsResponse> + Send;
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetWidgetsResponse {
     /// The widgets.
     Ok,

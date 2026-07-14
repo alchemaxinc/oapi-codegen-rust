@@ -26,6 +26,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// Create a widget.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CreateWidgetResponse {
     /// The widget was created.
     Created(Widget),
@@ -59,6 +60,7 @@ impl axum::response::IntoResponse for CreateWidgetResponse {
 }
 
 /// Fetch a widget as free-form JSON.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetWidgetRawResponse {
     /// An opaque widget document.
     Ok(serde_json::Value),

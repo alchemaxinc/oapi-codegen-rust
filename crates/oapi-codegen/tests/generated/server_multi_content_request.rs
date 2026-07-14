@@ -7,6 +7,7 @@ pub struct Widget {
     pub weight: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum CreateWidgetRequestBody {
     Json(Widget),
     Form(Widget),
@@ -88,6 +89,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// Create a widget from JSON, form, or plain-text input.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CreateWidgetResponse {
     /// The widget was created.
     Created,

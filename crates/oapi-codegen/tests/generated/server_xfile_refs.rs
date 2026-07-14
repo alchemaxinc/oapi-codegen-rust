@@ -22,6 +22,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// List things.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ListThingsResponse {
     /// ok
     Ok,
@@ -44,6 +45,7 @@ impl axum::response::IntoResponse for ListThingsResponse {
 }
 
 /// Create a thing.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CreateThingResponse {
     /// created
     Created,

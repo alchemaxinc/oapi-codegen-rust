@@ -220,6 +220,7 @@ fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream
     let doc = doc_attr(&operation.doc);
     let enum_def = quote! {
         #doc
+        #[derive(Debug, Clone, PartialEq)]
         pub enum #name {
             #(#variants),*
         }

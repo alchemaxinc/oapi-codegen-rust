@@ -188,13 +188,6 @@ impl RustType {
         return RustType::Option(Box::new(self));
     }
 
-    /// Whether this type already has a `None`/empty representation and so does
-    /// not need an `Option<..>` wrapper to express absence (`Vec`, `Map`).
-    pub fn is_nullable_container(&self) -> bool {
-        let nullable = matches!(self, RustType::Vec(_) | RustType::Map(_));
-        return nullable;
-    }
-
     /// Whether this type is an `Option<..>` (for which `skip_serializing_if =
     /// "Option::is_none"` is valid).
     pub fn is_option(&self) -> bool {

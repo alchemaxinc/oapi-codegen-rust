@@ -75,6 +75,9 @@ mod generated {
     pub mod string_formats {
         include!("generated/string_formats.rs");
     }
+    pub mod type_name_collisions {
+        include!("generated/type_name_collisions.rs");
+    }
     pub mod server_petstore {
         include!("generated/server_petstore.rs");
     }

@@ -33,6 +33,7 @@ axum = { version = "0.8.9", features = ["multipart"] }
 axum-extra = { version = "0.12.6", features = ["query", "cookie"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 openapiv3 = "2.2.0"
+percent-encoding = "2.3.2"
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "multipart"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"

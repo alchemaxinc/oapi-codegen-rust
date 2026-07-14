@@ -15,6 +15,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// Fetch a single pet by id.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetPetResponse {
     /// The requested pet.
     Ok(Pet),

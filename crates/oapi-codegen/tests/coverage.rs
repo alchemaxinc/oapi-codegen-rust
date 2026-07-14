@@ -308,6 +308,12 @@ const TEST_TABLE: &[Feature] = &[
         status: Status::Ignored,
         fixture: None,
     },
+    // Naming
+    Feature {
+        element: "naming.type-collisions",
+        status: Status::Supported,
+        fixture: Some("type_name_collisions"),
+    },
     // Document-level (server/client generation). The axum server generator now
     // covers a slice of paths/parameters/requestBody/responses; the blocking
     // reqwest client generator additionally covers securitySchemes. Those slices
@@ -524,6 +530,7 @@ generated_tests!(
     ref_local,
     string_enum,
     string_formats,
+    type_name_collisions,
 );
 
 /// The generated `#[test]`s must cover exactly the supported fixtures, so a new
@@ -848,6 +855,25 @@ fn server_urls_emit_in_models_only_mode() {
     assert!(
         generated.contains("pub fn sandbox("),
         "`x-rust-name` overrides the derived server identifier",
+    );
+}
+
+/// `embedded-spec` is not implemented; the library `generate()` must reject it
+/// rather than silently ignore the flag (as the CLI already does).
+#[test]
+fn embedded_spec_is_rejected() {
+    let config = oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            models: true,
+            embedded_spec: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let result = oapi_codegen::generate(&server_urls_fixture(), &config);
+    assert!(
+        matches!(result, Err(oapi_codegen::Error::Unimplemented(mode)) if mode == "embedded-spec"),
+        "generate() must reject the unimplemented `embedded-spec` flag",
     );
 }
 

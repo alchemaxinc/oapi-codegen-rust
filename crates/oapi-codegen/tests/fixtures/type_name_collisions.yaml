@@ -1,0 +1,41 @@
+openapi: 3.0.3
+info:
+  title: Type name collisions
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # Two distinct schema names that collapse onto the same Rust identifier
+    # (`OrderItem`). The first in document order keeps the base name; the second
+    # gains a numeric suffix (`OrderItem2`).
+    order-item:
+      type: object
+      properties:
+        sku:
+          type: string
+    orderItem:
+      type: object
+      properties:
+        quantity:
+          type: integer
+    # A reference to the *second* colliding schema, proving references resolve to
+    # the de-conflicted identifier rather than the base name.
+    cart:
+      type: object
+      properties:
+        item:
+          $ref: "#/components/schemas/orderItem"
+    # A `oneOf` whose members reference both colliding schemas, exercising union
+    # variant de-confliction (and variant-type resolution).
+    reference:
+      oneOf:
+        - $ref: "#/components/schemas/order-item"
+        - $ref: "#/components/schemas/orderItem"
+    # A string enum whose values collapse onto the same variant identifier
+    # (`InProgress`); the wire values are preserved via `#[serde(rename)]`.
+    stage:
+      type: string
+      enum:
+        - in-progress
+        - in_progress
+        - done

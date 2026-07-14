@@ -744,6 +744,7 @@ dependencies = [
  "http",
  "indexmap",
  "openapiv3",
+ "percent-encoding",
  "prettyplease",
  "proc-macro2",
  "quote",

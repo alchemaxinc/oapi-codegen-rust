@@ -53,24 +53,28 @@ impl From<reqwest::Error> for ClientError {
 }
 
 /// Fetch the caller's profile, authenticated by the global bearer scheme.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetProfileResponse {
     /// The caller's profile.
     Ok(Message),
 }
 
 /// Fetch a public resource that requires no authentication.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetPublicResponse {
     /// The public resource.
     Ok(Message),
 }
 
 /// Fetch an admin resource, authenticated by HTTP basic auth.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetAdminResponse {
     /// The admin resource.
     Ok(Message),
 }
 
 /// Fetch reports, authenticated by an API key header.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetReportsResponse {
     /// The reports.
     Ok(Message),
@@ -82,12 +86,14 @@ pub struct SearchQuery {
 }
 
 /// Search, authenticated by an API key query parameter.
+#[derive(Debug, Clone, PartialEq)]
 pub enum SearchResponse {
     /// The search results.
     Ok(Message),
 }
 
 /// Fetch session data, authenticated by an API key cookie.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetSessionResponse {
     /// The session data.
     Ok(Message),
@@ -97,7 +103,7 @@ pub enum GetSessionResponse {
 ///
 /// `base_url` is used as a prefix for every request path and should not
 /// carry a trailing slash (e.g. `https://api.example.com`).
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Client {
     base_url: String,
     http: reqwest::blocking::Client,

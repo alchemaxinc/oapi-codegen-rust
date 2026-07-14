@@ -22,6 +22,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// List pets, with a default and a range error response.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ListPetsResponse {
     /// The full list of pets.
     Ok(Pet),
@@ -54,6 +55,7 @@ impl axum::response::IntoResponse for ListPetsResponse {
 }
 
 /// Delete a pet, with bodyless default and range responses.
+#[derive(Debug, Clone, PartialEq)]
 pub enum DeletePetResponse {
     /// The pet was deleted.
     NoContent,

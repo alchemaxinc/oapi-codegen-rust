@@ -20,6 +20,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// List things.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ListThingsResponse {
     /// The things.
     Ok(Thing),

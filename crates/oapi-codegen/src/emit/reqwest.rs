@@ -1,9 +1,10 @@
 //! Emitting the blocking `reqwest` client as token streams.
 //!
-//! The client is self-contained: it depends only on `reqwest` (blocking), serde
-//! and the generated (or import-mapped) model types — never on axum. It reuses
-//! the same [`Service`] IR the axum server emitter consumes, so the two stay in
-//! lock-step through the shared operation-naming helpers.
+//! The client is self-contained: it depends only on `reqwest` (blocking), serde,
+//! `percent-encoding` (to escape path parameters) and the generated (or
+//! import-mapped) model types — never on axum. It reuses the same [`Service`] IR
+//! the axum server emitter consumes, so the two stay in lock-step through the
+//! shared operation-naming helpers.
 
 use proc_macro2::Literal;
 use proc_macro2::TokenStream;
@@ -78,6 +79,13 @@ fn client_items(service: &Service) -> Result<Vec<TokenStream>> {
     }
 
     let mut items = vec![client_error()];
+    if service
+        .operations
+        .iter()
+        .any(|operation| return !operation.path_params.is_empty())
+    {
+        items.push(path_param_encode_set());
+    }
     for operation in &service.operations {
         if let Some(query) = &operation.query {
             items.push(emit_struct(query)?);
@@ -161,6 +169,21 @@ fn client_error() -> TokenStream {
     };
 }
 
+/// Emit the module-level `AsciiSet` used to percent-encode path parameters.
+///
+/// Every character outside the RFC 3986 unreserved set (`A-Za-z0-9-._~`) is
+/// encoded so a parameter value containing `/`, `?`, `#`, `%` or whitespace can
+/// never break out of its URL path segment.
+fn path_param_encode_set() -> TokenStream {
+    return quote! {
+        const PATH_PARAM_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+            .remove(b'-')
+            .remove(b'.')
+            .remove(b'_')
+            .remove(b'~');
+    };
+}
+
 /// Emit the `Client` struct holding the base URL, blocking `reqwest` client, and
 /// one optional credential field per configured security scheme.
 fn client_struct(schemes: &[SecurityScheme]) -> TokenStream {
@@ -170,7 +193,7 @@ fn client_struct(schemes: &[SecurityScheme]) -> TokenStream {
         ///
         /// `base_url` is used as a prefix for every request path and should not
         /// carry a trailing slash (e.g. `https://api.example.com`).
-        #[derive(Clone)]
+        #[derive(Debug, Clone)]
         pub struct Client {
             base_url: String,
             http: reqwest::blocking::Client,
@@ -243,6 +266,7 @@ fn emit_response_enum(operation: &Operation) -> Result<TokenStream> {
     }
     return Ok(quote! {
         #doc
+        #[derive(Debug, Clone, PartialEq)]
         pub enum #name {
             #(#variants),*
         }
@@ -463,7 +487,9 @@ fn url_expr(operation: &Operation) -> TokenStream {
         rest = &rest[after..];
         if let Some(param) = params.next() {
             let name = param.name.to_token();
-            args.push(quote! { #name });
+            args.push(quote! {
+                percent_encoding::utf8_percent_encode(&#name.to_string(), PATH_PARAM_ENCODE_SET)
+            });
         }
     }
     literal.push_str(rest);

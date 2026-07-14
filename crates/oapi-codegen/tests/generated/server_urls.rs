@@ -51,14 +51,14 @@ pub const SERVER_URL_PRODUCTION: &str = "https://api.example.com/v1";
 
 /// Regional
 pub fn server_url_regional(
-    base_path: &str,
-    port: ServerUrlRegionalPort,
     tenant: &str,
+    port: ServerUrlRegionalPort,
+    base_path: &str,
 ) -> Result<String, String> {
     let mut url = String::from("https://{tenant}.example.com:{port}/{basePath}");
-    url = url.replace("{basePath}", base_path);
-    url = url.replace("{port}", port.as_str());
     url = url.replace("{tenant}", tenant);
+    url = url.replace("{port}", port.as_str());
+    url = url.replace("{basePath}", base_path);
     if url.contains('{') || url.contains('}') {
         return Err(
             format!("server URL still contains an unresolved placeholder: {url}"),
@@ -86,6 +86,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// Liveness probe.
+#[derive(Debug, Clone, PartialEq)]
 pub enum PingResponse {
     /// The service is reachable.
     NoContent,

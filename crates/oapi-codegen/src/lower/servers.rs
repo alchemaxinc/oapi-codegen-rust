@@ -10,6 +10,7 @@
 //! matching variable (emitted as free-form `&str` parameters).
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use openapiv3::Server;
 use openapiv3::ServerVariable;
@@ -26,7 +27,7 @@ use crate::ir::ServerUrlParamType;
 use crate::ir::ServerUrls;
 use crate::loader::Spec;
 use crate::naming::Case;
-use crate::naming::RustIdent;
+use crate::naming::deconflict_ident;
 use crate::naming::to_ident;
 
 /// The `x-rust-name` extension: override a server's generated identifier.
@@ -80,7 +81,6 @@ fn lower_server(server: &Server, seed: &str, enums: &mut Vec<ServerUrlEnum>) -> 
             ty,
         });
     }
-    params.sort_by(|a, b| return a.placeholder.cmp(&b.placeholder));
     return Ok(ServerUrl::Builder(ServerUrlBuilder {
         name: to_ident(seed, Case::Snake),
         doc,
@@ -120,7 +120,7 @@ fn build_enum(
     placeholder: &str,
     variable: &ServerVariable,
 ) -> Result<ServerUrlEnum> {
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut seen: HashSet<String> = HashSet::new();
     let mut variants = Vec::with_capacity(variable.enumeration.len());
     let mut default = None;
     for value in &variable.enumeration {
@@ -191,18 +191,6 @@ fn deconflict(seed: String, used: &mut HashMap<String, usize>) -> String {
         return seed;
     }
     return format!("{seed} {count}");
-}
-
-/// Ensure an enum variant identifier is unique, appending a numeric suffix on
-/// collision (so `foo` and `Foo` become `Foo` and `Foo2`).
-fn deconflict_ident(ident: RustIdent, seen: &mut HashMap<String, usize>) -> RustIdent {
-    let key = ident.logical().to_owned();
-    let count = seen.entry(key.clone()).or_insert(0);
-    *count += 1;
-    if *count == 1 {
-        return ident;
-    }
-    return to_ident(&format!("{key} {count}"), Case::Pascal);
 }
 
 /// Extract the `{placeholder}` names from a URL, in order and de-duplicated.
@@ -327,8 +315,8 @@ mod tests {
                 let names: Vec<&str> = builder.params.iter().map(|p| return p.placeholder.as_str()).collect();
                 assert_eq!(
                     names,
-                    vec!["basePath", "tenant"],
-                    "unused var skipped, placeholders sorted"
+                    vec!["tenant", "basePath"],
+                    "unused var skipped, placeholders in template-appearance order"
                 );
                 assert!(
                     builder
