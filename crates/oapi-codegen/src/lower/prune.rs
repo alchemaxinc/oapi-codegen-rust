@@ -32,9 +32,7 @@ pub fn prune_unused_models(module: &mut Module, service: &Service) {
     let mut reachable: BTreeSet<String> = BTreeSet::new();
     let mut worklist: Vec<String> = Vec::new();
 
-    let mut roots = Vec::new();
-    collect_service_refs(service, &mut roots);
-    for name in roots {
+    for name in service_refs(service) {
         if reachable.insert(name.clone()) {
             worklist.push(name);
         }
@@ -46,9 +44,7 @@ pub fn prune_unused_models(module: &mut Module, service: &Service) {
         let Some(item) = index.get(name.as_str()) else {
             continue;
         };
-        let mut refs = Vec::new();
-        collect_item_refs(item, &mut refs);
-        for referenced in refs {
+        for referenced in item_refs(item) {
             if reachable.insert(referenced.clone()) {
                 worklist.push(referenced);
             }
@@ -64,41 +60,42 @@ fn canonical(name: &str) -> String {
     return to_ident(name, Case::Pascal).logical().to_owned();
 }
 
-/// Record every named-type reference within `ty` (recursing through containers).
-fn collect_named(ty: &RustType, out: &mut Vec<String>) {
-    match ty {
-        RustType::Named(name) => out.push(canonical(name)),
-        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) => {
-            collect_named(inner, out);
-        }
-        _ => {}
-    }
+/// The named type a `ty` references, if any (recursing through containers).
+///
+/// A `RustType` names at most one component model: containers (`Vec`, `Map`,
+/// `Option`) wrap a single inner type, and every other variant is either a
+/// leaf `Named` or carries no model reference.
+fn named_ref(ty: &RustType) -> Option<String> {
+    return match ty {
+        RustType::Named(name) => Some(canonical(name)),
+        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) => named_ref(inner),
+        _ => None,
+    };
 }
 
-/// Record the named types a module item refers to (its fields/variants/alias).
-fn collect_item_refs(item: &Item, out: &mut Vec<String>) {
-    match item {
-        Item::Struct(strukt) => collect_struct_refs(strukt, out),
+/// The named types a module item refers to (its fields/variants/alias).
+fn item_refs(item: &Item) -> Vec<String> {
+    return match item {
+        Item::Struct(s) => struct_refs(s),
         Item::Enum(enumeration) => match &enumeration.kind {
-            EnumKind::Strings(_) => {}
-            EnumKind::Union(variants) => {
-                for variant in variants {
-                    collect_named(&variant.ty, out);
-                }
-            }
+            EnumKind::Strings(_) => Vec::new(),
+            EnumKind::Union(variants) => variants
+                .iter()
+                .filter_map(|variant| return named_ref(&variant.ty))
+                .collect(),
         },
-        Item::Alias(alias) => collect_named(&alias.ty, out),
-    }
+        Item::Alias(alias) => named_ref(&alias.ty).into_iter().collect(),
+    };
 }
 
-/// Record the named types a struct's fields and `additionalProperties` refer to.
-fn collect_struct_refs(strukt: &Struct, out: &mut Vec<String>) {
-    for field in &strukt.fields {
-        collect_named(&field.ty, out);
-    }
-    if let Some(additional) = &strukt.additional_properties {
-        collect_named(additional, out);
-    }
+/// The named types a struct's fields and `additionalProperties` refer to.
+fn struct_refs(s: &Struct) -> Vec<String> {
+    return s
+        .fields
+        .iter()
+        .filter_map(|field| return named_ref(&field.ty))
+        .chain(s.additional_properties.as_ref().and_then(named_ref))
+        .collect();
 }
 
 /// Whether the service directly references any named component model.
@@ -107,58 +104,58 @@ fn collect_struct_refs(strukt: &Struct, out: &mut Vec<String>) {
 /// needs `use super::*;` to bring the root-level models into scope — but only if
 /// it actually references one, since an unused glob import fails `-D warnings`.
 pub fn references_models(service: &Service) -> bool {
-    let mut refs = Vec::new();
-    collect_service_refs(service, &mut refs);
-    return !refs.is_empty();
+    return !service_refs(service).is_empty();
 }
 
-/// Record every named type the service's operations reference directly.
-fn collect_service_refs(service: &Service, out: &mut Vec<String>) {
+/// Every named type the service's operations reference directly.
+fn service_refs(service: &Service) -> Vec<String> {
+    let mut refs = Vec::new();
     for operation in &service.operations {
         for param in &operation.path_params {
-            collect_named(&param.ty, out);
+            refs.extend(named_ref(&param.ty));
         }
         if let Some(query) = &operation.query {
-            collect_struct_refs(query, out);
+            refs.extend(struct_refs(query));
         }
         if let Some(headers) = &operation.headers {
             for param in &headers.params {
-                collect_named(&param.ty, out);
+                refs.extend(named_ref(&param.ty));
             }
         }
         if let Some(cookies) = &operation.cookies {
             for param in &cookies.params {
-                collect_named(&param.ty, out);
+                refs.extend(named_ref(&param.ty));
             }
         }
         if let Some(request) = &operation.request {
             match request {
-                RequestPayload::Single(body) => collect_named(&body.ty, out),
+                RequestPayload::Single(body) => refs.extend(named_ref(&body.ty)),
                 RequestPayload::Multipart(multipart) => {
                     for field in &multipart.fields {
-                        collect_named(&field.ty, out);
+                        refs.extend(named_ref(&field.ty));
                     }
                 }
                 RequestPayload::Negotiated(negotiated) => {
                     for variant in &negotiated.variants {
-                        collect_named(&variant.body.ty, out);
+                        refs.extend(named_ref(&variant.body.ty));
                     }
                 }
             }
         }
         for response in &operation.responses {
             match &response.body {
-                Some(ResponseBody::Single(body)) => collect_named(&body.ty, out),
+                Some(ResponseBody::Single(body)) => refs.extend(named_ref(&body.ty)),
                 Some(ResponseBody::Negotiated(negotiated)) => {
                     for variant in &negotiated.variants {
-                        collect_named(&variant.body.ty, out);
+                        refs.extend(named_ref(&variant.body.ty));
                     }
                 }
                 None => {}
             }
             for header in &response.headers {
-                collect_named(&header.ty, out);
+                refs.extend(named_ref(&header.ty));
             }
         }
     }
+    return refs;
 }
