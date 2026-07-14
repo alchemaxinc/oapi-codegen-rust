@@ -103,7 +103,7 @@ fn struct_refs(s: &Struct) -> Vec<String> {
 /// When both the server and client are emitted into submodules, each submodule
 /// needs `use super::*;` to bring the root-level models into scope — but only if
 /// it actually references one, since an unused glob import fails `-D warnings`.
-pub fn references_models(service: &Service) -> bool {
+pub(crate) fn references_models(service: &Service) -> bool {
     return !service_refs(service).is_empty();
 }
 
