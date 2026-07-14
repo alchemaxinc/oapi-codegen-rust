@@ -141,6 +141,7 @@ pub trait Api: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<Output = UploadResponse> + Send;
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum UploadResponse {
     /// The file was stored.
     NoContent,

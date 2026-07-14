@@ -19,6 +19,7 @@ pub trait Api: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<Output = LoginResponse> + Send;
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum LoginResponse {
     /// The issued session, form-encoded.
     Ok(Session),

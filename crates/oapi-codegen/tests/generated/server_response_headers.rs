@@ -9,6 +9,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// List widgets with rate-limit headers.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetWidgetsResponse {
     /// The widgets.
     Ok {

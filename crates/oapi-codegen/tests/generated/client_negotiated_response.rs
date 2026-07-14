@@ -52,11 +52,13 @@ impl From<reqwest::Error> for ClientError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetReportResponseOkBody {
     Json(Report),
     Text(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetReportResponse {
     /// A report as JSON or text.
     Ok(GetReportResponseOkBody),
@@ -66,7 +68,7 @@ pub enum GetReportResponse {
 ///
 /// `base_url` is used as a prefix for every request path and should not
 /// carry a trailing slash (e.g. `https://api.example.com`).
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Client {
     base_url: String,
     http: reqwest::blocking::Client,

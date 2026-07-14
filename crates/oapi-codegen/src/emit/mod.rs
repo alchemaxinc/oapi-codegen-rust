@@ -208,6 +208,7 @@ pub(crate) fn emit_negotiated_body_enum(body: &NegotiatedBody) -> Result<TokenSt
         variants.push(quote! { #ident(#ty) });
     }
     return Ok(quote! {
+        #[derive(Debug, Clone, PartialEq)]
         pub enum #name {
             #(#variants),*
         }

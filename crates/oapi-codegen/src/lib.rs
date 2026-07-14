@@ -29,6 +29,9 @@ use crate::loader::Spec;
 /// server interface is appended when `generate.std-http-server` is set; the
 /// blocking `reqwest` client is appended when `generate.client` is set.
 pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
+    if config.generate.embedded_spec {
+        return Err(Error::Unimplemented("embedded-spec".to_owned()));
+    }
     let mut spec = Spec::load(spec_path)?;
     spec.apply_filters(&config.output_options);
     let want_server = config.generate.std_http_server;

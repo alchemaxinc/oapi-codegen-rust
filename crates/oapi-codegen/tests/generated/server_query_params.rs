@@ -34,6 +34,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// List books, filtered by query parameters.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ListBooksResponse {
     /// The matching books.
     Ok(Vec<Book>),

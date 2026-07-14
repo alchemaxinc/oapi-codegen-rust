@@ -42,6 +42,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// List all pets.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ListPetsResponse {
     /// The full list of pets.
     Ok(Vec<Pet>),
@@ -64,6 +65,7 @@ impl axum::response::IntoResponse for ListPetsResponse {
 }
 
 /// Register a new pet.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CreatePetResponse {
     /// The pet was created.
     Created(Pet),
@@ -97,6 +99,7 @@ impl axum::response::IntoResponse for CreatePetResponse {
 }
 
 /// Fetch a single pet by id.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetPetResponse {
     /// The requested pet.
     Ok(Pet),
@@ -130,6 +133,7 @@ impl axum::response::IntoResponse for GetPetResponse {
 }
 
 /// Remove a pet by id.
+#[derive(Debug, Clone, PartialEq)]
 pub enum DeletePetResponse {
     /// The pet was removed.
     NoContent,

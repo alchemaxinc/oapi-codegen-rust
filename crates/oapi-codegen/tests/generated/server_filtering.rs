@@ -19,6 +19,7 @@ pub trait Api: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<Output = HealthCheckResponse> + Send;
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum ListPetsResponse {
     /// ok
     Ok(Pet),
@@ -40,6 +41,7 @@ impl axum::response::IntoResponse for ListPetsResponse {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetStatsResponse {
     /// ok
     Ok(Stats),
@@ -61,6 +63,7 @@ impl axum::response::IntoResponse for GetStatsResponse {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum HealthCheckResponse {
     /// ok
     Ok,

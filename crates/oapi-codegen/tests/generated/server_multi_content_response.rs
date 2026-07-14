@@ -7,16 +7,19 @@ pub struct Report {
     pub lines: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetReportResponseOkBody {
     Json(Report),
     Text(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExportReportResponseDefaultBody {
     Json(Report),
     Text(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetSummaryResponseOkBody {
     Json(Report),
     Text(String),
@@ -37,6 +40,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// Fetch the report as JSON or plain text (handler chooses).
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetReportResponse {
     /// The report, as JSON or plain text.
     Ok(GetReportResponseOkBody),
@@ -64,6 +68,7 @@ impl axum::response::IntoResponse for GetReportResponse {
 }
 
 /// Export the report; the handler also sets the status code.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExportReportResponse {
     /// The report, as JSON or plain text.
     Default(axum::http::StatusCode, ExportReportResponseDefaultBody),
@@ -87,6 +92,7 @@ impl axum::response::IntoResponse for ExportReportResponse {
 }
 
 /// Fetch the summary as JSON or plain text, with a header.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetSummaryResponse {
     /// The summary, as JSON or plain text.
     Ok { body: GetSummaryResponseOkBody, x_report_id: Option<String> },

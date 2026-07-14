@@ -54,6 +54,7 @@ pub struct UploadMultipart {
     pub attempts: i64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum UploadResponse {
     /// Stored.
     NoContent,
@@ -63,7 +64,7 @@ pub enum UploadResponse {
 ///
 /// `base_url` is used as a prefix for every request path and should not
 /// carry a trailing slash (e.g. `https://api.example.com`).
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Client {
     base_url: String,
     http: reqwest::blocking::Client,

@@ -146,6 +146,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// List widgets using typed request headers.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetWidgetsResponse {
     /// The matching widgets.
     Ok,

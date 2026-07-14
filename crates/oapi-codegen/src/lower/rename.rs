@@ -1,13 +1,17 @@
-//! Applying `x-rust-name` type renames across the lowered IR.
+//! Resolving top-level type names across the lowered IR.
 //!
-//! A top-level schema may override its generated type name with `x-rust-name`.
-//! Because every reference to that schema lowers to a [`RustType::Named`] holding
-//! the original schema name, renaming the type also requires rewriting those
-//! references so they resolve to the new identifier. The item names themselves
-//! are set to the override during lowering (see [`crate::lower::schema`]); this
-//! pass only rewrites the `Named` references left pointing at the old name.
+//! A generated type name can diverge from the naive `to_ident(schema_name)` for
+//! two reasons: an explicit `x-rust-name` override, or collision de-confliction
+//! when distinct schema names collapse onto the same Rust identifier. Because
+//! every reference to a schema lowers to a [`RustType::Named`] holding the
+//! original schema name, resolving the type also requires rewriting those
+//! references so they point at the final identifier. The item names themselves
+//! are set from the same resolution map during lowering (see
+//! [`crate::lower::schema`]); this pass only rewrites the `Named` references
+//! left pointing at the original name.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use openapiv3::ReferenceOr;
 
@@ -19,29 +23,43 @@ use crate::ir::ResponseBody;
 use crate::ir::RustType;
 use crate::ir::Service;
 use crate::loader::Spec;
+use crate::naming::Case;
+use crate::naming::deconflict_ident;
+use crate::naming::to_ident;
 
 /// The `x-rust-name` extension: override a generated type or field identifier.
 const X_RUST_NAME: &str = "x-rust-name";
 
-/// Map of original schema name to its `x-rust-name` override, for every
-/// top-level schema that declares one. Only inline schemas can carry the
-/// extension, so `$ref` aliases are skipped.
+/// Map of original schema name to the final Rust type identifier that references
+/// to it must resolve to, for every top-level schema whose emitted name differs
+/// from the naive `to_ident(name)`. Two sources contribute an entry:
+///
+/// * an `x-rust-name` override (inline schemas only), and
+/// * collision de-confliction, when distinct schema names collapse onto the same
+///   Rust identifier (e.g. `foo-bar` and `fooBar` both becoming `FooBar`) — the
+///   later schema in document order gains a numeric suffix (`FooBar2`).
+///
+/// Schemas whose emitted name is unchanged are omitted, so the common case
+/// yields an empty map and reference rewriting is skipped entirely.
 pub fn type_renames(spec: &Spec) -> HashMap<String, String> {
-    let mut renames = HashMap::new();
+    let mut resolved = HashMap::new();
+    let mut seen = HashSet::new();
     for (name, entry) in spec.schemas() {
-        let ReferenceOr::Item(schema) = entry else {
-            continue;
+        let effective = match entry {
+            ReferenceOr::Item(schema) => schema
+                .schema_data
+                .extensions
+                .get(X_RUST_NAME)
+                .and_then(|value| return value.as_str())
+                .unwrap_or(name),
+            ReferenceOr::Reference { .. } => name.as_str(),
         };
-        if let Some(custom) = schema
-            .schema_data
-            .extensions
-            .get(X_RUST_NAME)
-            .and_then(|value| return value.as_str())
-        {
-            renames.insert(name.clone(), custom.to_owned());
+        let ident = deconflict_ident(to_ident(effective, Case::Pascal), &mut seen);
+        if ident.logical() != to_ident(name, Case::Pascal).logical() {
+            resolved.insert(name.clone(), ident.logical().to_owned());
         }
     }
-    return renames;
+    return resolved;
 }
 
 /// Rewrite every `Named` reference in `module`'s items to honour `renames`.

@@ -52,6 +52,7 @@ impl From<reqwest::Error> for ClientError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetFormResponse {
     /// A form-encoded body.
     Ok(Form),
@@ -61,7 +62,7 @@ pub enum GetFormResponse {
 ///
 /// `base_url` is used as a prefix for every request path and should not
 /// carry a trailing slash (e.g. `https://api.example.com`).
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Client {
     base_url: String,
     http: reqwest::blocking::Client,

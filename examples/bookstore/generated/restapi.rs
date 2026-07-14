@@ -180,6 +180,7 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum SubmitReviewRequestBody {
     Json(crate::apimodel::catalog::NewReview),
     Form(crate::apimodel::catalog::NewReview),
@@ -240,6 +241,7 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum SubmitReviewResponseCreatedBody {
     Json(crate::apimodel::catalog::Review),
     Text(String),
@@ -280,6 +282,7 @@ pub trait Api: Clone + Send + Sync + 'static {
 }
 
 /// List books, optionally filtered.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ListBooksResponse {
     /// The matching books.
     Ok(Vec<crate::apimodel::catalog::Book>),
@@ -302,6 +305,7 @@ impl axum::response::IntoResponse for ListBooksResponse {
 }
 
 /// Add a book to the catalog.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CreateBookResponse {
     /// The book was created.
     Created(crate::apimodel::catalog::Book),
@@ -346,6 +350,7 @@ impl axum::response::IntoResponse for CreateBookResponse {
 }
 
 /// Fetch a single book by id.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetBookResponse {
     /// The requested book.
     Ok(crate::apimodel::catalog::Book),
@@ -384,6 +389,7 @@ impl axum::response::IntoResponse for GetBookResponse {
 }
 
 /// Upload or replace a book's cover image.
+#[derive(Debug, Clone, PartialEq)]
 pub enum UploadBookCoverResponse {
     /// The cover image was stored.
     NoContent,
@@ -417,6 +423,7 @@ impl axum::response::IntoResponse for UploadBookCoverResponse {
 }
 
 /// Submit a review as JSON or a form; read it back as JSON or plain text.
+#[derive(Debug, Clone, PartialEq)]
 pub enum SubmitReviewResponse {
     /// The review was stored; returned as JSON or plain text.
     Created(SubmitReviewResponseCreatedBody),
@@ -457,6 +464,7 @@ impl axum::response::IntoResponse for SubmitReviewResponse {
 }
 
 /// Liveness probe returning a free-form document.
+#[derive(Debug, Clone, PartialEq)]
 pub enum GetHealthResponse {
     /// An opaque service-health document.
     Ok(serde_json::Value),

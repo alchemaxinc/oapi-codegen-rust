@@ -91,6 +91,29 @@ pub fn rename_for(wire: &str, ident: &RustIdent) -> Option<String> {
     return Some(wire.to_owned());
 }
 
+/// Ensure `ident` is unique among the identifiers already recorded in `seen`,
+/// appending the lowest free numeric suffix (`Foo`, `Foo2`, `Foo3`, ...) on
+/// collision. The chosen identifier is inserted into `seen`, which is keyed by
+/// logical identifier text (so `foo` and `Foo` are treated as distinct only
+/// when their cased forms differ).
+///
+/// Used to keep generated type names and enum variants unique when distinct
+/// OpenAPI names collapse onto the same Rust identifier (e.g. `foo-bar` and
+/// `fooBar` both becoming `FooBar`).
+pub fn deconflict_ident(ident: RustIdent, seen: &mut std::collections::HashSet<String>) -> RustIdent {
+    if seen.insert(ident.logical().to_owned()) {
+        return ident;
+    }
+    let mut suffix = 2;
+    loop {
+        let candidate = to_ident(&format!("{} {suffix}", ident.logical()), Case::Pascal);
+        if seen.insert(candidate.logical().to_owned()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
 /// How a candidate identifier string must be emitted to be valid Rust.
 enum IdentForm {
     /// Usable verbatim.
@@ -177,6 +200,22 @@ mod tests {
         let ident = to_ident("gen", Case::Snake);
         assert_eq!(ident.logical(), "gen");
         assert!(ident.raw, "`gen` should be a raw identifier under edition 2024");
+    }
+
+    #[test]
+    fn deconflict_ident_suffixes_collisions() {
+        let mut seen = std::collections::HashSet::new();
+        // Distinct OpenAPI names that collapse onto the same identifier gain the
+        // lowest free numeric suffix, in the order they are seen.
+        let first = deconflict_ident(to_ident("order-item", Case::Pascal), &mut seen);
+        let second = deconflict_ident(to_ident("orderItem", Case::Pascal), &mut seen);
+        let third = deconflict_ident(to_ident("Order_Item", Case::Pascal), &mut seen);
+        assert_eq!(first.logical(), "OrderItem");
+        assert_eq!(second.logical(), "OrderItem2");
+        assert_eq!(third.logical(), "OrderItem3");
+        // A distinct identifier is left untouched.
+        let other = deconflict_ident(to_ident("cart", Case::Pascal), &mut seen);
+        assert_eq!(other.logical(), "Cart");
     }
 
     #[test]

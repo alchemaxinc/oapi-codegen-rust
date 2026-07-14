@@ -8,6 +8,7 @@ pub trait Api: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<Output = EchoResponse> + Send;
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum EchoResponse {
     /// The echoed text.
     Ok(String),
