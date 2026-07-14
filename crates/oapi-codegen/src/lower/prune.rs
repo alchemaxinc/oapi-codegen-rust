@@ -101,6 +101,17 @@ fn collect_struct_refs(strukt: &Struct, out: &mut Vec<String>) {
     }
 }
 
+/// Whether the service directly references any named component model.
+///
+/// When both the server and client are emitted into submodules, each submodule
+/// needs `use super::*;` to bring the root-level models into scope — but only if
+/// it actually references one, since an unused glob import fails `-D warnings`.
+pub fn references_models(service: &Service) -> bool {
+    let mut refs = Vec::new();
+    collect_service_refs(service, &mut refs);
+    return !refs.is_empty();
+}
+
 /// Record every named type the service's operations reference directly.
 fn collect_service_refs(service: &Service, out: &mut Vec<String>) {
     for operation in &service.operations {

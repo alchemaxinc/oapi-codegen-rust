@@ -487,9 +487,12 @@ fn url_expr(operation: &Operation) -> TokenStream {
         rest = &rest[after..];
         if let Some(param) = params.next() {
             let name = param.name.to_token();
-            args.push(quote! {
-                percent_encoding::utf8_percent_encode(&#name.to_string(), PATH_PARAM_ENCODE_SET)
-            });
+            let encoded = if matches!(param.ty, RustType::String) {
+                quote! { percent_encoding::utf8_percent_encode(#name.as_str(), PATH_PARAM_ENCODE_SET) }
+            } else {
+                quote! { percent_encoding::utf8_percent_encode(&#name.to_string(), PATH_PARAM_ENCODE_SET) }
+            };
+            args.push(encoded);
         }
     }
     literal.push_str(rest);

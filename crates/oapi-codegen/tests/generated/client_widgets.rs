@@ -248,8 +248,8 @@ impl Client {
     /// Fetch a single widget by id.
     pub fn get_widget(&self, id: String) -> Result<GetWidgetResponse, ClientError> {
         let url = format!(
-            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(& id
-            .to_string(), PATH_PARAM_ENCODE_SET)
+            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(id
+            .as_str(), PATH_PARAM_ENCODE_SET)
         );
         let response = self.http.request(reqwest::Method::GET, url).send()?;
         let status = response.status();
@@ -273,8 +273,8 @@ impl Client {
         body: NewWidget,
     ) -> Result<ReplaceWidgetResponse, ClientError> {
         let url = format!(
-            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(& id
-            .to_string(), PATH_PARAM_ENCODE_SET)
+            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(id
+            .as_str(), PATH_PARAM_ENCODE_SET)
         );
         let mut request = self.http.request(reqwest::Method::PUT, url);
         request = request.form(&body);
@@ -293,8 +293,8 @@ impl Client {
         cookies: DeleteWidgetCookies,
     ) -> Result<DeleteWidgetResponse, ClientError> {
         let url = format!(
-            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(& id
-            .to_string(), PATH_PARAM_ENCODE_SET)
+            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(id
+            .as_str(), PATH_PARAM_ENCODE_SET)
         );
         let mut request = self.http.request(reqwest::Method::DELETE, url);
         let cookie_pairs: Vec<String> = [Some(format!("session={}", cookies.session))]
@@ -318,8 +318,8 @@ impl Client {
         body: String,
     ) -> Result<AddNoteResponse, ClientError> {
         let url = format!(
-            "{}/widgets/{}/notes", self.base_url, percent_encoding::utf8_percent_encode(&
-            id.to_string(), PATH_PARAM_ENCODE_SET)
+            "{}/widgets/{}/notes", self.base_url,
+            percent_encoding::utf8_percent_encode(id.as_str(), PATH_PARAM_ENCODE_SET)
         );
         let mut request = self.http.request(reqwest::Method::POST, url);
         request = request.header(reqwest::header::CONTENT_TYPE, "text/plain").body(body);
