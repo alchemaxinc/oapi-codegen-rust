@@ -6,6 +6,7 @@ members = ["crates/*", "examples/*"]
 version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/alchemaxinc/oapi-codegen-rust"
+license = "MIT"
 
 [workspace.lints.clippy]
 implicit_return = "deny"

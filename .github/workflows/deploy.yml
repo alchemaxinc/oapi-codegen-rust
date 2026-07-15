@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      publish_crate:
+        description: "Also publish to crates.io on this manual run (pushes to main always publish)"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +25,10 @@ jobs:
   semantic-release:
     name: Semantic Versioning and Release
     runs-on: ubuntu-latest
+    env:
+      # Pin cargo-edit so the version bump is reproducible; bump this to adopt a
+      # newer release. Used for both the cache key and the install below.
+      CARGO_EDIT_VERSION: "0.13.13"
     outputs:
       tag: ${{ steps.version-release.outputs.tag }}
 
@@ -39,41 +48,34 @@ jobs:
           shallow: false
           token: ${{ steps.app.outputs.token }}
 
+      - name: Read Rust toolchain version
+        id: rust-version
+        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-version.outputs.version }}
+
+      - name: Cache cargo-edit
+        id: cache-cargo-edit
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-set-version
+          key: cargo-edit-${{ runner.os }}-${{ env.CARGO_EDIT_VERSION }}
+
+      - name: Install cargo-edit
+        if: steps.cache-cargo-edit.outputs.cache-hit != 'true'
+        # `@semantic-release/exec` uses `cargo set-version` to bump the workspace
+        # version inside the release commit, so the tag carries the right version
+        # for both the built binaries and the published crate.
+        run: cargo install cargo-edit --locked --version "${CARGO_EDIT_VERSION}" --bin cargo-set-version
+
       - name: Version and release
         id: version-release
         uses: alchemaxinc/composite-toolbox/semantic-release@v1
         with:
           token: ${{ steps.app.outputs.token }}
-
-      - name: Check for Cargo.toml changes
-        id: check_changes
-        uses: alchemaxinc/composite-toolbox/check-changes@v1
-        with:
-          files: "Cargo.toml"
-
-      - name: Create Pull Request for version bump
-        id: open-pr
-        if: steps.check_changes.outputs.has_changes == 'true'
-        uses: alchemaxinc/composite-toolbox/create-pr@v1
-        with:
-          token: ${{ steps.app.outputs.token }}
-          base-branch: "main"
-          branch-prefix: "chore/auto/semantic-release"
-          files: "Cargo.toml"
-          commit-message: "chore(semantic-release): bump version in Cargo.toml"
-          pr-title: "chore: semantic release version bump"
-          pr-body: |
-            This PR updates the version in Cargo.toml after semantic-release created a new release.
-
-            This is an automated PR created by the semantic release workflow.
-
-      - name: Auto-merge Pull Request
-        if: steps.open-pr.outcome == 'success'
-        uses: alchemaxinc/composite-toolbox/merge-pr@v1
-        with:
-          token: ${{ steps.app.outputs.token }}
-          merge-method: "merge"
-          pull-request-number: ${{ steps.open-pr.outputs.pr_number }}
 
   build-and-upload:
     name: Build ${{ matrix.target }}
@@ -89,14 +91,14 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-latest
           - target: aarch64-apple-darwin
             runner: macos-latest
     env:
-      # Force ANSI colour in cargo/rustc output so GitHub Actions renders
-      # release-build logs in colour.
+      # Force ANSI color in cargo/rustc output so GitHub Actions renders
+      # release-build logs in color.
       CARGO_TERM_COLOR: always
-      # Incremental compilation is a net loss in CI: extra small files bloat
+      # Incremental compilation is a net loss in CI: tiny files bloat
       # the cache while CI never reuses incremental state across runs.
       CARGO_INCREMENTAL: "0"
       # Retry transient registry / network failures up to 10 times before
@@ -109,6 +111,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # The release commit (Cargo.toml/lock bump) is only reachable via the
+          # tag, not the push SHA that triggered this run.
+          ref: ${{ needs.semantic-release.outputs.tag }}
 
       - name: Read Rust toolchain version
         id: rust-version
@@ -127,7 +133,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build binary
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked -p oapi-codegen --bin oapi-codegen --target ${{ matrix.target }}
 
       - name: Rename binary and generate checksum
         run: |
@@ -149,7 +155,8 @@ jobs:
         run: |
           gh release upload "$TAG" \
             "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}" \
-            "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}.sha256"
+            "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}.sha256" \
+            --clobber
 
   publish:
     name: Publish release
@@ -164,3 +171,45 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           TAG: ${{ needs.semantic-release.outputs.tag }}
         run: gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false
+
+  publish-crate:
+    name: Publish to crates.io
+    needs: [semantic-release, publish]
+    if: >-
+      needs.semantic-release.outputs.tag != '' &&
+      (github.event_name == 'push' || inputs.publish_crate)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.semantic-release.outputs.tag }}
+
+      - name: Read Rust toolchain version
+        id: rust-version
+        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-version.outputs.version }}
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps --locked \
+            | jq -r '.packages[] | select(.name == "oapi-codegen") | .version')
+
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'User-Agent: oapi-codegen release pipeline (github.com/alchemaxinc/oapi-codegen-rust)' \
+            "https://crates.io/api/v1/crates/oapi-codegen/${version}")
+
+          if [ "$status" = "200" ]; then
+            echo "oapi-codegen ${version} is already on crates.io; skipping publish."
+            exit 0
+          fi
+
+          echo "Publishing oapi-codegen ${version} to crates.io."
+          cargo publish -p oapi-codegen --locked

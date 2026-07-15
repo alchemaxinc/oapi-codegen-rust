@@ -4,6 +4,7 @@ description = "Generate client and server boilerplate from OpenAPI 3 specificati
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "oapi-codegen"
