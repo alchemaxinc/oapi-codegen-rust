@@ -23,14 +23,14 @@ differs:
 
 ### Design decisions differences
 
-* `axum` only — no multi-framework generation.
-* One server mode: a typed `trait Api` (comparable to Go's strict server) — no unstructured handler variant.
-* Typed status-code response enums instead of response structs.
-* Token-based generation (`quote`/`syn`), not user-overridable `text/template`.
-* Blocking `reqwest` client — no async runtime forced on consumers.
-* Targets OpenAPI 3.0.
-* Reuses your `oapi-codegen` YAML config — unknown keys are ignored.
-* `x-rust-*` vendor extensions; Go keys rejected.
+- `axum` only — no multi-framework generation.
+- One server mode: a typed `trait Api` (comparable to Go's strict server) — no unstructured handler variant.
+- Typed status-code response enums instead of response structs.
+- Token-based generation (`quote`/`syn`), not user-overridable `text/template`.
+- Blocking `reqwest` client — no async runtime forced on consumers.
+- Targets OpenAPI 3.0.
+- Reuses your `oapi-codegen` YAML config — unknown keys are ignored.
+- `x-rust-*` vendor extensions; Go keys rejected.
 
 See [design decisions vs. Go](docs/design.md) for the rationale.
 
@@ -43,4 +43,3 @@ similar command-line interface and configuration options.
 - [Configuration](docs/configuration.md)
 - [OpenAPI extensions](docs/extensions.md)
 - [Design decisions vs. Go](docs/design.md)
-

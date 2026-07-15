@@ -18,35 +18,35 @@ Keys mirror [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen)'s
 YAML config; unknown keys are ignored, so an existing Go config can be reused
 as-is. Only the subset below is interpreted.
 
-| Key | Type | Purpose |
-| --- | --- | --- |
-| `package` | string | Target module name (informational). |
-| `output` | path | Output file path. |
-| `import-mapping` | map | Map referenced spec files to external Rust modules (multi-file specs). |
+| Key              | Type   | Purpose                                                                |
+| ---------------- | ------ | ---------------------------------------------------------------------- |
+| `package`        | string | Target module name (informational).                                    |
+| `output`         | path   | Output file path.                                                      |
+| `import-mapping` | map    | Map referenced spec files to external Rust modules (multi-file specs). |
 
 ### `generate`
 
-| Key | Purpose |
-| --- | --- |
-| `models` | Emit structs/enums from component schemas. |
-| `std-http-server` | Emit an axum server interface (`trait Api` + router). |
-| `client` | Emit a blocking `reqwest` client. |
-| `server-urls` | Emit constants/builders for the spec's `servers` URLs. |
-| `embedded-spec` | *Not implemented* — rejected if set. |
+| Key               | Purpose                                                |
+| ----------------- | ------------------------------------------------------ |
+| `models`          | Emit structs/enums from component schemas.             |
+| `std-http-server` | Emit an axum server interface (`trait Api` + router).  |
+| `client`          | Emit a blocking `reqwest` client.                      |
+| `server-urls`     | Emit constants/builders for the spec's `servers` URLs. |
+| `embedded-spec`   | _Not implemented_ — rejected if set.                   |
 
 Setting both `std-http-server` and `client` emits them into `server` / `client`
 submodules with shared models at the root.
 
 ### `output-options`
 
-| Key | Purpose |
-| --- | --- |
-| `skip-prune` | Keep schemas not referenced by any retained operation/schema. |
-| `include-tags` | Only generate operations with one of these tags. |
-| `exclude-tags` | Skip operations with any of these tags. |
-| `include-operation-ids` | Only generate these `operationId`s. |
-| `exclude-operation-ids` | Skip these `operationId`s. |
-| `exclude-schemas` | Drop these component schemas before lowering. |
+| Key                     | Purpose                                                       |
+| ----------------------- | ------------------------------------------------------------- |
+| `skip-prune`            | Keep schemas not referenced by any retained operation/schema. |
+| `include-tags`          | Only generate operations with one of these tags.              |
+| `exclude-tags`          | Skip operations with any of these tags.                       |
+| `include-operation-ids` | Only generate these `operationId`s.                           |
+| `exclude-operation-ids` | Skip these `operationId`s.                                    |
+| `exclude-schemas`       | Drop these component schemas before lowering.                 |
 
 ## Example
 
