@@ -10,7 +10,7 @@ concurrency:
 env:
   # Pinned Prettier version — kept in env so the install + cache key stay in
   # sync. Bump together with any prettier-config changes.
-  PRETTIER_VERSION: "3.3.3"
+  PRETTIER_VERSION: "3.9.5"
 
   # Pinned linker / test-runner versions for the manual installs below.
   # Pinning avoids surprise breakage from upstream releases and lets the
