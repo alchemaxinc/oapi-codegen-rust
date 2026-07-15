@@ -25,6 +25,11 @@ tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "net", "s
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "multipart"], optional = true }
 percent-encoding = { version = "2.3.2", optional = true }
 
+[dev-dependencies]
+# Used only by the e2e coverage guard (`tests/e2e_coverage.rs`) to parse
+# `openapi.yaml` and assert every operation has a registered e2e test.
+serde_yaml = "0.9.34+deprecated"
+
 [[bin]]
 name = "bookstore-server"
 path = "src/bin/server.rs"
