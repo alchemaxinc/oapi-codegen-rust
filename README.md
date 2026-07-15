@@ -3,6 +3,15 @@
 Generate idiomatic Rust API and Clients from OpenAPI 3 specifications, inspired by
 [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen).
 
+## Quickstart
+
+```sh
+cargo install oapi-codegen
+oapi-codegen --config cfg.yaml openapi.yaml
+```
+
+See [docs/](docs/) for installation, configuration, and extensions.
+
 ## Justification
 
 This project aims to fill a gap that does not seem to have an established solution in the Rust ecosystem: Generating API
@@ -14,12 +23,24 @@ differs:
 
 ### Design decisions differences
 
-* `axum` only, no generation for multiple web frameworks.
-* Typed status-code response enums (shared IR) instead of response structs.
-* Token-based generation, not text templates (Go uses `text/template`, we use a custom token-based approach).
-* `reqwest` client generation only, biased towards blocking for simplicity, no async runtime forced on consumers.
-* Vendor extensions keyed `x-rust-*`, and serde attributes, Go keys rejected.
+* `axum` only — no multi-framework generation.
+* One server mode: a typed `trait Api` (comparable to Go's strict server) — no unstructured handler variant.
+* Typed status-code response enums instead of response structs.
+* Token-based generation (`quote`/`syn`), not user-overridable `text/template`.
+* Blocking `reqwest` client — no async runtime forced on consumers.
+* Targets OpenAPI 3.0.
+* Reuses your `oapi-codegen` YAML config — unknown keys are ignored.
+* `x-rust-*` vendor extensions; Go keys rejected.
+
+See [design decisions vs. Go](docs/design.md) for the rationale.
 
 Otherwise, the project strives to be a faithful drop-in from the Go-based version in as idiomatic Rust as possible, with
 similar command-line interface and configuration options.
+
+## Documentation
+
+- [Installation](docs/installation.md)
+- [Configuration](docs/configuration.md)
+- [OpenAPI extensions](docs/extensions.md)
+- [Design decisions vs. Go](docs/design.md)
 
