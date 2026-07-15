@@ -95,10 +95,10 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-latest
     env:
-      # Force ANSI colour in cargo/rustc output so GitHub Actions renders
-      # release-build logs in colour.
+      # Force ANSI color in cargo/rustc output so GitHub Actions renders
+      # release-build logs in color.
       CARGO_TERM_COLOR: always
-      # Incremental compilation is a net loss in CI: extra small files bloat
+      # Incremental compilation is a net loss in CI: tiny files bloat
       # the cache while CI never reuses incremental state across runs.
       CARGO_INCREMENTAL: "0"
       # Retry transient registry / network failures up to 10 times before
@@ -175,10 +175,6 @@ jobs:
   publish-crate:
     name: Publish to crates.io
     needs: [semantic-release, publish]
-    # Pushes to main publish automatically. A manual re-run (workflow_dispatch)
-    # skips crates.io by default, so you can retry a release without hitting the
-    # immutable-version wall (a version can only be published once); tick
-    # `publish_crate` to publish from a manual run.
     if: >-
       needs.semantic-release.outputs.tag != '' &&
       (github.event_name == 'push' || inputs.publish_crate)
@@ -206,12 +202,6 @@ jobs:
           version=$(cargo metadata --format-version 1 --no-deps --locked \
             | jq -r '.packages[] | select(.name == "oapi-codegen") | .version')
 
-          # crates.io versions are immutable, so re-running a release must never
-          # try to republish an existing version. Ask crates.io whether this
-          # exact version already exists and skip if so, making the step
-          # idempotent (this mirrors how release-plz only publishes versions that
-          # aren't on the registry yet). Anything other than a definitive "200"
-          # falls through to `cargo publish`, which is the ultimate guard.
           status=$(curl -sS -o /dev/null -w '%{http_code}' \
             -H 'User-Agent: oapi-codegen release pipeline (github.com/alchemaxinc/oapi-codegen-rust)' \
             "https://crates.io/api/v1/crates/oapi-codegen/${version}")
