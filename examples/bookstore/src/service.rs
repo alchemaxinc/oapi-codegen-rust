@@ -28,7 +28,7 @@ use crate::restapi::UploadBookCoverMultipart;
 use crate::restapi::UploadBookCoverResponse;
 
 /// An in-memory bookstore backing the generated [`Api`] trait.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Service {
     books: Arc<Mutex<HashMap<String, Book>>>,
 }

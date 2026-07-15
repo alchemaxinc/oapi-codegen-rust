@@ -45,9 +45,9 @@ test-integration: ## Run integration tests
 
 .PHONY: test-e2e
 test-e2e: ## Run the Docker end-to-end test (generated server + client over HTTP)
-	docker compose \
-		-f crates/oapi-codegen/tests/integration/docker-compose.yml \
-		up --build --exit-code-from client --abort-on-container-exit
+	@compose="docker compose -f crates/oapi-codegen/tests/integration/docker-compose.yml"; \
+	trap 'code=$$?; $$compose down --remove-orphans --volumes; exit $$code' EXIT; \
+	$$compose up --build --exit-code-from client --abort-on-container-exit
 
 .PHONY: update-generated
 update-generated: ## Refresh generated files from the coverage fixtures
