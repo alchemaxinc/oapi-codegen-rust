@@ -37,7 +37,7 @@ const HEALTH_BACKOFF: Duration = Duration::from_millis(500);
 /// suite a no-op under a plain `cargo test` where no server is running.
 fn connected_client() -> Option<Client> {
     let base_url = match std::env::var(BASE_URL_ENV) {
-        Ok(base_url) => base_url,
+        Ok(base_url) => base_url.trim_end_matches('/').to_owned(),
         Err(_) => {
             return None;
         }
@@ -60,15 +60,19 @@ fn connected_client() -> Option<Client> {
 }
 
 /// A per-test unique idempotency key so tests never collide on the shared,
-/// stateful server instance.
+/// stateful server instance. Combines a timestamp with a monotonic counter so
+/// keys stay unique even when parallel tests read the same nanosecond or the
+/// clock lookup falls back.
 fn unique_key(prefix: &str) -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| {
             return elapsed.as_nanos();
         })
-        .unwrap_or_default();
-    return format!("{prefix}-{nanos}");
+        .unwrap_or(0);
+    return format!("{prefix}-{nanos}-{counter}");
 }
 
 /// Create a book on the server and return its id.
