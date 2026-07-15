@@ -1,11 +1,5 @@
 # Installation
 
-## Requirements
-
-- Rust 1.85+ (2024 edition) to build the generator.
-- The _generated_ code depends on the target crates you enable: `serde`, and
-  `axum` 0.8 (server) and/or `reqwest` 0.12 (client).
-
 ## Install
 
 ```sh
