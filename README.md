@@ -30,7 +30,7 @@ differ:
 - Blocking `reqwest` client — no async runtime forced on consumers.
 - Targets OpenAPI 3.0.
 - Reuses your `oapi-codegen` YAML config — unknown keys are ignored.
-- `x-rust-*` vendor extensions; Go keys rejected.
+- `x-rust-*` vendor extensions; `x-go-*` keys ignored.
 
 See [design decisions vs. Go](docs/design.md) for the rationale.
 

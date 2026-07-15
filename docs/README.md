@@ -5,5 +5,5 @@ a quickstart.
 
 - [Installation](installation.md)
 - [Configuration](configuration.md) — CLI and config-file reference
-- [OpenAPI extensions](extensions.md) — the `x-rust-*` keys
+- [OpenAPI extensions](extensions.md) — supported vendor extension keys
 - [Design decisions vs. Go](design.md) — where and why we deviate from `oapi-codegen`

@@ -16,7 +16,8 @@ oapi-codegen --version
 
 ```sh
 git clone https://github.com/alchemaxinc/oapi-codegen-rust
-cargo install --path oapi-codegen-rust/crates/oapi-codegen
+cd oapi-codegen-rust
+cargo install --path crates/oapi-codegen
 ```
 
 Or run it in-tree without installing:

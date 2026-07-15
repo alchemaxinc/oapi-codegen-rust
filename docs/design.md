@@ -41,10 +41,13 @@ places. This lists where `oapi-codegen-rust` deviates from
 - Status codes come from the `http` / `axum` / `reqwest` `StatusCode` types
   rather than a hand-maintained reason/table mirror.
 
-## Vendor extensions keyed `x-rust-*`
+## Vendor extensions
 
-- `x-rust-type`, `x-rust-name`, `x-rust-serde-skip` — the Go-named keys are not
-  accepted. See [extensions](extensions.md).
+- `x-rust-type`, `x-rust-name`, `x-rust-serde-skip`, plus `oapi-codegen`
+  compatibility keys (`x-omitempty`, `x-order`, `x-deprecated-reason`,
+  `x-enum-varnames` / `x-enumNames`).
+- `x-go-*` keys are ignored (accepted, no effect). See
+  [extensions](extensions.md).
 
 ## Combined output via submodules
 
