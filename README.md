@@ -1,6 +1,6 @@
 # oapi-codegen-rust
 
-Generate idiomatic Rust API and Clients from OpenAPI 3 specifications, inspired by
+Generate idiomatic Rust APIs and clients from OpenAPI 3 specifications, inspired by
 [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen).
 
 ## Quickstart
