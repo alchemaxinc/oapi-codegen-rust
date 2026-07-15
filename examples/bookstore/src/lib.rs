@@ -31,3 +31,15 @@ pub mod apimodel {
 pub mod restapi {
     include!("../generated/restapi.rs");
 }
+
+/// The blocking `reqwest` client generated from `openapi.yaml`, used by the
+/// Docker e2e integration test to exercise the running server over HTTP.
+#[cfg(feature = "client")]
+#[allow(dead_code, clippy::implicit_return)]
+pub mod restclient {
+    include!("../generated/restclient.rs");
+}
+
+mod service;
+
+pub use crate::service::Service;

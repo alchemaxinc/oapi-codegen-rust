@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 .PHONY: help
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-35s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: clean
@@ -43,6 +43,12 @@ test-unit: ## Run unit tests
 test-integration: ## Run integration tests
 	cargo test --features integration --test '*_integration' -- --nocapture
 
+.PHONY: test-e2e
+test-e2e: ## Run the Docker end-to-end test (generated server + client over HTTP)
+	docker compose \
+		-f crates/oapi-codegen/tests/integration/docker-compose.yml \
+		up --build --exit-code-from client --abort-on-container-exit
+
 .PHONY: update-generated
 update-generated: ## Refresh generated files from the coverage fixtures
 	UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage
@@ -52,7 +58,8 @@ generate-example: ## Regenerate the composed bookstore example from its OpenAPI 
 	cd examples/bookstore && \
 		cargo run -q -p oapi-codegen -- schemas/common.yaml --config oapi-codegen-common.yaml && \
 		cargo run -q -p oapi-codegen -- schemas/catalog.yaml --config oapi-codegen-catalog.yaml && \
-		cargo run -q -p oapi-codegen -- openapi.yaml --config oapi-codegen-server.yaml
+		cargo run -q -p oapi-codegen -- openapi.yaml --config oapi-codegen-server.yaml && \
+		cargo run -q -p oapi-codegen -- openapi.yaml --config oapi-codegen-client.yaml
 
 .PHONY: verify-generated
 verify-generated: ## Regenerate all generated code and fail if it drifts from what is committed

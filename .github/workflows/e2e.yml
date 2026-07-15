@@ -1,0 +1,20 @@
+name: end-to-end
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-e2e:
+    name: test
+    runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.event.pull_request.title, 'chore:') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Run Docker e2e (server + client over HTTP)
+        run: make test-e2e

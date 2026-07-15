@@ -1,0 +1,29 @@
+name: bookstore-e2e
+
+# End-to-end harness: the `server` service runs the generated axum server and the
+# `client` service compiles the generated reqwest client + integration test and
+# drives every bookstore endpoint over HTTP. Run from the repository root with:
+#
+#   docker compose -f crates/oapi-codegen/tests/integration/docker-compose.yml \
+#     up --build --exit-code-from client --abort-on-container-exit
+#
+# The overall exit status is the client's, so CI fails iff the e2e tests fail.
+
+services:
+  server:
+    build:
+      context: ../../../..
+      dockerfile: crates/oapi-codegen/tests/integration/server/Dockerfile
+    environment:
+      BOOKSTORE_ADDR: 0.0.0.0:8080
+    expose:
+      - "8080"
+
+  client:
+    build:
+      context: ../../../..
+      dockerfile: crates/oapi-codegen/tests/integration/client/Dockerfile
+    depends_on:
+      - server
+    environment:
+      BOOKSTORE_BASE_URL: http://server:8080

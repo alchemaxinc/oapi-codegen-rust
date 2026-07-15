@@ -1,0 +1,8 @@
+package: bookclient
+output: generated/restclient.rs
+generate:
+  client: true
+  models: false
+import-mapping:
+  schemas/common.yaml: crate::apimodel::common
+  schemas/catalog.yaml: crate::apimodel::catalog
