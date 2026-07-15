@@ -19,9 +19,9 @@ servers and client boilerplate directly from OpenAPI specifications.
 
 The project takes inspiration from [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen) and aims to provide a
 similar experience for Rust developers. Since Rust has substantial differences from Go, some key design decisions
-differs:
+differ:
 
-### Design decisions differences
+### Design differences
 
 - `axum` only — no multi-framework generation.
 - One server mode: a typed `trait Api` (comparable to Go's strict server) — no unstructured handler variant.
