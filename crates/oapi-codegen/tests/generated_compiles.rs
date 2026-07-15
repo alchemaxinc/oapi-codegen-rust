@@ -156,6 +156,9 @@ mod generated {
     pub mod client_form_response {
         include!("generated/client_form_response.rs");
     }
+    pub mod combined_server_client {
+        include!("generated/combined_server_client.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`

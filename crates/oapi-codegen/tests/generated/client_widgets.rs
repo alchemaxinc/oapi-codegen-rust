@@ -155,6 +155,13 @@ pub enum AddNoteResponse {
     },
 }
 
+/// Fetch a widget snapshot by its numeric revision.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetWidgetRevisionResponse {
+    /// The widget at that revision.
+    Ok(Widget),
+}
+
 /// A blocking HTTP client for the API.
 ///
 /// `base_url` is used as a prefix for every request path and should not
@@ -248,8 +255,8 @@ impl Client {
     /// Fetch a single widget by id.
     pub fn get_widget(&self, id: String) -> Result<GetWidgetResponse, ClientError> {
         let url = format!(
-            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(& id
-            .to_string(), PATH_PARAM_ENCODE_SET)
+            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(id
+            .as_str(), PATH_PARAM_ENCODE_SET)
         );
         let response = self.http.request(reqwest::Method::GET, url).send()?;
         let status = response.status();
@@ -273,8 +280,8 @@ impl Client {
         body: NewWidget,
     ) -> Result<ReplaceWidgetResponse, ClientError> {
         let url = format!(
-            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(& id
-            .to_string(), PATH_PARAM_ENCODE_SET)
+            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(id
+            .as_str(), PATH_PARAM_ENCODE_SET)
         );
         let mut request = self.http.request(reqwest::Method::PUT, url);
         request = request.form(&body);
@@ -293,8 +300,8 @@ impl Client {
         cookies: DeleteWidgetCookies,
     ) -> Result<DeleteWidgetResponse, ClientError> {
         let url = format!(
-            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(& id
-            .to_string(), PATH_PARAM_ENCODE_SET)
+            "{}/widgets/{}", self.base_url, percent_encoding::utf8_percent_encode(id
+            .as_str(), PATH_PARAM_ENCODE_SET)
         );
         let mut request = self.http.request(reqwest::Method::DELETE, url);
         let cookie_pairs: Vec<String> = [Some(format!("session={}", cookies.session))]
@@ -318,8 +325,8 @@ impl Client {
         body: String,
     ) -> Result<AddNoteResponse, ClientError> {
         let url = format!(
-            "{}/widgets/{}/notes", self.base_url, percent_encoding::utf8_percent_encode(&
-            id.to_string(), PATH_PARAM_ENCODE_SET)
+            "{}/widgets/{}/notes", self.base_url,
+            percent_encoding::utf8_percent_encode(id.as_str(), PATH_PARAM_ENCODE_SET)
         );
         let mut request = self.http.request(reqwest::Method::POST, url);
         request = request.header(reqwest::header::CONTENT_TYPE, "text/plain").body(body);
@@ -336,6 +343,24 @@ impl Client {
                 body,
                 x_note_id,
             });
+        }
+        return Err(ClientError::UnexpectedStatus(status));
+    }
+    /// Fetch a widget snapshot by its numeric revision.
+    pub fn get_widget_revision(
+        &self,
+        revision: i64,
+    ) -> Result<GetWidgetRevisionResponse, ClientError> {
+        let url = format!(
+            "{}/widgets/revisions/{}", self.base_url,
+            percent_encoding::utf8_percent_encode(& revision.to_string(),
+            PATH_PARAM_ENCODE_SET)
+        );
+        let response = self.http.request(reqwest::Method::GET, url).send()?;
+        let status = response.status();
+        if status.as_u16() == 200 {
+            let body: Widget = response.json()?;
+            return Ok(GetWidgetRevisionResponse::Ok(body));
         }
         return Err(ClientError::UnexpectedStatus(status));
     }

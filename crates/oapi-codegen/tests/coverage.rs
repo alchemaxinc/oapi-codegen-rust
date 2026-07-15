@@ -443,6 +443,10 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
     "client_unsupported_undeclared_scheme",
 ];
 
+/// Fixtures generated with both the server and client enabled, exercising the
+/// combined `server`/`client` submodule layout with shared root models.
+const COMBINED_FIXTURES: &[&str] = &["combined_server_client"];
+
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {
     return Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -971,6 +975,81 @@ fn client_unsupported_features_are_rejected() {
     }
 }
 
+/// Configuration that enables both the axum server and the `reqwest` client, so
+/// they are emitted together into `server` and `client` submodules.
+fn combined_config() -> oapi_codegen::Config {
+    return oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            std_http_server: true,
+            client: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+}
+
+/// Regenerate `stem`'s combined server+client output and assert it matches the
+/// committed file.
+///
+/// Refresh the committed files after an intentional change with
+/// `make update-generated`
+/// (`UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage`).
+fn assert_combined_generated_matches(stem: &str) {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+    let generated_file = dir.join("generated").join(format!("{stem}.rs"));
+
+    let generated = oapi_codegen::generate(&fixture, &combined_config()).unwrap_or_else(|err| {
+        panic!("generating combined `{stem}` failed: {err}");
+    });
+
+    if std::env::var_os("UPDATE_GENERATED").is_some() {
+        std::fs::write(&generated_file, &generated).unwrap_or_else(|err| {
+            panic!("writing `{stem}` failed: {err}");
+        });
+        return;
+    }
+
+    let expected = std::fs::read_to_string(&generated_file).unwrap_or_else(|err| {
+        panic!("reading `{stem}` failed (run `make update-generated`): {err}");
+    });
+    assert_eq!(
+        generated, expected,
+        "generated combined output for `{stem}` drifted from tests/generated/{stem}.rs; \
+         run `make update-generated` if this change is intentional",
+    );
+}
+
+/// Emit one `#[test]` per combined fixture (so each shows in the test output)
+/// plus a `COMBINED_GENERATED_TEST_STEMS` catalogue used to guard against drift.
+/// The stem list must match [`COMBINED_FIXTURES`] — enforced by
+/// [`combined_generated_tests_cover_combined_fixtures`].
+macro_rules! combined_generated_tests {
+    ($($stem:ident),+ $(,)?) => {
+        $(
+            #[test]
+            fn $stem() {
+                assert_combined_generated_matches(stringify!($stem));
+            }
+        )+
+
+        const COMBINED_GENERATED_TEST_STEMS: &[&str] = &[$(stringify!($stem)),+];
+    };
+}
+
+combined_generated_tests!(combined_server_client);
+
+/// The combined `#[test]`s must cover exactly the combined fixtures.
+#[test]
+fn combined_generated_tests_cover_combined_fixtures() {
+    let covered: BTreeSet<&str> = COMBINED_GENERATED_TEST_STEMS.iter().copied().collect();
+    let expected: BTreeSet<&str> = COMBINED_FIXTURES.iter().copied().collect();
+    assert_eq!(
+        covered, expected,
+        "the `combined_generated_tests!` list is out of sync with COMBINED_FIXTURES",
+    );
+}
+
 /// Every supported generated file must be `include!`d by
 /// `tests/generated_compiles.rs` so its emitted code is type-checked against
 /// real serde/chrono/uuid.
@@ -980,7 +1059,8 @@ fn generated_outputs_are_compile_checked() {
     let stems = fixtures_with(Status::Supported)
         .into_iter()
         .chain(SERVER_FIXTURES.iter().copied())
-        .chain(CLIENT_FIXTURES.iter().copied());
+        .chain(CLIENT_FIXTURES.iter().copied())
+        .chain(COMBINED_FIXTURES.iter().copied());
     for stem in stems {
         let needle = format!("include!(\"generated/{stem}.rs\")");
         assert!(
@@ -1022,6 +1102,7 @@ fn fixtures_and_test_table_agree() {
         .chain(SERVER_UNSUPPORTED_FIXTURES.iter().copied())
         .chain(CLIENT_FIXTURES.iter().copied())
         .chain(CLIENT_UNSUPPORTED_FIXTURES.iter().copied())
+        .chain(COMBINED_FIXTURES.iter().copied())
         .collect();
 
     for stem in &referenced {

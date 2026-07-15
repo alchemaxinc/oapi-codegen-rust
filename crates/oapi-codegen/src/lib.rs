@@ -27,7 +27,9 @@ use crate::loader::Spec;
 /// Models are emitted when `generate.models` is set, or implicitly when the
 /// server or client is generated (so referenced types are in scope). The axum
 /// server interface is appended when `generate.std-http-server` is set; the
-/// blocking `reqwest` client is appended when `generate.client` is set.
+/// blocking `reqwest` client is appended when `generate.client` is set. When
+/// both are set, the shared models stay at the crate root and the two
+/// generators are emitted into separate `server` and `client` submodules.
 pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     if config.generate.embedded_spec {
         return Err(Error::Unimplemented("embedded-spec".to_owned()));
@@ -46,19 +48,18 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     } else {
         Module::default()
     };
-    if want_server {
+    if want_server || want_client {
         let mut service = lower::generate_service(&spec, &config.import_mapping)?;
         lower::rewrite_service(&mut service, &lower::type_renames(&spec));
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
-        return emit::emit_with_service(&module, &service, server_urls.as_ref());
-    }
-    if want_client {
-        let mut service = lower::generate_service(&spec, &config.import_mapping)?;
-        lower::rewrite_service(&mut service, &lower::type_renames(&spec));
-        if !config.output_options.skip_prune {
-            lower::prune_unused_models(&mut module, &service);
+        if want_server && want_client {
+            let needs_super = lower::references_models(&service);
+            return emit::emit_with_service_and_client(&module, &service, server_urls.as_ref(), needs_super);
+        }
+        if want_server {
+            return emit::emit_with_service(&module, &service, server_urls.as_ref());
         }
         return emit::emit_with_client(&module, &service, server_urls.as_ref());
     }

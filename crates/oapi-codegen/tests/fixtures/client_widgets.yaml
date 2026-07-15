@@ -180,6 +180,25 @@ paths:
             text/plain:
               schema:
                 type: string
+  /widgets/revisions/{revision}:
+    get:
+      operationId: getWidgetRevision
+      summary: Fetch a widget snapshot by its numeric revision.
+      parameters:
+        - name: revision
+          in: path
+          required: true
+          description: Non-string path parameter, encoded via its Display impl.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: The widget at that revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
 components:
   schemas:
     Widget:

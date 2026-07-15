@@ -71,6 +71,43 @@ pub fn emit_with_client(module: &Module, service: &Service, server_urls: Option<
     return render(&items);
 }
 
+/// Render a module's shared models at the crate root, then the axum server and
+/// blocking `reqwest` client in separate `server` and `client` submodules.
+///
+/// The two generators emit same-named, different-shaped per-operation items
+/// (response enums, parameter structs, multipart/negotiated bodies): the server
+/// versions carry axum impls, the client versions are plain. Namespacing them
+/// keeps each output idiomatic and lets client-only consumers avoid axum. Each
+/// submodule brings the root models into scope with `use super::*;` when it
+/// references any.
+pub fn emit_with_service_and_client(
+    module: &Module,
+    service: &Service,
+    server_urls: Option<&ServerUrls>,
+    needs_super: bool,
+) -> Result<String> {
+    let mut root = module_items(module)?;
+    root.extend(server_url_items(server_urls)?);
+    let server = reexported_submodule("server", &axum::AxumServer.emit(service)?, needs_super)?;
+    let client = reexported_submodule("client", &reqwest::ReqwestClient.emit(service)?, needs_super)?;
+
+    let mut out = String::from(HEADER);
+    let mut sections = Vec::new();
+    let root_body = render_body(&root)?;
+    if !root_body.is_empty() {
+        sections.push(root_body);
+    }
+    sections.push(server);
+    sections.push(client);
+    for (index, section) in sections.iter().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        out.push_str(section);
+    }
+    return Ok(out);
+}
+
 /// Emit the server-URL items, or nothing when the feature is disabled or the
 /// spec declares no servers.
 fn server_url_items(server_urls: Option<&ServerUrls>) -> Result<Vec<TokenStream>> {
@@ -89,9 +126,50 @@ fn module_items(module: &Module) -> Result<Vec<TokenStream>> {
     return Ok(items);
 }
 
-/// Pretty-print a sequence of top-level items, one blank line apart.
+/// Wrap a generator's items in `pub mod #name { … }`, rendering each item one
+/// blank line apart (as at the top level) and indenting the body one level. A
+/// leading `use super::*;` is added when `needs_super` is set so the submodule
+/// can name the root-level models.
+fn reexported_submodule(name: &str, items: &[TokenStream], needs_super: bool) -> Result<String> {
+    let mut inner = Vec::with_capacity(items.len() + 1);
+    if needs_super {
+        inner.push(quote! { use super::*; });
+    }
+    inner.extend_from_slice(items);
+    let body = render_body(&inner)?;
+    let indented = indent(&body);
+    return Ok(format!("pub mod {name} {{\n{indented}}}\n"));
+}
+
+/// Indent every non-empty line of `text` by one four-space level.
+fn indent(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        if line == "\n" {
+            out.push('\n');
+        } else {
+            out.push_str("    ");
+            out.push_str(line);
+        }
+    }
+    return out;
+}
+
+/// Pretty-print a sequence of top-level items, one blank line apart, prefixed
+/// with the generated-file header.
 fn render(items: &[TokenStream]) -> Result<String> {
     let mut out = String::from(HEADER);
+    out.push_str(&render_body(items)?);
+    return Ok(out);
+}
+
+/// Pretty-print a sequence of items, one blank line apart, without the header.
+///
+/// Each item is parsed and pretty-printed on its own so that a blank line
+/// separates adjacent items — prettyplease otherwise emits them with no
+/// separation, which is hard to read when many `pub` items follow each other.
+fn render_body(items: &[TokenStream]) -> Result<String> {
+    let mut out = String::new();
     for (index, tokens) in items.iter().enumerate() {
         let file = syn::parse2::<syn::File>(tokens.clone()).map_err(|source| {
             return Error::InvalidGeneratedCode { source };
