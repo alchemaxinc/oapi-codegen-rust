@@ -7,5 +7,5 @@
 FROM rust:1.96-bookworm AS builder
 WORKDIR /src
 COPY . .
-RUN cargo test --no-run -p bookstore-example --features client --test e2e
-CMD ["cargo", "test", "-p", "bookstore-example", "--features", "client", "--test", "e2e", "--", "--nocapture"]
+RUN cargo test --no-run --locked -p bookstore-example --features client --test e2e
+CMD ["cargo", "test", "--locked", "-p", "bookstore-example", "--features", "client", "--test", "e2e", "--", "--nocapture"]

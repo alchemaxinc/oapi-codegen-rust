@@ -4,7 +4,7 @@
 FROM rust:1.96-bookworm AS builder
 WORKDIR /src
 COPY . .
-RUN cargo build --release -p bookstore-example --bin bookstore-server
+RUN cargo build --release --locked -p bookstore-example --bin bookstore-server
 
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
