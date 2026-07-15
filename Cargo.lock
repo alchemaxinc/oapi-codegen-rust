@@ -170,8 +170,12 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "axum-extra",
+ "percent-encoding",
+ "reqwest",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "tokio",
 ]
 
 [[package]]

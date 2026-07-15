@@ -1,0 +1,7 @@
+# Keep the Docker build context small and platform-agnostic: never ship host
+# build artifacts or VCS metadata into the image.
+target/
+**/target/
+.git/
+.github/
+*.md
