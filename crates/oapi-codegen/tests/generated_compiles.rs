@@ -510,6 +510,8 @@ fn generated_server_writes_response_headers() {
     use server_response_headers::Api;
     use server_response_headers::GetWidgetsResponse;
 
+    const SAMPLE_RATE_LIMIT_REMAINING: i32 = 42;
+
     #[derive(Clone)]
     struct Service;
 
@@ -518,7 +520,7 @@ fn generated_server_writes_response_headers() {
             return GetWidgetsResponse::Ok {
                 body: vec!["w1".to_owned()],
                 x_request_id: "abc-123".to_owned(),
-                x_rate_limit_remaining: Some(42),
+                x_rate_limit_remaining: Some(SAMPLE_RATE_LIMIT_REMAINING),
             };
         }
     }
@@ -527,7 +529,7 @@ fn generated_server_writes_response_headers() {
     let response = GetWidgetsResponse::Ok {
         body: vec!["w1".to_owned()],
         x_request_id: "abc-123".to_owned(),
-        x_rate_limit_remaining: Some(42),
+        x_rate_limit_remaining: Some(SAMPLE_RATE_LIMIT_REMAINING),
     }
     .into_response();
     assert_eq!(response.status(), axum::http::StatusCode::OK);
@@ -542,8 +544,10 @@ fn generated_server_writes_response_headers() {
         response
             .headers()
             .get("x-ratelimit-remaining")
-            .expect("missing x-ratelimit-remaining header"),
-        "42"
+            .expect("missing x-ratelimit-remaining header")
+            .to_str()
+            .expect("header value is valid UTF-8"),
+        SAMPLE_RATE_LIMIT_REMAINING.to_string()
     );
 
     // An unset optional header is absent.
@@ -693,14 +697,14 @@ fn read_request(stream: &mut std::net::TcpStream) -> String {
             let size_str = size_line.trim_end_matches("\r\n").split(';').next().unwrap_or("");
             let size = usize::from_str_radix(size_str.trim(), 16).expect("parse chunk size");
             if size == 0 {
-                let mut crlf = [0u8; 2];
+                let mut crlf = [0_u8; 2];
                 reader.read_exact(&mut crlf).expect("read final chunk crlf");
                 break;
             }
-            let mut chunk = vec![0u8; size];
+            let mut chunk = vec![0_u8; size];
             reader.read_exact(&mut chunk).expect("read chunk body");
             body.extend_from_slice(&chunk);
-            let mut crlf = [0u8; 2];
+            let mut crlf = [0_u8; 2];
             reader.read_exact(&mut crlf).expect("read chunk crlf");
         }
     } else {
@@ -714,7 +718,7 @@ fn read_request(stream: &mut std::net::TcpStream) -> String {
                 return None;
             })
             .unwrap_or(0);
-        body.resize(content_length, 0u8);
+        body.resize(content_length, 0_u8);
         if content_length > 0 {
             reader.read_exact(&mut body).expect("read request body");
         }
@@ -1137,8 +1141,13 @@ fn generated_client_applies_security_credentials() {
     let server = std::thread::spawn(move || {
         use std::io::Write;
 
-        let mut received = Vec::with_capacity(6);
-        for _ in 0..6 {
+        /// One request per security scheme this test exercises: global bearer,
+        /// unauthenticated, per-operation basic override, and header/query/cookie
+        /// API keys.
+        const REQUEST_COUNT: usize = 6;
+
+        let mut received = Vec::with_capacity(REQUEST_COUNT);
+        for _ in 0..REQUEST_COUNT {
             let (mut stream, _) = listener.accept().expect("accept mock connection");
             received.push(read_request(&mut stream));
             let body = r#"{"text":"ok"}"#;

@@ -11,3 +11,6 @@ license = "MIT"
 [workspace.lints.clippy]
 implicit_return = "deny"
 needless_return = "allow"
+default_numeric_fallback = "deny"
+unreadable_literal = "deny"
+unseparated_literal_suffix = "deny"
