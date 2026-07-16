@@ -19,7 +19,13 @@ async fn main() {
         .expect("bind the bookstore server listener");
 
     let local = listener.local_addr().expect("resolve the bound listener address");
-    println!("bookstore server listening on http://{local}");
+    #[allow(
+        clippy::print_stdout,
+        reason = "intentional startup banner for a runnable server binary, not a debug leftover"
+    )]
+    {
+        println!("bookstore server listening on http://{local}");
+    }
 
     axum::serve(listener, restapi::router(Service::new()))
         .await
