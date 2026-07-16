@@ -1,4 +1,4 @@
-//! Terminal diagnostics for the CLI: guided, colorized error reporting.
+//! Terminal console output for the CLI: guided, colorized error reporting.
 //!
 //! Everything here writes to stderr through [`anstream`], which automatically
 //! strips ANSI styling when stderr is not a terminal or `NO_COLOR` is set, so

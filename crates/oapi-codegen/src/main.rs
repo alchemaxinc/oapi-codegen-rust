@@ -4,7 +4,7 @@
     reason = "this binary reports status and guided errors to stderr"
 )]
 
-mod diag;
+mod console;
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use oapi_codegen::Error;
 use oapi_codegen::Result;
 use oapi_codegen::config::Generate;
 
-use crate::diag::SpecStats;
+use crate::console::SpecStats;
 
 /// Extra `--help` text with worked examples.
 const EXAMPLES: &str = "\
@@ -80,16 +80,16 @@ impl CliFailure {
     fn report(&self) {
         match self {
             CliFailure::Generator(err) => {
-                diag::report_error(err);
+                console::report_error(err);
             }
             CliFailure::NoArtifacts { config } => {
-                diag::report_no_artifacts(config);
+                console::report_no_artifacts(config);
             }
             CliFailure::NoOutput => {
-                diag::report_no_output();
+                console::report_no_output();
             }
             CliFailure::EmptyOutput { spec, stats, generate } => {
-                diag::report_empty_output(spec, stats, generate);
+                console::report_empty_output(spec, stats, generate);
             }
         }
     }
@@ -135,7 +135,7 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
     let output = output.ok_or(CliFailure::NoOutput)?;
 
     let code = oapi_codegen::generate(&cli.spec, &config)?;
-    if diag::is_effectively_empty(&code) {
+    if console::is_effectively_empty(&code) {
         let stats = spec_stats(&cli.spec, &config)?;
         return Err(CliFailure::EmptyOutput {
             spec: cli.spec.clone(),
@@ -145,11 +145,11 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
     }
 
     oapi_codegen::write_output(&output, &code)?;
-    diag::report_wrote(&output);
+    console::report_wrote(&output);
     return Ok(());
 }
 
-/// Compute a lightweight summary of the spec for empty-output diagnostics,
+/// Compute a lightweight summary of the spec for empty-output reporting,
 /// applying the same filters the generator used.
 fn spec_stats(spec_path: &Path, config: &Config) -> Result<SpecStats> {
     let mut spec = oapi_codegen::loader::Spec::load(spec_path)?;
