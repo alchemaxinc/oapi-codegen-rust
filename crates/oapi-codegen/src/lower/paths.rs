@@ -940,7 +940,9 @@ impl Lowerer<'_> {
                     reason: "multipart/form-data cannot be combined with other request content types".to_owned(),
                 });
             }
-            let (_, media) = supported[0];
+            let Some(&(_, media)) = supported.first() else {
+                unreachable!("multipart body content type count already validated to be exactly one");
+            };
             let multipart = self.lower_multipart_body(path, method, op_name, origin.as_deref(), media)?;
             return Ok(Some(RequestPayload::Multipart(multipart)));
         }

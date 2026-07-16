@@ -1,0 +1,5 @@
+# Allow `clippy::indexing_slicing` inside `#[test]` functions and `#[cfg(test)]` modules.
+# Test assertions frequently index into small, known-shape fixture vectors for readability;
+# production code must still avoid panicking indexing (see indexing_slicing/get_unwrap in
+# Cargo.toml `[workspace.lints.clippy]`).
+allow-indexing-slicing-in-tests = true
