@@ -13,7 +13,12 @@
 //! `implicit_return`/`dead_code` rules are about first-party source, not
 //! generated output. The handwritten tests below are linted normally.
 
-#[allow(dead_code, clippy::implicit_return, clippy::collapsible_if)]
+#[allow(
+    dead_code,
+    clippy::implicit_return,
+    clippy::collapsible_if,
+    reason = "generated output: ordinary idiomatic Rust the workspace's implicit_return/dead_code rules don't target, and collapsible_if is emitted control flow this test doesn't need collapsed"
+)]
 mod generated {
     pub mod allof_merge {
         include!("generated/allof_merge.rs");
@@ -166,7 +171,10 @@ mod generated {
 /// generate this module from the referenced schema file; here a minimal struct
 /// proves the emitted `crate::apimodel::CreateWidget` path resolves and that the
 /// generated handler can decode it as a JSON body.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "test-only stand-in for the models crate the server_refs fixture's import-mapping targets; only CreateWidget is constructed here"
+)]
 mod apimodel {
     #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
     pub struct CreateWidget {
