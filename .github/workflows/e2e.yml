@@ -11,7 +11,7 @@ jobs:
   docker-e2e:
     name: test
     runs-on: ubuntu-latest
-    if: ${{ !startsWith(github.event.pull_request.title, 'chore:') }}
+    if: ${{ !startsWith(github.event.pull_request.title, 'chore:') && !startsWith(github.event.pull_request.title, 'chore(') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
