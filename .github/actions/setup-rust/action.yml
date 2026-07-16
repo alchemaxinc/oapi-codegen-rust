@@ -1,0 +1,35 @@
+name: Setup Rust toolchain
+description: >-
+  Reads the pinned toolchain channel from rust-toolchain.toml and installs it
+  via dtolnay/rust-toolchain, so the channel is single-sourced across CI and
+  the release pipeline instead of being duplicated in every workflow.
+
+inputs:
+  components:
+    description: Comma-separated list of extra rustup components to install (e.g. "clippy, rustfmt").
+    required: false
+    default: ""
+  targets:
+    description: Comma-separated list of extra compilation targets to install.
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: The Rust toolchain channel read from rust-toolchain.toml.
+    value: ${{ steps.rust-version.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read Rust toolchain version
+      id: rust-version
+      shell: bash
+      run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.rust-version.outputs.version }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
