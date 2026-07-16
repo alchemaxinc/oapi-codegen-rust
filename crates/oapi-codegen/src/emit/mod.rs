@@ -225,20 +225,20 @@ pub(crate) fn emit_type(ty: &RustType) -> Result<TokenStream> {
             quote! { #ident }
         }
         RustType::External { module, name } => {
-            let path: syn::Path = syn::parse_str(module).map_err(|_| {
+            let path: syn::Path = syn::parse_str(module).map_err(|err| {
                 return Error::UnsupportedSchema {
                     path: "import-mapping".to_owned(),
-                    reason: format!("module path `{module}` is not a valid Rust path expression"),
+                    reason: format!("module path `{module}` is not a valid Rust path expression: {err}"),
                 };
             })?;
             let ident = to_ident(name, Case::Pascal).to_token();
             quote! { #path::#ident }
         }
         RustType::Verbatim(text) => {
-            let parsed: TokenStream = text.parse().map_err(|_| {
+            let parsed: TokenStream = text.parse().map_err(|err: proc_macro2::LexError| {
                 return Error::UnsupportedSchema {
                     path: "x-rust-type".to_owned(),
-                    reason: format!("value `{text}` is not a valid Rust type expression"),
+                    reason: format!("value `{text}` is not a valid Rust type expression: {err}"),
                 };
             })?;
             parsed
