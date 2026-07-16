@@ -4,8 +4,11 @@ on:
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
 
 env:
   # Pinned Prettier version — kept in env so the install + cache key stay in
@@ -81,16 +84,9 @@ jobs:
     steps:
       - *checkout-code
 
-      - &read-rust-version
-        name: Read Rust toolchain version
-        id: rust-version
-        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
-
-      - &install-rust
-        name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
-          toolchain: ${{ steps.rust-version.outputs.version }}
           components: clippy, rustfmt
 
       # mold is a drop-in linker that links Rust binaries roughly an order of
@@ -173,7 +169,7 @@ jobs:
         # both invocations target the same `target/` directory.
         run: cargo nextest run --workspace --all-targets --locked --no-fail-fast
 
-      # Regenerate the committed example + goldens and fail on any diff, so a
+      # Regenerate the committed example + fixtures and fail on any diff, so a
       # change to the generator or a spec cannot land without its regenerated
       # output. Runs unconditionally (no chore: skip) since drift is cheap to
       # check and must never slip through. Reuses the target/ built above.

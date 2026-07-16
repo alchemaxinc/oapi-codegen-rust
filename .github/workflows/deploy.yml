@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
 
 permissions:
   issues: write
@@ -95,14 +95,9 @@ jobs:
           # so the build still runs --locked).
           ref: ${{ needs.semantic-release.outputs.tag }}
 
-      - name: Read Rust toolchain version
-        id: rust-version
-        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
-          toolchain: ${{ steps.rust-version.outputs.version }}
           targets: ${{ matrix.target }}
 
       - name: Cache Cargo dependencies
@@ -185,14 +180,8 @@ jobs:
         with:
           ref: ${{ needs.semantic-release.outputs.tag }}
 
-      - name: Read Rust toolchain version
-        id: rust-version
-        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ steps.rust-version.outputs.version }}
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
 
       - name: Cache cargo-edit
         id: cache-cargo-edit

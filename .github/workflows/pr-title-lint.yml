@@ -11,8 +11,11 @@ on:
     types: [opened, edited, reopened, synchronize]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
 
 env:
   COMMITLINT_CLI_VERSION: "20.5.0"
