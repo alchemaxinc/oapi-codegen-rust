@@ -3,6 +3,10 @@
 //! It wires the shared in-memory [`bookstore_example::Service`] into the
 //! generated axum router and serves it. The bind address comes from
 //! `BOOKSTORE_ADDR` (default `0.0.0.0:8080`) so the container can override it.
+#![allow(
+    clippy::expect_used,
+    reason = "startup/config validation: fail fast with a clear message before serving traffic"
+)]
 
 use std::net::SocketAddr;
 

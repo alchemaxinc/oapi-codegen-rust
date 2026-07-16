@@ -3,3 +3,5 @@
 # production code must still avoid panicking indexing (see indexing_slicing/get_unwrap in
 # Cargo.toml `[workspace.lints.clippy]`).
 allow-indexing-slicing-in-tests = true
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

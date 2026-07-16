@@ -956,7 +956,9 @@ impl Lowerer<'_> {
             }
         }
         if variants.len() == 1 {
-            let variant = variants.pop().expect("length checked to be 1");
+            let Some(variant) = variants.pop() else {
+                unreachable!("length checked to be 1 above");
+            };
             return Ok(Some(RequestPayload::Single(variant.body)));
         }
         if variants.is_empty() {
@@ -1215,7 +1217,9 @@ impl Lowerer<'_> {
                         });
                     }
                     let variant = to_ident(&format!("status_{range}xx"), Case::Pascal);
-                    let range = u8::try_from(*range).expect("range checked to be within 1..=5 above");
+                    let Ok(range) = u8::try_from(*range) else {
+                        unreachable!("range checked to be within 1..=5 above");
+                    };
                     (ResponseStatus::Range(range), variant)
                 }
             };
@@ -1294,7 +1298,9 @@ impl Lowerer<'_> {
             }
         }
         if variants.len() == 1 {
-            let variant = variants.pop().expect("length checked to be 1");
+            let Some(variant) = variants.pop() else {
+                unreachable!("length checked to be 1 above");
+            };
             return Ok(Some(LoweredResponseBody::Single(variant.body)));
         }
         if variants.is_empty() {

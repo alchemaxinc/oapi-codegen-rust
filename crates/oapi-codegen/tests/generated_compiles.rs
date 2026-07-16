@@ -672,6 +672,10 @@ fn generated_server_handles_multipart_body() {
 /// headers, and body. Handles both `Content-Length` and `Transfer-Encoding:
 /// chunked` framing, since `reqwest` may stream some bodies (e.g. multipart)
 /// without declaring a length up front.
+#[allow(
+    clippy::expect_used,
+    reason = "test-support helper: panicking is the correct failure mode when a mock request can't be read"
+)]
 fn read_request(stream: &mut std::net::TcpStream) -> String {
     use std::io::BufRead;
     use std::io::Read;

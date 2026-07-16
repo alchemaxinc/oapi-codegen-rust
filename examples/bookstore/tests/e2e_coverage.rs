@@ -27,7 +27,9 @@ const TESTED_OPERATIONS: &[&str] = &[
 
 #[test]
 fn every_operation_has_a_registered_e2e_test() {
-    let declared = declared_operation_ids(include_str!("../openapi.yaml"));
+    let document: serde_yaml::Value =
+        serde_yaml::from_str(include_str!("../openapi.yaml")).expect("parse openapi.yaml");
+    let declared = declared_operation_ids(&document);
     let tested: BTreeSet<String> = TESTED_OPERATIONS
         .iter()
         .map(|operation| {
@@ -53,8 +55,7 @@ fn every_operation_has_a_registered_e2e_test() {
 /// Collect every `operationId` declared under `paths.<path>.<method>` in the
 /// OpenAPI document. Non-operation path-item entries (e.g. `parameters`) carry
 /// no `operationId` and are skipped.
-fn declared_operation_ids(spec: &str) -> BTreeSet<String> {
-    let document: serde_yaml::Value = serde_yaml::from_str(spec).expect("parse openapi.yaml");
+fn declared_operation_ids(document: &serde_yaml::Value) -> BTreeSet<String> {
     let paths = match document.get("paths").and_then(|paths| {
         return paths.as_mapping();
     }) {
