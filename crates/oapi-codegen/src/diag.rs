@@ -14,6 +14,14 @@ use oapi_codegen::Error;
 use oapi_codegen::config::Generate;
 use owo_colors::OwoColorize;
 
+/// Example `generate:` block shown when a config enables no artifacts. Each
+/// line is printed dimmed and indented under the hint.
+const GENERATE_EXAMPLE: &str = "\
+generate:
+  models: true            # structs/enums from components.schemas
+  std-http-server: true   # an axum server trait from the paths
+  client: true            # a blocking reqwest client from the paths";
+
 /// A lightweight summary of a spec, used to explain empty output.
 #[derive(Debug, Clone, Copy)]
 pub struct SpecStats {
@@ -61,19 +69,14 @@ pub fn report_no_artifacts(config: &Path) {
         "  {} enable at least one artifact under `generate:`",
         "hint:".cyan().bold()
     );
-    eprintln!("{}", "      generate:".dimmed());
-    eprintln!(
-        "{}",
-        "        models: true            # structs/enums from components.schemas".dimmed()
-    );
-    eprintln!(
-        "{}",
-        "        std-http-server: true   # an axum server trait from the paths".dimmed()
-    );
-    eprintln!(
-        "{}",
-        "        client: true            # a blocking reqwest client from the paths".dimmed()
-    );
+    print_snippet(GENERATE_EXAMPLE);
+}
+
+/// Print a multi-line code snippet dimmed and indented under a hint.
+fn print_snippet(snippet: &str) {
+    for line in snippet.lines() {
+        eprintln!("      {}", line.dimmed());
+    }
 }
 
 /// Report that generation succeeded but produced no code, explaining the

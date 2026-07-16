@@ -7,7 +7,7 @@ Generate idiomatic Rust APIs and clients from OpenAPI 3 specifications, inspired
 
 ```sh
 cargo install oapi-codegen
-oapi-codegen --config cfg.yaml openapi.yaml
+oapi-codegen --config cfg.yaml --output src/api.rs openapi.yaml
 ```
 
 See [docs/](docs/) for installation, configuration, and extensions.
