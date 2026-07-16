@@ -3,13 +3,11 @@ name: Semantic Versioning and Release
 on:
   push:
     branches:
+      # main -> full stable releases (+ crates.io); develop -> `-dev.N`
+      # prereleases via the semantic-release prerelease channel in .releaserc.json.
       - main
+      - develop
   workflow_dispatch:
-    inputs:
-      publish_crate:
-        description: "Also publish to crates.io on this manual run (pushes to main always publish)"
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -175,9 +173,11 @@ jobs:
   publish-crate:
     name: Publish to crates.io
     needs: [semantic-release, publish]
+    # crates.io is immutable and prereleases live on develop, so only the stable
+    # main channel publishes. develop `-dev.N` builds never reach crates.io.
     if: >-
       needs.semantic-release.outputs.tag != '' &&
-      (github.event_name == 'push' || inputs.publish_crate)
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -213,3 +213,34 @@ jobs:
 
           echo "Publishing oapi-codegen ${version} to crates.io."
           cargo publish -p oapi-codegen --locked
+
+  backmerge:
+    name: Backmerge main into develop
+    # Runs as its own job so a backmerge conflict cannot block the release
+    # itself — by the time we get here the tag, GitHub release and crates.io
+    # publish have already succeeded. Keeps develop's version baseline aligned
+    # so the next prerelease counts from the freshly released version.
+    needs: [semantic-release, publish, publish-crate]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - *create-app-token
+
+      - name: Checkout and setup
+        uses: alchemaxinc/composite-toolbox/checkout-and-setup@v1
+        with:
+          shallow: false
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Backmerge main into develop
+        run: |
+          set -e
+          git fetch origin develop
+          git checkout develop
+          git merge main --no-edit
+          git push origin develop
