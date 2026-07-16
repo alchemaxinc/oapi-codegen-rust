@@ -741,6 +741,7 @@ dependencies = [
 name = "oapi-codegen"
 version = "0.1.0"
 dependencies = [
+ "anstream",
  "axum",
  "axum-extra",
  "chrono",
@@ -748,6 +749,7 @@ dependencies = [
  "http",
  "indexmap",
  "openapiv3",
+ "owo-colors",
  "percent-encoding",
  "prettyplease",
  "proc-macro2",
@@ -783,6 +785,12 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "owo-colors"
+version = "4.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
 name = "percent-encoding"

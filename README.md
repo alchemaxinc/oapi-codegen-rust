@@ -7,7 +7,7 @@ Generate idiomatic Rust APIs and clients from OpenAPI 3 specifications, inspired
 
 ```sh
 cargo install oapi-codegen
-oapi-codegen --config cfg.yaml openapi.yaml
+oapi-codegen --config cfg.yaml --output src/api.rs openapi.yaml
 ```
 
 See [docs/](docs/) for installation, configuration, and extensions.
@@ -30,6 +30,8 @@ differ:
 - Blocking `reqwest` client — no async runtime forced on consumers.
 - Targets OpenAPI 3.0.
 - Reuses your `oapi-codegen` YAML config — unknown keys are ignored.
+- Explicit over implicit: `--config` and an output path are required, and
+  empty generation fails loudly (Go defaults these and prints to stdout).
 - `x-rust-*` vendor extensions; `x-go-*` keys ignored.
 
 See [design decisions vs. Go](docs/design.md) for the rationale.
