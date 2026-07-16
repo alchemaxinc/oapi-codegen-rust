@@ -240,7 +240,11 @@ jobs:
       - name: Backmerge main into develop
         run: |
           set -e
+          # Activate the .gitattributes `merge=ours` driver so the version lines
+          # in Cargo.toml/Cargo.lock (which semantic-release rewrites on both
+          # channels) auto-resolve to develop's value instead of conflicting.
+          git config merge.ours.driver true
           git fetch origin develop
-          git checkout develop
+          git checkout -B develop origin/develop
           git merge main --no-edit
           git push origin develop
