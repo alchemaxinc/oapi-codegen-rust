@@ -123,7 +123,7 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
     }
 
     let generate = &config.generate;
-    if !generate.models && !generate.std_http_server && !generate.client {
+    if !generate.models && !generate.std_http_server && !generate.client && !generate.server_urls {
         return Err(CliFailure::NoArtifacts {
             config: cli.config.clone(),
         });
@@ -144,7 +144,7 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
         });
     }
 
-    write_output_file(&code, &output)?;
+    oapi_codegen::write_output(&output, &code)?;
     diag::report_wrote(&output);
     return Ok(());
 }
@@ -157,26 +157,6 @@ fn spec_stats(spec_path: &Path, config: &Config) -> Result<SpecStats> {
     return Ok(SpecStats {
         schemas: spec.schemas().len(),
         paths: spec.paths().paths.len(),
+        servers: spec.servers().len(),
     });
-}
-
-/// Write generated `code` to `path`, creating parent directories as needed.
-fn write_output_file(code: &str, path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent).map_err(|source| {
-            return Error::WriteOutput {
-                path: path.display().to_string(),
-                source,
-            };
-        })?;
-    }
-    std::fs::write(path, code).map_err(|source| {
-        return Error::WriteOutput {
-            path: path.display().to_string(),
-            source,
-        };
-    })?;
-    return Ok(());
 }

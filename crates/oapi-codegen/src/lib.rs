@@ -89,7 +89,7 @@ pub fn generate_models_to_file(spec_path: &Path, output_path: &Path) -> Result<(
 }
 
 /// Write generated source to `output_path`, creating parent directories.
-fn write_output(output_path: &Path, code: &str) -> Result<()> {
+pub fn write_output(output_path: &Path, code: &str) -> Result<()> {
     if let Some(parent) = output_path.parent()
         && !parent.as_os_str().is_empty()
     {
