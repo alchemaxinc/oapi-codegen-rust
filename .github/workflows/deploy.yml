@@ -19,14 +19,16 @@ permissions:
   id-token: write
   pull-requests: write
 
+env:
+  # Pin cargo-edit so the version bump is reproducible; bump this to adopt a
+  # newer release. Used by the build and publish jobs to stamp the tag version
+  # into Cargo.toml before building/publishing.
+  CARGO_EDIT_VERSION: "0.13.13"
+
 jobs:
   semantic-release:
     name: Semantic Versioning and Release
     runs-on: ubuntu-latest
-    env:
-      # Pin cargo-edit so the version bump is reproducible; bump this to adopt a
-      # newer release. Used for both the cache key and the install below.
-      CARGO_EDIT_VERSION: "0.13.13"
     outputs:
       tag: ${{ steps.version-release.outputs.tag }}
 
@@ -45,29 +47,6 @@ jobs:
         with:
           shallow: false
           token: ${{ steps.app.outputs.token }}
-
-      - name: Read Rust toolchain version
-        id: rust-version
-        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ steps.rust-version.outputs.version }}
-
-      - name: Cache cargo-edit
-        id: cache-cargo-edit
-        uses: actions/cache@v6
-        with:
-          path: ~/.cargo/bin/cargo-set-version
-          key: cargo-edit-${{ runner.os }}-${{ env.CARGO_EDIT_VERSION }}
-
-      - name: Install cargo-edit
-        if: steps.cache-cargo-edit.outputs.cache-hit != 'true'
-        # `@semantic-release/exec` uses `cargo set-version` to bump the workspace
-        # version inside the release commit, so the tag carries the right version
-        # for both the built binaries and the published crate.
-        run: cargo install cargo-edit --locked --version "${CARGO_EDIT_VERSION}" --bin cargo-set-version
 
       - name: Version and release
         id: version-release
@@ -110,8 +89,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          # The release commit (Cargo.toml/lock bump) is only reachable via the
-          # tag, not the push SHA that triggered this run.
+          # semantic-release tags the released commit; check it out so the build
+          # matches exactly what was released.
           ref: ${{ needs.semantic-release.outputs.tag }}
 
       - name: Read Rust toolchain version
@@ -130,8 +109,26 @@ jobs:
           shared-key: release-${{ matrix.target }}
           key: ${{ matrix.target }}
 
+      - name: Cache cargo-edit
+        id: cache-cargo-edit
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-set-version
+          key: cargo-edit-${{ runner.os }}-${{ env.CARGO_EDIT_VERSION }}
+
+      - name: Install cargo-edit
+        if: steps.cache-cargo-edit.outputs.cache-hit != 'true'
+        run: cargo install cargo-edit --locked --version "${CARGO_EDIT_VERSION}" --bin cargo-set-version
+
+      - name: Stamp the released version into Cargo.toml
+        # The tag is authoritative; write its version into the workspace so the
+        # built binary reports it via CARGO_PKG_VERSION.
+        env:
+          TAG: ${{ needs.semantic-release.outputs.tag }}
+        run: cargo set-version --workspace "${TAG#v}"
+
       - name: Build binary
-        run: cargo build --release --locked -p oapi-codegen --bin oapi-codegen --target ${{ matrix.target }}
+        run: cargo build --release -p oapi-codegen --bin oapi-codegen --target ${{ matrix.target }}
 
       - name: Rename binary and generate checksum
         run: |
@@ -195,11 +192,27 @@ jobs:
         with:
           toolchain: ${{ steps.rust-version.outputs.version }}
 
+      - name: Cache cargo-edit
+        id: cache-cargo-edit
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-set-version
+          key: cargo-edit-${{ runner.os }}-${{ env.CARGO_EDIT_VERSION }}
+
+      - name: Install cargo-edit
+        if: steps.cache-cargo-edit.outputs.cache-hit != 'true'
+        run: cargo install cargo-edit --locked --version "${CARGO_EDIT_VERSION}" --bin cargo-set-version
+
+      - name: Stamp the released version into Cargo.toml
+        env:
+          TAG: ${{ needs.semantic-release.outputs.tag }}
+        run: cargo set-version --workspace "${TAG#v}"
+
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          version=$(cargo metadata --format-version 1 --no-deps --locked \
+          version=$(cargo metadata --format-version 1 --no-deps \
             | jq -r '.packages[] | select(.name == "oapi-codegen") | .version')
 
           status=$(curl -sS -o /dev/null -w '%{http_code}' \
@@ -212,14 +225,15 @@ jobs:
           fi
 
           echo "Publishing oapi-codegen ${version} to crates.io."
-          cargo publish -p oapi-codegen --locked
+          cargo publish -p oapi-codegen --allow-dirty
 
   backmerge:
     name: Backmerge main into develop
     # Runs as its own job so a backmerge conflict cannot block the release
     # itself — by the time we get here the tag, GitHub release and crates.io
-    # publish have already succeeded. Keeps develop's version baseline aligned
-    # so the next prerelease counts from the freshly released version.
+    # publish have already succeeded. Fast-forwards develop with the commits
+    # that shipped to main so the next prerelease builds on the release rather
+    # than diverging from it.
     needs: [semantic-release, publish, publish-crate]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -240,10 +254,6 @@ jobs:
       - name: Backmerge main into develop
         run: |
           set -e
-          # Activate the .gitattributes `merge=ours` driver so the version lines
-          # in Cargo.toml/Cargo.lock (which semantic-release rewrites on both
-          # channels) auto-resolve to develop's value instead of conflicting.
-          git config merge.ours.driver true
           git fetch origin develop
           git checkout -B develop origin/develop
           git merge main --no-edit
