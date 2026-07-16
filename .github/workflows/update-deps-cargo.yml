@@ -23,5 +23,5 @@ jobs:
           auto-merge: "true"
           merge-method: "squash"
           branch-prefix: "update-cargo"
-          pr-title: "fix: update cargo dependencies"
-          commit-message: "fix: update cargo dependencies"
+          pr-title: "fix(deps): update cargo dependencies"
+          commit-message: "fix(deps): update cargo dependencies"
