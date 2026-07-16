@@ -104,7 +104,7 @@ pub fn deconflict_ident(ident: RustIdent, seen: &mut std::collections::HashSet<S
     if seen.insert(ident.logical().to_owned()) {
         return ident;
     }
-    let mut suffix = 2;
+    let mut suffix: u32 = 2;
     loop {
         let candidate = to_ident(&format!("{} {suffix}", ident.logical()), Case::Pascal);
         if seen.insert(candidate.logical().to_owned()) {

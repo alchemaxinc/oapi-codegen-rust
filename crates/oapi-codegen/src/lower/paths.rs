@@ -940,7 +940,9 @@ impl Lowerer<'_> {
                     reason: "multipart/form-data cannot be combined with other request content types".to_owned(),
                 });
             }
-            let (_, media) = supported[0];
+            let Some(&(_, media)) = supported.first() else {
+                unreachable!("multipart body content type count already validated to be exactly one");
+            };
             let multipart = self.lower_multipart_body(path, method, op_name, origin.as_deref(), media)?;
             return Ok(Some(RequestPayload::Multipart(multipart)));
         }
@@ -954,7 +956,9 @@ impl Lowerer<'_> {
             }
         }
         if variants.len() == 1 {
-            let variant = variants.pop().expect("length checked to be 1");
+            let Some(variant) = variants.pop() else {
+                unreachable!("length checked to be 1 above");
+            };
             return Ok(Some(RequestPayload::Single(variant.body)));
         }
         if variants.is_empty() {
@@ -1213,7 +1217,10 @@ impl Lowerer<'_> {
                         });
                     }
                     let variant = to_ident(&format!("status_{range}xx"), Case::Pascal);
-                    (ResponseStatus::Range(*range as u8), variant)
+                    let Ok(range) = u8::try_from(*range) else {
+                        unreachable!("range checked to be within 1..=5 above");
+                    };
+                    (ResponseStatus::Range(range), variant)
                 }
             };
             let response = self.resolve_response_ref(response)?;
@@ -1291,7 +1298,9 @@ impl Lowerer<'_> {
             }
         }
         if variants.len() == 1 {
-            let variant = variants.pop().expect("length checked to be 1");
+            let Some(variant) = variants.pop() else {
+                unreachable!("length checked to be 1 above");
+            };
             return Ok(Some(LoweredResponseBody::Single(variant.body)));
         }
         if variants.is_empty() {

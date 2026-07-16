@@ -13,7 +13,12 @@
 //! `implicit_return`/`dead_code` rules are about first-party source, not
 //! generated output. The handwritten tests below are linted normally.
 
-#[allow(dead_code, clippy::implicit_return, clippy::collapsible_if)]
+#[allow(
+    dead_code,
+    clippy::implicit_return,
+    clippy::collapsible_if,
+    reason = "generated output: ordinary idiomatic Rust the workspace's implicit_return/dead_code rules don't target, and collapsible_if is emitted control flow this test doesn't need collapsed"
+)]
 mod generated {
     pub mod allof_merge {
         include!("generated/allof_merge.rs");
@@ -166,7 +171,10 @@ mod generated {
 /// generate this module from the referenced schema file; here a minimal struct
 /// proves the emitted `crate::apimodel::CreateWidget` path resolves and that the
 /// generated handler can decode it as a JSON body.
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "test-only stand-in for the models crate the server_refs fixture's import-mapping targets; only CreateWidget is constructed here"
+)]
 mod apimodel {
     #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
     pub struct CreateWidget {
@@ -510,6 +518,8 @@ fn generated_server_writes_response_headers() {
     use server_response_headers::Api;
     use server_response_headers::GetWidgetsResponse;
 
+    const SAMPLE_RATE_LIMIT_REMAINING: i32 = 42;
+
     #[derive(Clone)]
     struct Service;
 
@@ -518,7 +528,7 @@ fn generated_server_writes_response_headers() {
             return GetWidgetsResponse::Ok {
                 body: vec!["w1".to_owned()],
                 x_request_id: "abc-123".to_owned(),
-                x_rate_limit_remaining: Some(42),
+                x_rate_limit_remaining: Some(SAMPLE_RATE_LIMIT_REMAINING),
             };
         }
     }
@@ -527,7 +537,7 @@ fn generated_server_writes_response_headers() {
     let response = GetWidgetsResponse::Ok {
         body: vec!["w1".to_owned()],
         x_request_id: "abc-123".to_owned(),
-        x_rate_limit_remaining: Some(42),
+        x_rate_limit_remaining: Some(SAMPLE_RATE_LIMIT_REMAINING),
     }
     .into_response();
     assert_eq!(response.status(), axum::http::StatusCode::OK);
@@ -542,8 +552,10 @@ fn generated_server_writes_response_headers() {
         response
             .headers()
             .get("x-ratelimit-remaining")
-            .expect("missing x-ratelimit-remaining header"),
-        "42"
+            .expect("missing x-ratelimit-remaining header")
+            .to_str()
+            .expect("header value is valid UTF-8"),
+        SAMPLE_RATE_LIMIT_REMAINING.to_string()
     );
 
     // An unset optional header is absent.
@@ -660,6 +672,10 @@ fn generated_server_handles_multipart_body() {
 /// headers, and body. Handles both `Content-Length` and `Transfer-Encoding:
 /// chunked` framing, since `reqwest` may stream some bodies (e.g. multipart)
 /// without declaring a length up front.
+#[allow(
+    clippy::expect_used,
+    reason = "test-support helper: panicking is the correct failure mode when a mock request can't be read"
+)]
 fn read_request(stream: &mut std::net::TcpStream) -> String {
     use std::io::BufRead;
     use std::io::Read;
@@ -693,14 +709,14 @@ fn read_request(stream: &mut std::net::TcpStream) -> String {
             let size_str = size_line.trim_end_matches("\r\n").split(';').next().unwrap_or("");
             let size = usize::from_str_radix(size_str.trim(), 16).expect("parse chunk size");
             if size == 0 {
-                let mut crlf = [0u8; 2];
+                let mut crlf = [0_u8; 2];
                 reader.read_exact(&mut crlf).expect("read final chunk crlf");
                 break;
             }
-            let mut chunk = vec![0u8; size];
+            let mut chunk = vec![0_u8; size];
             reader.read_exact(&mut chunk).expect("read chunk body");
             body.extend_from_slice(&chunk);
-            let mut crlf = [0u8; 2];
+            let mut crlf = [0_u8; 2];
             reader.read_exact(&mut crlf).expect("read chunk crlf");
         }
     } else {
@@ -714,7 +730,7 @@ fn read_request(stream: &mut std::net::TcpStream) -> String {
                 return None;
             })
             .unwrap_or(0);
-        body.resize(content_length, 0u8);
+        body.resize(content_length, 0_u8);
         if content_length > 0 {
             reader.read_exact(&mut body).expect("read request body");
         }
@@ -1137,8 +1153,13 @@ fn generated_client_applies_security_credentials() {
     let server = std::thread::spawn(move || {
         use std::io::Write;
 
-        let mut received = Vec::with_capacity(6);
-        for _ in 0..6 {
+        /// One request per security scheme this test exercises: global bearer,
+        /// unauthenticated, per-operation basic override, and header/query/cookie
+        /// API keys.
+        const REQUEST_COUNT: usize = 6;
+
+        let mut received = Vec::with_capacity(REQUEST_COUNT);
+        for _ in 0..REQUEST_COUNT {
             let (mut stream, _) = listener.accept().expect("accept mock connection");
             received.push(read_request(&mut stream));
             let body = r#"{"text":"ok"}"#;

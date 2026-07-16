@@ -15,19 +15,31 @@
 
 /// Models generated from the schema files, one module per source file.
 pub mod apimodel {
-    #[allow(dead_code, clippy::implicit_return)]
+    #[allow(
+        dead_code,
+        clippy::implicit_return,
+        reason = "generated output: idiomatic tail-expression code the implicit_return lint does not target, and this module exposes types/methods this crate never constructs"
+    )]
     pub mod common {
         include!("../generated/apimodel/common.rs");
     }
 
-    #[allow(dead_code, clippy::implicit_return)]
+    #[allow(
+        dead_code,
+        clippy::implicit_return,
+        reason = "generated output: idiomatic tail-expression code the implicit_return lint does not target, and this module exposes types/methods this crate never constructs"
+    )]
     pub mod catalog {
         include!("../generated/apimodel/catalog.rs");
     }
 }
 
 /// The axum server interface generated from `openapi.yaml`.
-#[allow(dead_code, clippy::implicit_return)]
+#[allow(
+    dead_code,
+    clippy::implicit_return,
+    reason = "generated output: idiomatic tail-expression code the implicit_return lint does not target, and this module exposes types/methods this crate never constructs"
+)]
 pub mod restapi {
     include!("../generated/restapi.rs");
 }
@@ -35,7 +47,11 @@ pub mod restapi {
 /// The blocking `reqwest` client generated from `openapi.yaml`, used by the
 /// Docker e2e integration test to exercise the running server over HTTP.
 #[cfg(feature = "client")]
-#[allow(dead_code, clippy::implicit_return)]
+#[allow(
+    dead_code,
+    clippy::implicit_return,
+    reason = "generated output: idiomatic tail-expression code the implicit_return lint does not target, and this module exposes types/methods this crate never constructs"
+)]
 pub mod restclient {
     include!("../generated/restclient.rs");
 }

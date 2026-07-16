@@ -27,6 +27,10 @@ use crate::restapi::SubmitReviewResponseCreatedBody;
 use crate::restapi::UploadBookCoverMultipart;
 use crate::restapi::UploadBookCoverResponse;
 
+/// A negative `limit` query parameter is clamped to this floor before being
+/// used as a `Vec::truncate` bound.
+const MIN_LIMIT: i32 = 0;
+
 /// An in-memory bookstore backing the generated [`Api`] trait.
 #[derive(Clone, Default, Debug)]
 pub struct Service {
@@ -78,7 +82,8 @@ impl Api for Service {
             return left.id.cmp(&right.id);
         });
         if let Some(limit) = query.limit {
-            result.truncate(limit.max(0) as usize);
+            let take = usize::try_from(limit.max(MIN_LIMIT)).unwrap_or(usize::MAX);
+            result.truncate(take);
         }
         return ListBooksResponse::Ok(result);
     }

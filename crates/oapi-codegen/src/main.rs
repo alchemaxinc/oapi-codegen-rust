@@ -1,4 +1,9 @@
 //! Command-line entry point for the `oapi-codegen` generator.
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "this binary's whole job is printing generated code to stdout and status/errors to stderr"
+)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;

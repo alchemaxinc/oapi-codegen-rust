@@ -336,26 +336,26 @@ fn emit_dynamic_response(
 /// Emit the `Router` builder, grouping operations that share a path so they map
 /// onto a single axum route with multiple method handlers.
 fn emit_router(service: &Service) -> TokenStream {
-    let mut routes = Vec::new();
-    let mut index = 0;
-    while index < service.operations.len() {
-        let path = &service.operations[index].path;
-        let mut method_router = TokenStream::new();
-        let mut first = true;
-        while index < service.operations.len() && service.operations[index].path == *path {
-            let operation = &service.operations[index];
-            let routing = format_ident!("{}", operation.method);
-            let handler = axum_handler_name(&operation.name).to_token();
-            if first {
-                method_router = quote! { axum::routing::#routing(#handler::<T>) };
-                first = false;
-            } else {
-                method_router = quote! { #method_router.#routing(#handler::<T>) };
+    let routes = service
+        .operations
+        .chunk_by(|left, right| return left.path == right.path)
+        .map(|group| {
+            let [first, ..] = group else {
+                unreachable!("chunk_by never yields an empty group");
+            };
+            let path = &first.path;
+            let mut method_router = TokenStream::new();
+            for (index, operation) in group.iter().enumerate() {
+                let routing = format_ident!("{}", operation.method);
+                let handler = axum_handler_name(&operation.name).to_token();
+                if index == 0 {
+                    method_router = quote! { axum::routing::#routing(#handler::<T>) };
+                } else {
+                    method_router = quote! { #method_router.#routing(#handler::<T>) };
+                }
             }
-            index += 1;
-        }
-        routes.push(quote! { .route(#path, #method_router) });
-    }
+            return quote! { .route(#path, #method_router) };
+        });
     return quote! {
         /// Build an axum `Router` that dispatches each route to `api`.
         pub fn router<T: Api>(api: T) -> axum::Router {
@@ -389,9 +389,7 @@ fn emit_handler(operation: &Operation) -> Result<TokenStream> {
         for param in &operation.path_params {
             types.push(emit_type(&param.ty)?);
         }
-        if operation.path_params.len() == 1 {
-            let name = &names[0];
-            let ty = &types[0];
+        if let ([name], [ty]) = (names.as_slice(), types.as_slice()) {
             extractors.push(quote! { axum::extract::Path(#name): axum::extract::Path<#ty> });
         } else {
             extractors.push(quote! { axum::extract::Path((#(#names),*)): axum::extract::Path<(#(#types),*)> });
