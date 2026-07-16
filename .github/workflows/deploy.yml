@@ -206,9 +206,18 @@ jobs:
         run: cargo install cargo-edit --locked --version "${CARGO_EDIT_VERSION}" --bin cargo-set-version
 
       - name: Stamp the released version into Cargo.toml
+        # The tag is authoritative for the version. Stamp it into the manifests
+        # and make an ephemeral local commit (never pushed) so `cargo publish`
+        # sees a clean tree and we avoid `--allow-dirty` — which would otherwise
+        # silently bundle any unrelated dirty file. Committing only these two
+        # paths keeps cargo's own dirty check as a guard against that.
         env:
           TAG: ${{ needs.semantic-release.outputs.tag }}
-        run: cargo set-version --workspace "${TAG#v}"
+        run: |
+          cargo set-version --workspace "${TAG#v}"
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m "chore(release): ${TAG#v}" -- Cargo.toml Cargo.lock
 
       - name: Publish to crates.io
         env:
@@ -227,15 +236,14 @@ jobs:
           fi
 
           echo "Publishing oapi-codegen ${version} to crates.io."
-          cargo publish -p oapi-codegen --locked --allow-dirty
+          cargo publish -p oapi-codegen --locked
 
   backmerge:
     name: Backmerge main into develop
     # Runs as its own job so a backmerge conflict cannot block the release
     # itself — by the time we get here the tag, GitHub release and crates.io
-    # publish have already succeeded. Fast-forwards develop with the commits
-    # that shipped to main so the next prerelease builds on the release rather
-    # than diverging from it.
+    # publish have already succeeded. Merges main into develop so the next
+    # prerelease builds on the release rather than diverging from it.
     needs: [semantic-release, publish, publish-crate]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
