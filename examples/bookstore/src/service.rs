@@ -82,7 +82,8 @@ impl Api for Service {
             return left.id.cmp(&right.id);
         });
         if let Some(limit) = query.limit {
-            result.truncate(limit.max(MIN_LIMIT) as usize);
+            let take = usize::try_from(limit.max(MIN_LIMIT)).unwrap_or(usize::MAX);
+            result.truncate(take);
         }
         return ListBooksResponse::Ok(result);
     }

@@ -1215,7 +1215,8 @@ impl Lowerer<'_> {
                         });
                     }
                     let variant = to_ident(&format!("status_{range}xx"), Case::Pascal);
-                    (ResponseStatus::Range(*range as u8), variant)
+                    let range = u8::try_from(*range).expect("range checked to be within 1..=5 above");
+                    (ResponseStatus::Range(range), variant)
                 }
             };
             let response = self.resolve_response_ref(response)?;
