@@ -25,11 +25,15 @@ runs:
     - name: Read Rust toolchain version
       id: rust-version
       shell: bash
-      run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+      run: |
+        set -euo pipefail
+        version="$(sed -nE 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' rust-toolchain.toml | head -n1)"
+        test -n "$version"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # v-nobody-knows until https://github.com/dtolnay/rust-toolchain/issues/180 is fixed
       with:
-        toolchain: ${{ steps.rust-version.outputs.version }}
-        components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
+        components: ${{ inputs.components }}
+        toolchain: ${{ steps.rust-version.outputs.version }}
