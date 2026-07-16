@@ -89,8 +89,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          # semantic-release tags the released commit; check it out so the build
-          # matches exactly what was released.
+          # semantic-release tags the released commit; check it out so we build
+          # from the released sources, then stamp the tag version into the
+          # workspace manifests below (set-version keeps Cargo.lock consistent,
+          # so the build still runs --locked).
           ref: ${{ needs.semantic-release.outputs.tag }}
 
       - name: Read Rust toolchain version
@@ -128,7 +130,7 @@ jobs:
         run: cargo set-version --workspace "${TAG#v}"
 
       - name: Build binary
-        run: cargo build --release -p oapi-codegen --bin oapi-codegen --target ${{ matrix.target }}
+        run: cargo build --release --locked -p oapi-codegen --bin oapi-codegen --target ${{ matrix.target }}
 
       - name: Rename binary and generate checksum
         run: |
@@ -212,7 +214,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          version=$(cargo metadata --format-version 1 --no-deps \
+          version=$(cargo metadata --format-version 1 --no-deps --locked \
             | jq -r '.packages[] | select(.name == "oapi-codegen") | .version')
 
           status=$(curl -sS -o /dev/null -w '%{http_code}' \
@@ -225,7 +227,7 @@ jobs:
           fi
 
           echo "Publishing oapi-codegen ${version} to crates.io."
-          cargo publish -p oapi-codegen --allow-dirty
+          cargo publish -p oapi-codegen --locked --allow-dirty
 
   backmerge:
     name: Backmerge main into develop
