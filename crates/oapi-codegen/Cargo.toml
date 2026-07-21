@@ -28,11 +28,6 @@ serde_yaml = "0.9.34"
 syn = { version = "2.0.118", features = ["full"] }
 
 [dev-dependencies]
-# chrono/uuid only type-check the generated model outputs (which reference
-# them); axum type-checks the generated server output; reqwest type-checks the
-# generated client output; openapiv3 backs the coverage-matrix anchor in
-# tests/coverage.rs; clap-markdown renders docs/cli.md in tests/cli_docs.rs.
-# None are needed by the generator itself.
 axum = { version = "0.8.9", features = ["multipart"] }
 axum-extra = { version = "0.12.6", features = ["query", "cookie"] }
 chrono = { version = "0.4.45", features = ["serde"] }

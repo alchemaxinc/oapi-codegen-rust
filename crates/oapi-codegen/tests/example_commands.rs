@@ -42,16 +42,21 @@ fn markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
             panic!("iterating `{}` failed: {err}", dir.display());
         });
         let path = entry.path();
+
         if path.is_dir() {
             let name = entry.file_name();
-            if !matches!(name.to_str(), Some("target" | "node_modules" | ".git")) {
-                markdown_files(&path, out);
+            if matches!(name.to_str(), Some("target" | "node_modules" | ".git")) {
+                continue;
             }
+            markdown_files(&path, out);
             continue;
         }
-        if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
-            out.push(path);
+
+        if path.extension().and_then(std::ffi::OsStr::to_str) != Some("md") {
+            continue;
         }
+
+        out.push(path);
     }
 }
 
