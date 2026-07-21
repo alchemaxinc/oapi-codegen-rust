@@ -24,9 +24,6 @@
   flag, argument, help text, or the `EXAMPLES` block, run `make update-docs` to
   regenerate `docs/cli.md` (it is generated — never edit it by hand). CI's
   `make verify-generated` fails on drift.
-- The bookstore commands documented in `examples/bookstore/README.md` are
-  executed by the `example_commands` integration test, so keep those snippets as
-  real, runnable invocations.
 
 # Rust Coding Conventions and Best Practices
 

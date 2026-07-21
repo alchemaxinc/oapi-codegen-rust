@@ -3,8 +3,6 @@
 Regenerate this example from its multi-file OpenAPI spec by running the CLI once
 per config, from this directory:
 
-<!-- runnable-example: examples/bookstore -->
-
 ```sh
 oapi-codegen --config-file oapi-codegen-common.yaml schemas/common.yaml
 oapi-codegen --config-file oapi-codegen-catalog.yaml schemas/catalog.yaml
