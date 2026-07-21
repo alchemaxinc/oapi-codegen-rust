@@ -111,7 +111,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-set-version
-          key: cargo-edit-${{ runner.os }}-${{ env.CARGO_EDIT_VERSION }}-${{ hashFiles('rust-toolchain.toml') }}
+          key: cargo-edit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_EDIT_VERSION }}-${{ hashFiles('rust-toolchain.toml') }}
 
       - name: Install cargo-edit
         if: steps.cache-cargo-edit.outputs.cache-hit != 'true'
@@ -188,7 +188,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-set-version
-          key: cargo-edit-${{ runner.os }}-${{ env.CARGO_EDIT_VERSION }}-${{ hashFiles('rust-toolchain.toml') }}
+          key: cargo-edit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_EDIT_VERSION }}-${{ hashFiles('rust-toolchain.toml') }}
 
       - name: Install cargo-edit
         if: steps.cache-cargo-edit.outputs.cache-hit != 'true'
