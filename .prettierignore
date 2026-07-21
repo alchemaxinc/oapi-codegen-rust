@@ -4,3 +4,6 @@ node_modules/
 
 # Lockfiles are not formatted by Prettier
 Cargo.lock
+
+# Generated from the clap CLI definition by `make update-docs`
+docs/cli.md

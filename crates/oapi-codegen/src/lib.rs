@@ -5,6 +5,7 @@
 //! generator, its operations ([`lower::paths`] → [`ir`]), then emit formatted Rust
 //! source ([`emit`]). [`Config`] mirrors `oapi-codegen`'s YAML configuration.
 
+pub mod cli;
 pub mod config;
 pub mod emit;
 pub mod error;

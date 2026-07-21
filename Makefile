@@ -53,6 +53,10 @@ test-e2e: ## Run the Docker end-to-end test (generated server + client over HTTP
 update-generated: ## Refresh generated files from the coverage fixtures
 	UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage
 
+.PHONY: update-docs
+update-docs: ## Refresh docs/cli.md from the clap CLI definition
+	UPDATE_DOCS=1 cargo test -p oapi-codegen --test cli_docs
+
 .PHONY: generate-example
 generate-example: ## Regenerate the composed bookstore example from its OpenAPI spec
 	cd examples/bookstore && \
@@ -65,11 +69,12 @@ generate-example: ## Regenerate the composed bookstore example from its OpenAPI 
 verify-generated: ## Regenerate all generated code and fail if it drifts from what is committed
 	$(MAKE) generate-example
 	$(MAKE) update-generated
-	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated)" ]; then \
+	$(MAKE) update-docs
+	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md)" ]; then \
 		echo "ERROR: generated code is out of date."; \
-		echo "Run 'make generate-example' and 'make update-generated', then commit the result."; \
-		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated; \
-		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated; \
+		echo "Run 'make generate-example', 'make update-generated' and 'make update-docs', then commit the result."; \
+		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
+		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
 		exit 1; \
 	fi
 	@echo "Generated code is up to date."

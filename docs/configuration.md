@@ -15,6 +15,9 @@ oapi-codegen --config-file <cfg.yaml> [--output-file <out.rs>] <spec.yaml>
   generation produces no code, nothing is written and the tool exits with an
   explanation.
 
+For a full, auto-generated reference of every flag and argument, see
+[`cli.md`](./cli.md) (regenerate with `make update-docs`).
+
 ## Config file
 
 Keys mirror [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen)'s
