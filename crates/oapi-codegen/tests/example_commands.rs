@@ -106,7 +106,46 @@ fn runnable_examples(source: &Path, root: &Path, markdown: &str) -> Vec<Runnable
         }
     }
 
+    if let Some((dir, _)) = active {
+        panic!(
+            "`{}` has an unterminated runnable-example code block for `{dir}`",
+            source.display(),
+        );
+    }
+    if let Some(dir) = pending_dir {
+        panic!(
+            "`{}` has a `runnable-example` marker for `{dir}` but no fenced code block follows it",
+            source.display(),
+        );
+    }
+
     return examples;
+}
+
+/// A throwaway directory that removes itself on drop, so a panicking test never
+/// leaves a stale workspace behind. The nanosecond suffix keeps repeated runs
+/// (even within the same process id) from colliding.
+struct Workspace {
+    path: PathBuf,
+}
+
+impl Workspace {
+    fn new(offset: usize) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_else(|err| {
+                panic!("system clock is before UNIX_EPOCH: {err}");
+            })
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("oapi-codegen-docs-{}-{offset}-{nanos}", std::process::id(),));
+        return Self { path };
+    }
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 /// Recursively copy `src` into `dst`, creating directories as needed.
@@ -165,13 +204,13 @@ fn documented_commands_run() {
             example.source.display(),
         );
 
-        let workspace = std::env::temp_dir().join(format!("oapi-codegen-docs-{}-{offset}", std::process::id()));
-        copy_dir(&example.dir, &workspace);
+        let workspace = Workspace::new(offset);
+        copy_dir(&example.dir, &workspace.path);
 
         for args in &example.commands {
             let status = Command::new(env!("CARGO_BIN_EXE_oapi-codegen"))
                 .args(args)
-                .current_dir(&workspace)
+                .current_dir(&workspace.path)
                 .status()
                 .unwrap_or_else(|err| {
                     panic!(
@@ -187,9 +226,5 @@ fn documented_commands_run() {
                 example.source.display(),
             );
         }
-
-        std::fs::remove_dir_all(&workspace).unwrap_or_else(|err| {
-            panic!("cleaning up `{}` failed: {err}", workspace.display());
-        });
     }
 }

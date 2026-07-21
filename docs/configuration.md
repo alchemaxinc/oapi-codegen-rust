@@ -3,7 +3,7 @@
 ## CLI
 
 ```sh
-oapi-codegen --config-file <cfg.yaml> [--output-file <out.rs>] <spec.yaml>
+oapi-codegen --config-file <config-file> [--output-file <output-file>] <spec-file>
 ```
 
 - `<spec-file>` — path to the OpenAPI 3 document (YAML or JSON). Required.
