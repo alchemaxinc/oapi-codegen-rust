@@ -3,10 +3,10 @@
 ## CLI
 
 ```sh
-oapi-codegen --config-file <config-file> [--output-file <output-file>] <spec-file>
+oapi-codegen [OPTIONS] --config-file <CONFIG_FILE> <SPEC_FILE>
 ```
 
-- `<spec-file>` — path to the OpenAPI 3 document (YAML or JSON). Required.
+- `<SPEC_FILE>` — path to the OpenAPI 3 document (YAML or JSON). Required.
 - `--config-file, -c` — path to a YAML config file. Required, and must enable at
   least one artifact under `generate:` (`models`, `std-http-server`, `client`,
   or `server-urls`); the tool errors with guidance otherwise.

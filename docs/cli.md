@@ -33,7 +33,7 @@ path must be given via --output-file or the config's `output:` key:
 ###### **Options:**
 
 * `-c`, `--config-file <CONFIG_FILE>` — Path to an `oapi-codegen` YAML config file (required)
-* `-o`, `--output-file <OUTPUT_FILE>` — Output file path (overrides the config `output`). Required unless the config sets `output`
+* `-o`, `--output-file <OUTPUT_FILE>` — Output file path (overrides the config `output:`). Required unless the config sets `output:`
 
 
 

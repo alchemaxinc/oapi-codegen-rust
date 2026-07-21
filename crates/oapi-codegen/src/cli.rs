@@ -37,8 +37,8 @@ pub struct Cli {
     #[arg(short = 'c', long)]
     pub config_file: PathBuf,
 
-    /// Output file path (overrides the config `output`). Required unless the
-    /// config sets `output`.
+    /// Output file path (overrides the config `output:`). Required unless the
+    /// config sets `output:`.
     #[arg(short = 'o', long)]
     pub output_file: Option<PathBuf>,
 }

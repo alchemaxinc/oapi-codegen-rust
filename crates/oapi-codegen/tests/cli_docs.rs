@@ -45,7 +45,8 @@ fn cli_reference_is_up_to_date() {
         panic!("reading `{}` failed (run `make update-docs`): {err}", path.display());
     });
     assert_eq!(
-        generated, expected,
+        generated,
+        expected.replace("\r\n", "\n"),
         "docs/cli.md drifted from the CLI definition; run `make update-docs` if this change is intentional",
     );
 }
