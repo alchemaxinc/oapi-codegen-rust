@@ -70,10 +70,10 @@ places. This lists where `oapi-codegen-rust` deviates from
 - **Go:** `oapi-codegen` runs without a config file — `-generate` defaults to
   `types,client,server,spec` and `-o` defaults to stdout — so a bare
   `oapi-codegen spec.yaml` produces output.
-- **Rust:** invocation is explicit. `--config` is required and must enable at
-  least one artifact, an output destination is required (via `--output` or the
-  config's `output:` key), and generation that would emit no code fails with a
-  guided explanation instead of writing an empty file.
+- **Rust:** invocation is explicit. `--config-file` is required and must enable
+  at least one artifact, an output destination is required (via `--output-file`
+  or the config's `output:` key), and generation that would emit no code fails
+  with a guided explanation instead of writing an empty file.
 - **Why:** the CLI is a build step whose behavior should be obvious from the
   command and config, not from defaults; failing loudly with next steps beats a
   silent empty file.

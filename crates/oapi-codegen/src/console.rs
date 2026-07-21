@@ -56,7 +56,7 @@ pub fn report_error(err: &Error) {
 pub fn report_no_output() {
     eprintln!("{} no output destination was given.", "error:".red().bold());
     eprintln!(
-        "  {} pass `--output <file>` on the command line, or set `output:` in your config.",
+        "  {} pass `--output-file <file>` on the command line, or set `output:` in your config.",
         "hint:".cyan().bold()
     );
 }

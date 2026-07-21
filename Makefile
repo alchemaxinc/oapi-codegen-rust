@@ -56,10 +56,10 @@ update-generated: ## Refresh generated files from the coverage fixtures
 .PHONY: generate-example
 generate-example: ## Regenerate the composed bookstore example from its OpenAPI spec
 	cd examples/bookstore && \
-		cargo run -q -p oapi-codegen -- schemas/common.yaml --config oapi-codegen-common.yaml && \
-		cargo run -q -p oapi-codegen -- schemas/catalog.yaml --config oapi-codegen-catalog.yaml && \
-		cargo run -q -p oapi-codegen -- openapi.yaml --config oapi-codegen-server.yaml && \
-		cargo run -q -p oapi-codegen -- openapi.yaml --config oapi-codegen-client.yaml
+		cargo run -q -p oapi-codegen -- schemas/common.yaml --config-file oapi-codegen-common.yaml && \
+		cargo run -q -p oapi-codegen -- schemas/catalog.yaml --config-file oapi-codegen-catalog.yaml && \
+		cargo run -q -p oapi-codegen -- openapi.yaml --config-file oapi-codegen-server.yaml && \
+		cargo run -q -p oapi-codegen -- openapi.yaml --config-file oapi-codegen-client.yaml
 
 .PHONY: verify-generated
 verify-generated: ## Regenerate all generated code and fail if it drifts from what is committed
