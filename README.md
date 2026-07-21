@@ -7,7 +7,14 @@ Generate idiomatic Rust APIs and clients from OpenAPI 3 specifications, inspired
 
 ```sh
 cargo install oapi-codegen
-oapi-codegen --config-file cfg.yaml --output-file src/api.rs openapi.yaml
+```
+
+```console
+$ oapi-codegen --config-file cfg.yaml --output-file src/api.rs openapi.yaml
+? failed
+error: failed to read config file `cfg.yaml`: No such file or directory (os error 2)
+  hint: No config file exists at `cfg.yaml`; check the path and your working directory.
+
 ```
 
 See [docs/](docs/) for installation, configuration, and extensions.
