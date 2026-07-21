@@ -21,6 +21,7 @@ jobs:
         with:
           token: ${{ steps.app.outputs.token }}
           auto-merge: "true"
+          base-branch: "develop"
           merge-method: "squash"
           file-glob: ".github/**/*.yml"
           branch-prefix: "update-actions"
