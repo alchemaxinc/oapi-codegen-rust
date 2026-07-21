@@ -22,10 +22,10 @@ use crate::console::SpecStats;
 const EXAMPLES: &str = "\
 Examples:
   # Write generated code, selecting artifacts in the config file:
-  oapi-codegen api.yaml --config-file oapi-codegen.yaml --output-file src/api.rs
+  oapi-codegen --config-file oapi-codegen.yaml --output-file src/api.rs api.yaml
 
   # The output path may instead come from the config's `output:` key:
-  oapi-codegen api.yaml --config-file oapi-codegen.yaml
+  oapi-codegen --config-file oapi-codegen.yaml api.yaml
 
 A config file is required, must enable at least one artifact, and an output
 path must be given via --output-file or the config's `output:` key:

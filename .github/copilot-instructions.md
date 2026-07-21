@@ -11,6 +11,13 @@
 
 - Prefer Conventional Commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`.
 
+## CLI usage examples
+
+- In every `oapi-codegen` command example (README, docs, `--help` text, the
+  Makefile, example folders), always put options first and the positional
+  `<SPEC_FILE>` last, matching the generated `--help` usage line
+  (e.g. `oapi-codegen --config-file cfg.yaml --output-file out.rs spec.yaml`).
+
 # Rust Coding Conventions and Best Practices
 
 Follow idiomatic Rust practices and community standards when writing Rust code.
