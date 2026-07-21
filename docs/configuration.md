@@ -3,16 +3,20 @@
 ## CLI
 
 ```sh
-oapi-codegen --config <cfg.yaml> [--output <out.rs>] <spec.yaml>
+oapi-codegen [OPTIONS] --config-file <CONFIG_FILE> <SPEC_FILE>
 ```
 
-- `<spec>` — path to the OpenAPI 3 document (YAML or JSON). Required.
-- `--config, -c` — path to a YAML config file. Required, and must enable at
+- `<SPEC_FILE>` — path to the OpenAPI 3 document (YAML or JSON). Required.
+- `--config-file, -c` — path to a YAML config file. Required, and must enable at
   least one artifact under `generate:` (`models`, `std-http-server`, `client`,
   or `server-urls`); the tool errors with guidance otherwise.
-- `--output, -o` — output file. Required unless the config sets `output:`
-  (`--output` overrides it); the tool errors if neither is given. If generation
-  produces no code, nothing is written and the tool exits with an explanation.
+- `--output-file, -o` — output file. Required unless the config sets `output:`
+  (`--output-file` overrides it); the tool errors if neither is given. If
+  generation produces no code, nothing is written and the tool exits with an
+  explanation.
+
+For a full, auto-generated reference of every flag and argument, see
+[`cli.md`](./cli.md) (regenerate with `make update-docs`).
 
 ## Config file
 

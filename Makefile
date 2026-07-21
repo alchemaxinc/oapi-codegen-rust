@@ -53,26 +53,31 @@ test-e2e: ## Run the Docker end-to-end test (generated server + client over HTTP
 update-generated: ## Refresh generated files from the coverage fixtures
 	UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage
 
+.PHONY: update-docs
+update-docs: ## Refresh docs/cli.md from the clap CLI definition
+	UPDATE_DOCS=1 cargo test -p oapi-codegen --test cli_docs
+
 .PHONY: generate-example
 generate-example: ## Regenerate the composed bookstore example from its OpenAPI spec
 	cd examples/bookstore && \
-		cargo run -q -p oapi-codegen -- schemas/common.yaml --config oapi-codegen-common.yaml && \
-		cargo run -q -p oapi-codegen -- schemas/catalog.yaml --config oapi-codegen-catalog.yaml && \
-		cargo run -q -p oapi-codegen -- openapi.yaml --config oapi-codegen-server.yaml && \
-		cargo run -q -p oapi-codegen -- openapi.yaml --config oapi-codegen-client.yaml
+		cargo run -q -p oapi-codegen -- --config-file oapi-codegen-common.yaml schemas/common.yaml && \
+		cargo run -q -p oapi-codegen -- --config-file oapi-codegen-catalog.yaml schemas/catalog.yaml && \
+		cargo run -q -p oapi-codegen -- --config-file oapi-codegen-server.yaml openapi.yaml && \
+		cargo run -q -p oapi-codegen -- --config-file oapi-codegen-client.yaml openapi.yaml
 
 .PHONY: verify-generated
-verify-generated: ## Regenerate all generated code and fail if it drifts from what is committed
+verify-generated: ## Regenerate all generated files and fail if they drift from what is committed
 	$(MAKE) generate-example
 	$(MAKE) update-generated
-	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated)" ]; then \
-		echo "ERROR: generated code is out of date."; \
-		echo "Run 'make generate-example' and 'make update-generated', then commit the result."; \
-		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated; \
-		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated; \
+	$(MAKE) update-docs
+	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md)" ]; then \
+		echo "ERROR: generated files are out of date."; \
+		echo "Run 'make generate-example', 'make update-generated' and 'make update-docs', then commit the result."; \
+		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
+		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
 		exit 1; \
 	fi
-	@echo "Generated code is up to date."
+	@echo "Generated files are up to date."
 
 .PHONY: docs
 docs: ## Generate and open Rust documentation

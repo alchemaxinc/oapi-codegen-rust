@@ -14,44 +14,10 @@ use clap::Parser;
 use oapi_codegen::Config;
 use oapi_codegen::Error;
 use oapi_codegen::Result;
+use oapi_codegen::cli::Cli;
 use oapi_codegen::config::Generate;
 
 use crate::console::SpecStats;
-
-/// Extra `--help` text with worked examples.
-const EXAMPLES: &str = "\
-Examples:
-  # Write generated code, selecting artifacts in the config file:
-  oapi-codegen api.yaml --config oapi-codegen.yaml --output src/api.rs
-
-  # The output path may instead come from the config's `output:` key:
-  oapi-codegen api.yaml --config oapi-codegen.yaml
-
-A config file is required, must enable at least one artifact, and an output
-path must be given via --output or the config's `output:` key:
-  # oapi-codegen.yaml
-  output: src/api.rs
-  generate:
-    models: true
-    std-http-server: true
-    client: true";
-
-/// Generate idiomatic Rust from an OpenAPI 3 specification.
-#[derive(Debug, Parser)]
-#[command(name = "oapi-codegen", version, about, after_long_help = EXAMPLES)]
-struct Cli {
-    /// Path to the OpenAPI 3 specification (YAML or JSON).
-    spec: PathBuf,
-
-    /// Path to an `oapi-codegen` YAML config file (required).
-    #[arg(short, long)]
-    config: PathBuf,
-
-    /// Output file path (overrides the config `output`). Required unless the
-    /// config sets `output`.
-    #[arg(short, long)]
-    output: Option<PathBuf>,
-}
 
 /// A failure that has enough context to be reported to the user.
 enum CliFailure {
@@ -116,7 +82,7 @@ fn main() -> ExitCode {
 
 /// Run the generator according to the parsed CLI arguments.
 fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
-    let config = Config::load(&cli.config)?;
+    let config = Config::load(&cli.config_file)?;
 
     if config.generate.embedded_spec {
         return Err(CliFailure::Generator(Error::Unimplemented("embedded-spec".to_owned())));
@@ -125,20 +91,20 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
     let generate = &config.generate;
     if !generate.models && !generate.std_http_server && !generate.client && !generate.server_urls {
         return Err(CliFailure::NoArtifacts {
-            config: cli.config.clone(),
+            config: cli.config_file.clone(),
         });
     }
 
-    let output = cli.output.clone().or_else(|| {
+    let output = cli.output_file.clone().or_else(|| {
         return config.output.clone();
     });
     let output = output.ok_or(CliFailure::NoOutput)?;
 
-    let code = oapi_codegen::generate(&cli.spec, &config)?;
+    let code = oapi_codegen::generate(&cli.spec_file, &config)?;
     if console::is_effectively_empty(&code) {
-        let stats = spec_stats(&cli.spec, &config)?;
+        let stats = spec_stats(&cli.spec_file, &config)?;
         return Err(CliFailure::EmptyOutput {
-            spec: cli.spec.clone(),
+            spec: cli.spec_file.clone(),
             stats,
             generate: config.generate.clone(),
         });

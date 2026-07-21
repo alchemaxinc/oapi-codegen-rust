@@ -11,6 +11,20 @@
 
 - Prefer Conventional Commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`.
 
+## CLI usage examples
+
+- In every `oapi-codegen` command example (README, docs, `--help` text, the
+  Makefile, example folders), always put options first and the positional
+  `<SPEC_FILE>` last, matching the generated `--help` usage line
+  (e.g. `oapi-codegen --config-file cfg.yaml --output-file out.rs spec.yaml`).
+
+## CLI definition is the single source of truth
+
+- The clap CLI lives in `crates/oapi-codegen/src/cli.rs`. After changing any
+  flag, argument, help text, or the `EXAMPLES` block, run `make update-docs` to
+  regenerate `docs/cli.md` (it is generated — never edit it by hand). CI's
+  `make verify-generated` fails on drift.
+
 # Rust Coding Conventions and Best Practices
 
 Follow idiomatic Rust practices and community standards when writing Rust code.
