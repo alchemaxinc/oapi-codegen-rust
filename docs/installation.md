@@ -10,7 +10,7 @@ Verify:
 
 ```console
 $ oapi-codegen --version
-oapi-codegen [..]
+oapi-codegen [VERSION]
 
 ```
 
