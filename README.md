@@ -61,6 +61,11 @@ against [`.github/openapi-versions.json`](.github/openapi-versions.json).
 
 ## Documentation
 
+> [!NOTE]  
+> These documents are primarily written by LLMs and are not intended for human reading. This project aims to be self-explanitory
+> through a sharp focus on TUI UX and guided error messaging. The documentation exists to help guide LLM context where needed.
+> They have been checked and verified by humans, and can be read if interested.
+
 - [Installation](docs/installation.md)
 - [Configuration](docs/configuration.md)
 - [OpenAPI extensions](docs/extensions.md)
