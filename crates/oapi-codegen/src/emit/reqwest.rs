@@ -719,13 +719,24 @@ fn response_case_build(name: &proc_macro2::Ident, case: &ResponseCase) -> Result
         let field = header.name.to_token();
         let ty = emit_type(&header.ty)?;
         let header_name = Literal::string(&header.header_name);
-        header_reads.push(quote! {
-            let #field: Option<#ty> = response
+        let read = quote! {
+            response
                 .headers()
                 .get(#header_name)
                 .and_then(|value| return value.to_str().ok())
-                .and_then(|value| return value.parse().ok());
-        });
+                .and_then(|value| return value.parse().ok())
+        };
+        if header.required {
+            let missing = format!("missing or invalid required response header `{}`", header.header_name);
+            header_reads.push(quote! {
+                let #field: #ty = #read
+                    .ok_or_else(|| return ClientError::Decode(#missing.to_owned()))?;
+            });
+        } else {
+            header_reads.push(quote! {
+                let #field: Option<#ty> = #read;
+            });
+        }
         construct_fields.push(quote! { #field });
     }
     return Ok(quote! {

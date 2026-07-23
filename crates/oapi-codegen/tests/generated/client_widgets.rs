@@ -100,7 +100,7 @@ pub enum AddNoteResponse {
     Created {
         body: String,
         /// Identifier assigned to the stored note.
-        x_note_id: Option<String>,
+        x_note_id: String,
     },
 }
 
@@ -335,11 +335,17 @@ impl Client {
         let response = request.send()?;
         let status = response.status();
         if status.as_u16() == 201 {
-            let x_note_id: Option<String> = response
+            let x_note_id: String = response
                 .headers()
                 .get("X-Note-Id")
                 .and_then(|value| return value.to_str().ok())
-                .and_then(|value| return value.parse().ok());
+                .and_then(|value| return value.parse().ok())
+                .ok_or_else(|| {
+                    return ClientError::Decode(
+                        "missing or invalid required response header `X-Note-Id`"
+                            .to_owned(),
+                    );
+                })?;
             let body = response.text()?;
             return Ok(AddNoteResponse::Created {
                 body,

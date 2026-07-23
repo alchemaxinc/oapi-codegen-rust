@@ -150,7 +150,12 @@ fn response_variant_def(case: &ResponseCase) -> Result<TokenStream> {
         let field = header.name.to_token();
         let ty = emit_type(&header.ty)?;
         let doc = doc_attr(&header.doc);
-        field_defs.push(quote! { #doc #field: Option<#ty> });
+        let field_ty = if header.required {
+            quote! { #ty }
+        } else {
+            quote! { Option<#ty> }
+        };
+        field_defs.push(quote! { #doc #field: #field_ty });
     }
     return Ok(quote! { #variant { #(#field_defs),* } });
 }

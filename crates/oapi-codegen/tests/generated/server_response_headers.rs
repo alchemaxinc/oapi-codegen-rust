@@ -7,14 +7,14 @@ pub enum GetWidgetsResponse {
     Ok {
         body: Vec<String>,
         /// Correlation id echoed to the caller.
-        x_request_id: Option<String>,
+        x_request_id: String,
         /// Remaining quota in the current window.
         x_rate_limit_remaining: Option<i32>,
     },
     /// No content, but a correlation id header is still returned.
-    NoContent { x_request_id: Option<String> },
+    NoContent { x_request_id: String },
     /// An error, with a correlation id.
-    Default { status: http::StatusCode, body: String, x_request_id: Option<String> },
+    Default { status: http::StatusCode, body: String, x_request_id: String },
 }
 
 /// Server behaviour: implement one method per operation.
@@ -30,16 +30,14 @@ impl axum::response::IntoResponse for GetWidgetsResponse {
         match self {
             GetWidgetsResponse::Ok { body, x_request_id, x_rate_limit_remaining } => {
                 let mut header_map = axum::http::HeaderMap::new();
-                if let Some(x_request_id) = x_request_id {
-                    if let Ok(value) = axum::http::HeaderValue::from_str(
-                        &x_request_id.to_string(),
-                    ) {
-                        header_map
-                            .insert(
-                                axum::http::HeaderName::from_static("x-request-id"),
-                                value,
-                            );
-                    }
+                if let Ok(value) = axum::http::HeaderValue::from_str(
+                    &x_request_id.to_string(),
+                ) {
+                    header_map
+                        .insert(
+                            axum::http::HeaderName::from_static("x-request-id"),
+                            value,
+                        );
                 }
                 if let Some(x_rate_limit_remaining) = x_rate_limit_remaining {
                     if let Ok(value) = axum::http::HeaderValue::from_str(
@@ -73,16 +71,14 @@ impl axum::response::IntoResponse for GetWidgetsResponse {
             }
             GetWidgetsResponse::NoContent { x_request_id } => {
                 let mut header_map = axum::http::HeaderMap::new();
-                if let Some(x_request_id) = x_request_id {
-                    if let Ok(value) = axum::http::HeaderValue::from_str(
-                        &x_request_id.to_string(),
-                    ) {
-                        header_map
-                            .insert(
-                                axum::http::HeaderName::from_static("x-request-id"),
-                                value,
-                            );
-                    }
+                if let Ok(value) = axum::http::HeaderValue::from_str(
+                    &x_request_id.to_string(),
+                ) {
+                    header_map
+                        .insert(
+                            axum::http::HeaderName::from_static("x-request-id"),
+                            value,
+                        );
                 }
                 return (
                     {
@@ -102,16 +98,14 @@ impl axum::response::IntoResponse for GetWidgetsResponse {
             }
             GetWidgetsResponse::Default { status, body, x_request_id } => {
                 let mut header_map = axum::http::HeaderMap::new();
-                if let Some(x_request_id) = x_request_id {
-                    if let Ok(value) = axum::http::HeaderValue::from_str(
-                        &x_request_id.to_string(),
-                    ) {
-                        header_map
-                            .insert(
-                                axum::http::HeaderName::from_static("x-request-id"),
-                                value,
-                            );
-                    }
+                if let Ok(value) = axum::http::HeaderValue::from_str(
+                    &x_request_id.to_string(),
+                ) {
+                    header_map
+                        .insert(
+                            axum::http::HeaderName::from_static("x-request-id"),
+                            value,
+                        );
                 }
                 return (status, header_map, axum::Json(body)).into_response();
             }

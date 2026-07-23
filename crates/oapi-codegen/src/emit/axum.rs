@@ -471,17 +471,23 @@ fn emit_response_with_headers(
     return Ok(arm);
 }
 
-/// Emit the best-effort insertion of one response header into `header_map`.
-/// Response headers are carried as `Option<T>`; a present value that fails to
-/// encode as a `HeaderValue` is skipped (never panics).
+/// Emit the insertion of one response header into `header_map`. A value that
+/// fails to encode as a `HeaderValue` is skipped (never panics); an optional
+/// header is only inserted when present.
 fn emit_response_header_insert(header: &ResponseHeader) -> TokenStream {
     let ident = header.name.to_token();
     let lower_name = header.header_name.to_ascii_lowercase();
+    let insert = quote! {
+        if let Ok(value) = axum::http::HeaderValue::from_str(&#ident.to_string()) {
+            header_map.insert(axum::http::HeaderName::from_static(#lower_name), value);
+        }
+    };
+    if header.required {
+        return insert;
+    }
     return quote! {
         if let Some(#ident) = #ident {
-            if let Ok(value) = axum::http::HeaderValue::from_str(&#ident.to_string()) {
-                header_map.insert(axum::http::HeaderName::from_static(#lower_name), value);
-            }
+            #insert
         }
     };
 }

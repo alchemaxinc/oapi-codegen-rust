@@ -44,6 +44,11 @@ Setting both `std-http-server` and `client` emits models, per-operation types,
 and both interfaces flat at the crate root, so the server and client share one
 file and the same response types.
 
+Generated code may reference `http::StatusCode` directly (for example, for
+`default` and range responses), so add [`http`](https://crates.io/crates/http)
+as a direct dependency of the generated crate. `axum` and `reqwest` re-export
+the type, but the `http::` path names the crate itself.
+
 ### `output-options`
 
 | Key                     | Purpose                                                                                             |
