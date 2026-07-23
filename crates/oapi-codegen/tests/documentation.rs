@@ -1,7 +1,13 @@
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 const README_MD: &str = "README.md";
+
+/// Serializes tests that mutate the process working directory. `set_current_dir`
+/// is process-global, so the doc tests that switch directories must not run
+/// concurrently or they would observe each other's directory.
+static WORKING_DIR_LOCK: Mutex<()> = Mutex::new(());
 
 struct WorkingDirGuard {
     previous: PathBuf,
@@ -37,6 +43,14 @@ impl Drop for WorkingDirGuard {
         }
         let _ = std::env::set_current_dir(&self.previous);
     }
+}
+
+/// Acquires the process-wide working-directory lock, recovering from poisoning
+/// so a panic in one case does not cascade into unrelated test failures.
+fn lock_working_dir() -> std::sync::MutexGuard<'static, ()> {
+    return WORKING_DIR_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| return poisoned.into_inner());
 }
 
 fn collect_markdown_files(dir: &Path) -> Vec<PathBuf> {
@@ -83,6 +97,7 @@ fn documentation_root_readme_examples() {
 
     // Idiomatic trycmd requires adding a `README.in` folder into the root dir, which I found incredibly polluting.
     // They're fine to exist inside `test/` folders and the like, but for ensuring that the root README.md does not get out-of-sync, I found this workaround acceptable.
+    let _lock = lock_working_dir();
     let _cwd = WorkingDirGuard::change_to(&repo_root).remove_on_drop(repo_root.join("generated"));
     trycmd::TestCases::new().case(repo_root.join(README_MD));
 }
@@ -95,12 +110,21 @@ fn documentation_match_cli_behavior() {
     for path in collect_markdown_files(&repo_root.join("docs")) {
         cases.case(path);
     }
-
-    for path in collect_example_readmes(&repo_root.join("examples")) {
-        cases.case(path);
-    }
-
     cases
         .insert_var("[VERSION]", env!("CARGO_PKG_VERSION"))
         .unwrap_or_else(|err| panic!("[VERSION] should be a valid trycmd substitution variable: {err}"));
+    drop(cases);
+
+    // Example READMEs document commands meant to be run from the example's own
+    // directory (relative config and spec paths), so each one runs with the
+    // working directory pointed at that folder. Regenerating overwrites the
+    // committed `generated/` output in place, which is deterministic.
+    let _lock = lock_working_dir();
+    for readme in collect_example_readmes(&repo_root.join("examples")) {
+        let dir = readme
+            .parent()
+            .unwrap_or_else(|| panic!("example README `{}` has no parent directory", readme.display()));
+        let _cwd = WorkingDirGuard::change_to(dir).remove_on_drop(dir.join("generated"));
+        trycmd::TestCases::new().case(&readme);
+    }
 }
