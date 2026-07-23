@@ -15,6 +15,9 @@ on:
 env:
   BASE_BRANCH: develop
   PR_TITLE: "docs: track newly released OpenAPI specification versions"
+  # Kept in sync with ci.yml so the row we insert is formatted by the same
+  # Prettier version that CI later checks against.
+  PRETTIER_VERSION: "3.9.5"
 
 jobs:
   check-openapi-versions:
@@ -70,14 +73,6 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           NEW_VERSIONS: ${{ steps.detect.outputs.new }}
         run: |
-          # Column widths come from the table separator, so inserted rows stay
-          # aligned exactly as Prettier renders them and CI's format check passes.
-          sep=$(grep -m1 -E '^\| -+ \|' README.md | sed 's/^| //; s/ |$//')
-          IFS='|' read -r c1 c2 c3 <<< "$sep"
-          w1=$(printf '%s' "$c1" | tr -cd '-' | wc -c | tr -d ' ')
-          w2=$(printf '%s' "$c2" | tr -cd '-' | wc -c | tr -d ' ')
-          w3=$(printf '%s' "$c3" | tr -cd '-' | wc -c | tr -d ' ')
-
           for minor in $NEW_VERSIONS; do
             title="Support OpenAPI $minor"
 
@@ -104,9 +99,9 @@ jobs:
               echo "::notice::Reusing existing tracking issue for OpenAPI $minor: $url"
             fi
 
+            # Append an unformatted row; the next step runs Prettier to align it.
             if ! grep -q "^| v${minor}.0 " README.md; then
-              row=$(printf '| %-*s | %-*s | %-*s |' \
-                "$w1" "v${minor}.0" "$w2" "Planned" "$w3" "Tracking [here]($url).")
+              row="| v${minor}.0 | Planned | Tracking [here]($url). |"
               awk -v row="$row" \
                 '/^\| v3\./ { last = NR } { lines[NR] = $0 }
                  END { for (i = 1; i <= NR; i++) { print lines[i]; if (i == last) print row } }' \
@@ -114,6 +109,10 @@ jobs:
               mv README.md.tmp README.md
             fi
           done
+
+      - name: Format support matrix
+        if: steps.detect.outputs.new != ''
+        run: npx --yes prettier@${{ env.PRETTIER_VERSION }} --write README.md
 
       - name: Check for changes
         id: changes
