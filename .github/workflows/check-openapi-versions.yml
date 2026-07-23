@@ -1,0 +1,65 @@
+name: Check OpenAPI Versions
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 1 * *" # Run on the 1st of every month at midnight
+
+env:
+  PRETTIER_VERSION: "3.9.5"
+
+jobs:
+  check-openapi-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create temporary GitHub App Token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          owner: ${{ github.repository_owner }}
+          client-id: ${{ vars.HOUSEKEEPING_BOT_APP_ID }}
+          private-key: ${{ secrets.HOUSEKEEPING_BOT_PRIVATE_KEY }}
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+          ref: develop
+          fetch-depth: 0
+
+      - name: Reconcile OpenAPI versions
+        id: check
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_LABEL: enhancement
+          ISSUE_TYPE: Feature
+        run: .github/scripts/check-openapi-versions.sh
+
+      - name: Format changed files
+        if: steps.check.outputs.changed == 'true'
+        run: npx prettier@${{ env.PRETTIER_VERSION }} --write README.md .github/openapi-versions.json
+
+      - name: Open pull request
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          branch="chore/openapi-version-tracking"
+          title="chore(openapi): track newly released OpenAPI versions"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git switch -c "$branch"
+          git add README.md .github/openapi-versions.json
+          git commit -m "$title"
+          git push --force-with-lease origin "$branch"
+
+          if ! gh pr view "$branch" --json state --jq '.state' 2>/dev/null | grep -qx OPEN; then
+            gh pr create \
+              --base develop \
+              --head "$branch" \
+              --title "$title" \
+              --body "Automated update from the OpenAPI version check workflow: new upstream spec versions were detected and are now tracked in the README support matrix and \`.github/openapi-versions.json\`. Tracking issues have been filed for each new version."
+          fi
