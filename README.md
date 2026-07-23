@@ -12,7 +12,7 @@ cargo install oapi-codegen
 ```console
 $ oapi-codegen --config-file cfg.yaml --output-file src/api.rs openapi.yaml
 ? failed
-error: failed to read config file `cfg.yaml`: No such file or directory (os error 2)
+error: failed to read config file `cfg.yaml`: [..]
   hint: No config file exists at `cfg.yaml`; check the path and your working directory.
 
 ```
