@@ -3,6 +3,42 @@ use std::path::PathBuf;
 
 const README_MD: &str = "README.md";
 
+struct WorkingDirGuard {
+    previous: PathBuf,
+    cleanup: Option<PathBuf>,
+}
+
+impl WorkingDirGuard {
+    fn change_to(target: &Path) -> Self {
+        let previous = std::env::current_dir().unwrap_or_else(|err| panic!("reading current directory failed: {err}"));
+        std::env::set_current_dir(target)
+            .unwrap_or_else(|err| panic!("switching current directory to `{}` failed: {err}", target.display()));
+        return Self {
+            previous,
+            cleanup: None,
+        };
+    }
+
+    /// Removes `path` on drop, but only if it does not already exist now. This
+    /// keeps a developer's pre-existing directory untouched while cleaning up
+    /// anything the case generates.
+    fn remove_on_drop(mut self, path: PathBuf) -> Self {
+        if !path.exists() {
+            self.cleanup = Some(path);
+        }
+        return self;
+    }
+}
+
+impl Drop for WorkingDirGuard {
+    fn drop(&mut self) {
+        if let Some(path) = &self.cleanup {
+            let _ = std::fs::remove_dir_all(path);
+        }
+        let _ = std::env::set_current_dir(&self.previous);
+    }
+}
+
 fn collect_markdown_files(dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap_or_else(|err| panic!("reading `{}` failed: {err}", dir.display()))
@@ -40,12 +76,22 @@ fn collect_example_readmes(dir: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn doc_examples_match_cli_behavior() {
+fn documentation_root_readme_examples() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let repo_root = std::fs::canonicalize(&repo_root)
+        .unwrap_or_else(|err| panic!("resolving repo root `{}` failed: {err}", repo_root.display()));
+
+    // Idiomatic trycmd requires adding a `README.in` folder into the root dir, which I found incredibly polluting.
+    // They're fine to exist inside `test/` folders and the like, but for ensuring that the root README.md does not get out-of-sync, I found this workaround acceptable.
+    let _cwd = WorkingDirGuard::change_to(&repo_root).remove_on_drop(repo_root.join("generated"));
+    trycmd::TestCases::new().case(repo_root.join(README_MD));
+}
+
+#[test]
+fn documentation_match_cli_behavior() {
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
 
     let cases = trycmd::TestCases::new();
-    cases.case(repo_root.join(README_MD));
-
     for path in collect_markdown_files(&repo_root.join("docs")) {
         cases.case(path);
     }
@@ -56,5 +102,5 @@ fn doc_examples_match_cli_behavior() {
 
     cases
         .insert_var("[VERSION]", env!("CARGO_PKG_VERSION"))
-        .expect("[VERSION] should be a valid trycmd substitution variable");
+        .unwrap_or_else(|err| panic!("[VERSION] should be a valid trycmd substitution variable: {err}"));
 }
