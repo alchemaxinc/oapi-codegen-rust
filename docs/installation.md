@@ -8,8 +8,10 @@ cargo install oapi-codegen
 
 Verify:
 
-```sh
-oapi-codegen --version
+```console
+$ oapi-codegen --version
+oapi-codegen [VERSION]
+
 ```
 
 ## From source

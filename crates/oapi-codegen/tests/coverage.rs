@@ -1051,11 +1051,11 @@ fn combined_generated_tests_cover_combined_fixtures() {
 }
 
 /// Every supported generated file must be `include!`d by
-/// `tests/generated_compiles.rs` so its emitted code is type-checked against
+/// `tests/generated.rs` so its emitted code is type-checked against
 /// real serde/chrono/uuid.
 #[test]
 fn generated_outputs_are_compile_checked() {
-    let source = include_str!("generated_compiles.rs");
+    let source = include_str!("generated.rs");
     let stems = fixtures_with(Status::Supported)
         .into_iter()
         .chain(SERVER_FIXTURES.iter().copied())
@@ -1065,7 +1065,7 @@ fn generated_outputs_are_compile_checked() {
         let needle = format!("include!(\"generated/{stem}.rs\")");
         assert!(
             source.contains(&needle),
-            "tests/generated_compiles.rs does not compile-check `{stem}`; \
+            "tests/generated.rs does not compile-check `{stem}`; \
              add a `pub mod {stem} {{ {needle}; }}`",
         );
     }

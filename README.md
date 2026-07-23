@@ -7,7 +7,14 @@ Generate idiomatic Rust APIs and clients from OpenAPI 3 specifications, inspired
 
 ```sh
 cargo install oapi-codegen
-oapi-codegen --config-file cfg.yaml --output-file src/api.rs openapi.yaml
+```
+
+From this repository's root (e.g., after cloning), try the included bookstore example:
+
+```console
+$ oapi-codegen --config-file examples/bookstore/oapi-codegen-server.yaml examples/bookstore/openapi.yaml
+✓ wrote generated/restapi.rs
+
 ```
 
 See [docs/](docs/) for installation, configuration, and extensions.
@@ -28,16 +35,26 @@ differ:
 - Typed status-code response enums instead of response structs.
 - Token-based generation (`quote`/`syn`), not user-overridable `text/template`.
 - Blocking `reqwest` client — no async runtime forced on consumers.
-- Targets OpenAPI 3.0.
 - Reuses your `oapi-codegen` YAML config — unknown keys are ignored.
-- Explicit over implicit: `--config-file` and an output path are required, and
-  empty generation fails loudly (Go defaults these and prints to stdout).
+- Explicit over implicit: `--config-file` is required, and an output path must be given via `--output-file` or the
+  config's `output:` key; empty generation fails loudly (Go defaults these and prints to stdout).
 - `x-rust-*` vendor extensions; `x-go-*` keys ignored.
 
 See [design decisions vs. Go](docs/design.md) for the rationale.
 
 Otherwise, the project strives to be a faithful drop-in from the Go-based version in as idiomatic Rust as possible, with
 similar command-line interface and configuration options.
+
+### OpenAPI Version Support
+
+Adding full support to all OpenAPI versions is not trivial, and is done in iterations which all require various design
+decisions to support.
+
+| Version | Status    | Notes                                                                                          |
+| ------- | --------- | ---------------------------------------------------------------------------------------------- |
+| v3.0.0  | Supported | Supported in [`v1.0.0`](https://github.com/alchemaxinc/oapi-codegen-rust/releases/tag/v1.0.0). |
+| v3.1.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/33).                   |
+| v3.2.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/48).                   |
 
 ## Documentation
 
