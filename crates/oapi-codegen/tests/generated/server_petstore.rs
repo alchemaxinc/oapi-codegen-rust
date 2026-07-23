@@ -20,6 +20,38 @@ pub struct Error {
     pub message: String,
 }
 
+/// List all pets.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListPetsResponse {
+    /// The full list of pets.
+    Ok(Vec<Pet>),
+}
+
+/// Register a new pet.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreatePetResponse {
+    /// The pet was created.
+    Created(Pet),
+    /// The request body was invalid.
+    BadRequest(Error),
+}
+
+/// Fetch a single pet by id.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetPetResponse {
+    /// The requested pet.
+    Ok(Pet),
+    /// No pet has that id.
+    NotFound(Error),
+}
+
+/// Remove a pet by id.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeletePetResponse {
+    /// The pet was removed.
+    NoContent,
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// List all pets.
@@ -41,13 +73,6 @@ pub trait Api: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<Output = DeletePetResponse> + Send;
 }
 
-/// List all pets.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ListPetsResponse {
-    /// The full list of pets.
-    Ok(Vec<Pet>),
-}
-
 impl axum::response::IntoResponse for ListPetsResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
@@ -62,15 +87,6 @@ impl axum::response::IntoResponse for ListPetsResponse {
             }
         }
     }
-}
-
-/// Register a new pet.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreatePetResponse {
-    /// The pet was created.
-    Created(Pet),
-    /// The request body was invalid.
-    BadRequest(Error),
 }
 
 impl axum::response::IntoResponse for CreatePetResponse {
@@ -98,15 +114,6 @@ impl axum::response::IntoResponse for CreatePetResponse {
     }
 }
 
-/// Fetch a single pet by id.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetPetResponse {
-    /// The requested pet.
-    Ok(Pet),
-    /// No pet has that id.
-    NotFound(Error),
-}
-
 impl axum::response::IntoResponse for GetPetResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
@@ -130,13 +137,6 @@ impl axum::response::IntoResponse for GetPetResponse {
             }
         }
     }
-}
-
-/// Remove a pet by id.
-#[derive(Debug, Clone, PartialEq)]
-pub enum DeletePetResponse {
-    /// The pet was removed.
-    NoContent,
 }
 
 impl axum::response::IntoResponse for DeletePetResponse {

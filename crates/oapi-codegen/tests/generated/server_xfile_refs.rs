@@ -7,6 +7,22 @@ pub struct ListThingsQuery {
     pub page_size: Option<i32>,
 }
 
+/// List things.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListThingsResponse {
+    /// ok
+    Ok,
+}
+
+/// Create a thing.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateThingResponse {
+    /// created
+    Created,
+    /// The thing was not found.
+    NotFound,
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// List things.
@@ -19,13 +35,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         body: crate::apimodel::NewThing,
     ) -> impl std::future::Future<Output = CreateThingResponse> + Send;
-}
-
-/// List things.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ListThingsResponse {
-    /// ok
-    Ok,
 }
 
 impl axum::response::IntoResponse for ListThingsResponse {
@@ -42,15 +51,6 @@ impl axum::response::IntoResponse for ListThingsResponse {
             }
         }
     }
-}
-
-/// Create a thing.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateThingResponse {
-    /// created
-    Created,
-    /// The thing was not found.
-    NotFound,
 }
 
 impl axum::response::IntoResponse for CreateThingResponse {

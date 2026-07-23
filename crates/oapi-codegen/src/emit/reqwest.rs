@@ -13,12 +13,9 @@ use quote::quote;
 
 use crate::emit::doc_attr;
 use crate::emit::emit_type;
-use crate::emit::models::emit_struct;
 use crate::error::Error;
 use crate::error::Result;
 use crate::ir::BodyKind;
-use crate::ir::Cookies;
-use crate::ir::Headers;
 use crate::ir::Multipart;
 use crate::ir::NegotiatedBody;
 use crate::ir::Operation;
@@ -85,29 +82,6 @@ fn client_items(service: &Service) -> Result<Vec<TokenStream>> {
         .any(|operation| return !operation.path_params.is_empty())
     {
         items.push(path_param_encode_set());
-    }
-    for operation in &service.operations {
-        if let Some(query) = &operation.query {
-            items.push(emit_struct(query)?);
-        }
-        if let Some(headers) = &operation.headers {
-            items.push(emit_headers_struct(headers)?);
-        }
-        if let Some(cookies) = &operation.cookies {
-            items.push(emit_cookies_struct(cookies)?);
-        }
-        if let Some(RequestPayload::Multipart(multipart)) = &operation.request {
-            items.push(crate::emit::emit_multipart_struct(multipart)?);
-        }
-        if let Some(RequestPayload::Negotiated(request)) = &operation.request {
-            items.push(crate::emit::emit_negotiated_body_enum(request)?);
-        }
-        for case in &operation.responses {
-            if let Some(ResponseBody::Negotiated(body)) = &case.body {
-                items.push(crate::emit::emit_negotiated_body_enum(body)?);
-            }
-        }
-        items.push(emit_response_enum(operation)?);
     }
     items.push(client_struct(&service.security_schemes));
     items.push(emit_client_impl(service)?);
@@ -200,77 +174,6 @@ fn client_struct(schemes: &[SecurityScheme]) -> TokenStream {
             #(#credentials,)*
         }
     };
-}
-
-/// Emit a plain input struct for an operation's header parameters. Unlike the
-/// server's header struct this carries no extractor impl — the client reads the
-/// fields to set request headers.
-fn emit_headers_struct(headers: &Headers) -> Result<TokenStream> {
-    let name = headers.name.to_token();
-    let mut fields = Vec::with_capacity(headers.params.len());
-    for param in &headers.params {
-        let field = param.name.to_token();
-        let ty = emit_type(&param.ty)?;
-        let ty = if param.required {
-            ty
-        } else {
-            quote! { Option<#ty> }
-        };
-        let doc = doc_attr(&param.doc);
-        fields.push(quote! { #doc pub #field: #ty });
-    }
-    return Ok(quote! {
-        pub struct #name {
-            #(#fields),*
-        }
-    });
-}
-
-/// Emit a plain input struct for an operation's cookie parameters, mirroring
-/// [`emit_headers_struct`].
-fn emit_cookies_struct(cookies: &Cookies) -> Result<TokenStream> {
-    let name = cookies.name.to_token();
-    let mut fields = Vec::with_capacity(cookies.params.len());
-    for param in &cookies.params {
-        let field = param.name.to_token();
-        let ty = emit_type(&param.ty)?;
-        let ty = if param.required {
-            ty
-        } else {
-            quote! { Option<#ty> }
-        };
-        let doc = doc_attr(&param.doc);
-        fields.push(quote! { #doc pub #field: #ty });
-    }
-    return Ok(quote! {
-        pub struct #name {
-            #(#fields),*
-        }
-    });
-}
-
-/// Emit the response enum an operation's method returns.
-///
-/// The variant shapes mirror the server's response enum (a status field for
-/// `default`/range responses, then the body, then declared headers) but the
-/// status uses `reqwest::StatusCode` and header fields are always `Option<T>`:
-/// a client cannot assume the server honoured a required-header contract.
-fn emit_response_enum(operation: &Operation) -> Result<TokenStream> {
-    let name = operation.response_enum.to_token();
-    let doc = doc_attr(&operation.doc);
-    let mut variants = Vec::with_capacity(operation.responses.len());
-    for case in &operation.responses {
-        let (variant_def, _) = response_case(&name, case)?;
-        let case_doc = doc_attr(&case.doc);
-        variants.push(quote! { #case_doc #variant_def });
-    }
-    return Ok(quote! {
-        #doc
-        #[derive(Debug, Clone, PartialEq)]
-        pub enum #name {
-            #(#variants),*
-        }
-    });
 }
 
 /// Emit the `impl Client` block: the constructors, the `with_<scheme>` credential
@@ -748,7 +651,7 @@ fn decode_response(operation: &Operation) -> Result<TokenStream> {
     let mut ranges = Vec::new();
     let mut default = None;
     for case in &operation.responses {
-        let (_, build) = response_case(&name, case)?;
+        let build = response_case_build(&name, case)?;
         match &case.status {
             ResponseStatus::Fixed(code) => {
                 let code = Literal::u16_unsuffixed(*code);
@@ -782,43 +685,33 @@ fn decode_response(operation: &Operation) -> Result<TokenStream> {
     });
 }
 
-/// Emit both the enum variant definition and the decode block for one response
-/// case, keeping the two in agreement. The decode block reads the declared
-/// headers, decodes the body, and returns the constructed variant.
-fn response_case(name: &proc_macro2::Ident, case: &ResponseCase) -> Result<(TokenStream, TokenStream)> {
+/// Emit the decode block for one response case: read the declared headers,
+/// decode the body, and return the constructed shared response-enum variant
+/// (defined by [`crate::emit::operation`]).
+fn response_case_build(name: &proc_macro2::Ident, case: &ResponseCase) -> Result<TokenStream> {
     let variant = case.variant.to_token();
     let dynamic = !matches!(case.status, ResponseStatus::Fixed(_));
     let body_ty = response_body_type(&case.body)?;
     let decode_body = body_decode(&case.body)?;
 
     if case.headers.is_empty() {
-        let variant_def = match (&body_ty, dynamic) {
-            (None, false) => quote! { #variant },
-            (None, true) => quote! { #variant(reqwest::StatusCode) },
-            (Some(ty), false) => quote! { #variant(#ty) },
-            (Some(ty), true) => quote! { #variant(reqwest::StatusCode, #ty) },
-        };
         let construct = match (&body_ty, dynamic) {
             (None, false) => quote! { #name::#variant },
             (None, true) => quote! { #name::#variant(status) },
             (Some(_), false) => quote! { #name::#variant(body) },
             (Some(_), true) => quote! { #name::#variant(status, body) },
         };
-        let build = quote! {
+        return Ok(quote! {
             #decode_body
             return Ok(#construct);
-        };
-        return Ok((variant_def, build));
+        });
     }
 
-    let mut field_defs = Vec::new();
     let mut construct_fields = Vec::new();
     if dynamic {
-        field_defs.push(quote! { status: reqwest::StatusCode });
         construct_fields.push(quote! { status });
     }
-    if let Some(ty) = &body_ty {
-        field_defs.push(quote! { body: #ty });
+    if body_ty.is_some() {
         construct_fields.push(quote! { body });
     }
     let mut header_reads = Vec::with_capacity(case.headers.len());
@@ -826,8 +719,6 @@ fn response_case(name: &proc_macro2::Ident, case: &ResponseCase) -> Result<(Toke
         let field = header.name.to_token();
         let ty = emit_type(&header.ty)?;
         let header_name = Literal::string(&header.header_name);
-        let doc = doc_attr(&header.doc);
-        field_defs.push(quote! { #doc #field: Option<#ty> });
         header_reads.push(quote! {
             let #field: Option<#ty> = response
                 .headers()
@@ -837,13 +728,11 @@ fn response_case(name: &proc_macro2::Ident, case: &ResponseCase) -> Result<(Toke
         });
         construct_fields.push(quote! { #field });
     }
-    let variant_def = quote! { #variant { #(#field_defs),* } };
-    let build = quote! {
+    return Ok(quote! {
         #(#header_reads)*
         #decode_body
         return Ok(#name::#variant { #(#construct_fields),* });
-    };
-    return Ok((variant_def, build));
+    });
 }
 
 /// The Rust type a response variant carries for its body, if any: the decoded

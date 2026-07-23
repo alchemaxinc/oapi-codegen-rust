@@ -8,6 +8,12 @@ pub struct GetWidgetsCookies {
     pub page_size: Option<i32>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetWidgetsResponse {
+    /// The widgets.
+    Ok,
+}
+
 impl<S> axum::extract::FromRequestParts<S> for GetWidgetsCookies
 where
     S: Send + Sync,
@@ -53,12 +59,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         cookies: GetWidgetsCookies,
     ) -> impl std::future::Future<Output = GetWidgetsResponse> + Send;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetWidgetsResponse {
-    /// The widgets.
-    Ok,
 }
 
 impl axum::response::IntoResponse for GetWidgetsResponse {

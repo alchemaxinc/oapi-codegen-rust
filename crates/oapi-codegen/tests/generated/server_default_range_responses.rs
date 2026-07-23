@@ -10,6 +10,28 @@ pub struct Error {
     pub message: String,
 }
 
+/// List pets, with a default and a range error response.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListPetsResponse {
+    /// The full list of pets.
+    Ok(Pet),
+    /// A server-side failure; the handler sets the concrete code.
+    Status5xx(http::StatusCode, Error),
+    /// An unexpected error.
+    Default(http::StatusCode, Error),
+}
+
+/// Delete a pet, with bodyless default and range responses.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeletePetResponse {
+    /// The pet was deleted.
+    NoContent,
+    /// The request was rejected; the handler sets the code.
+    Status4xx(http::StatusCode),
+    /// An unexpected error.
+    Default(http::StatusCode),
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// List pets, with a default and a range error response.
@@ -19,17 +41,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         id: i64,
     ) -> impl std::future::Future<Output = DeletePetResponse> + Send;
-}
-
-/// List pets, with a default and a range error response.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ListPetsResponse {
-    /// The full list of pets.
-    Ok(Pet),
-    /// A server-side failure; the handler sets the concrete code.
-    Status5xx(axum::http::StatusCode, Error),
-    /// An unexpected error.
-    Default(axum::http::StatusCode, Error),
 }
 
 impl axum::response::IntoResponse for ListPetsResponse {
@@ -52,17 +63,6 @@ impl axum::response::IntoResponse for ListPetsResponse {
             }
         }
     }
-}
-
-/// Delete a pet, with bodyless default and range responses.
-#[derive(Debug, Clone, PartialEq)]
-pub enum DeletePetResponse {
-    /// The pet was deleted.
-    NoContent,
-    /// The request was rejected; the handler sets the code.
-    Status4xx(axum::http::StatusCode),
-    /// An unexpected error.
-    Default(axum::http::StatusCode),
 }
 
 impl axum::response::IntoResponse for DeletePetResponse {

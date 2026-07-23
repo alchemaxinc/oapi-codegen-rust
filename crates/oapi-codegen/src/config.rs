@@ -78,6 +78,12 @@ pub struct OutputOptions {
     /// may fail or emit a reference to a type that is not declared.
     #[serde(default)]
     pub exclude_schemas: Vec<String>,
+    /// Suffix appended to a per-operation response enum's name (default
+    /// `Response`). Set this to resolve a clash between a generated
+    /// `<Op>Response` enum and a component schema of the same name, mirroring
+    /// `oapi-codegen`'s `response-type-suffix`.
+    #[serde(default)]
+    pub response_type_suffix: Option<String>,
 }
 
 impl Config {

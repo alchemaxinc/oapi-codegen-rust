@@ -9,6 +9,12 @@ pub struct UploadMultipart {
     pub priority: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum UploadResponse {
+    /// The file was stored.
+    NoContent,
+}
+
 impl<S> axum::extract::FromRequest<S> for UploadMultipart
 where
     S: Send + Sync,
@@ -139,12 +145,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         body: UploadMultipart,
     ) -> impl std::future::Future<Output = UploadResponse> + Send;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum UploadResponse {
-    /// The file was stored.
-    NoContent,
 }
 
 impl axum::response::IntoResponse for UploadResponse {

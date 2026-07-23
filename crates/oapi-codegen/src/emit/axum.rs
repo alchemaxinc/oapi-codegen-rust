@@ -6,7 +6,6 @@ use quote::quote;
 
 use crate::emit::doc_attr;
 use crate::emit::emit_type;
-use crate::emit::models::emit_struct;
 use crate::error::Result;
 use crate::ir::BodyKind;
 use crate::ir::BodyVariant;
@@ -91,43 +90,26 @@ fn negotiated_response_arms(body: &NegotiatedBody, status: &TokenStream, with_he
         .collect();
 }
 
-/// Emit the enum backing a negotiated response body: one variant per content
-/// representation, carrying that representation's decoded type. The generated
-/// `IntoResponse` renders whichever variant the handler returned.
-fn emit_response_body_enum(body: &NegotiatedBody) -> Result<TokenStream> {
-    return crate::emit::emit_negotiated_body_enum(body);
-}
-
-/// Emit the axum server interface: the `Api` trait, per-operation response
+/// Emit the axum server interface: the `Api` trait, per-operation `IntoResponse`
 /// enums, the `Router` builder, and the internal handler functions.
 fn service_items(service: &Service) -> Result<Vec<TokenStream>> {
     let mut items = Vec::new();
     for operation in &service.operations {
-        if let Some(query) = &operation.query {
-            items.push(emit_struct(query)?);
-        }
         if let Some(headers) = &operation.headers {
-            items.extend(emit_headers(headers)?);
+            items.push(emit_headers_extractor(headers)?);
         }
         if let Some(cookies) = &operation.cookies {
-            items.extend(emit_cookies(cookies)?);
+            items.push(emit_cookies_extractor(cookies)?);
         }
         match &operation.request {
-            Some(RequestPayload::Multipart(multipart)) => items.extend(emit_multipart(multipart)?),
-            Some(RequestPayload::Negotiated(request)) => items.extend(emit_request_body(request)?),
+            Some(RequestPayload::Multipart(multipart)) => items.push(emit_multipart_extractor(multipart)?),
+            Some(RequestPayload::Negotiated(request)) => items.push(emit_request_body_extractor(request)?),
             Some(RequestPayload::Single(_)) | None => {}
-        }
-        for case in &operation.responses {
-            if let Some(ResponseBody::Negotiated(body)) = &case.body {
-                items.push(emit_response_body_enum(body)?);
-            }
         }
     }
     items.push(emit_trait(service)?);
     for operation in &service.operations {
-        let (enum_def, into_response) = emit_response_enum(operation)?;
-        items.push(enum_def);
-        items.push(into_response);
+        items.push(emit_into_response(operation)?);
     }
     items.push(emit_router(service));
     for operation in &service.operations {
@@ -197,14 +179,14 @@ fn emit_method_args(operation: &Operation) -> Result<Vec<TokenStream>> {
 }
 
 /// Emit an operation's response enum together with its `IntoResponse` impl.
-fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream)> {
+/// Emit an operation's `IntoResponse` impl, turning the shared response enum
+/// (emitted by [`crate::emit::operation`]) into an axum response.
+fn emit_into_response(operation: &Operation) -> Result<TokenStream> {
     let name = operation.response_enum.to_token();
-    let mut variants = Vec::with_capacity(operation.responses.len());
     let mut arms = Vec::with_capacity(operation.responses.len());
     for case in &operation.responses {
         let variant = case.variant.to_token();
-        let doc = doc_attr(&case.doc);
-        let (variant_def, arm) = if case.headers.is_empty() {
+        let arm = if case.headers.is_empty() {
             match &case.status {
                 ResponseStatus::Fixed(code) => emit_fixed_response(&name, &variant, *code, &case.body)?,
                 ResponseStatus::Default | ResponseStatus::Range(_) => {
@@ -214,18 +196,9 @@ fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream
         } else {
             emit_response_with_headers(&name, &variant, case)?
         };
-        variants.push(quote! { #doc #variant_def });
         arms.push(arm);
     }
-    let doc = doc_attr(&operation.doc);
-    let enum_def = quote! {
-        #doc
-        #[derive(Debug, Clone, PartialEq)]
-        pub enum #name {
-            #(#variants),*
-        }
-    };
-    let into_response = quote! {
+    return Ok(quote! {
         impl axum::response::IntoResponse for #name {
             fn into_response(self) -> axum::response::Response {
                 match self {
@@ -233,18 +206,17 @@ fn emit_response_enum(operation: &Operation) -> Result<(TokenStream, TokenStream
                 }
             }
         }
-    };
-    return Ok((enum_def, into_response));
+    });
 }
 
-/// Emit the variant and `IntoResponse` arm for a fixed status code, whose value
-/// is known at generation time and emitted as a compile-time constant.
+/// Emit the `IntoResponse` arm for a fixed status code, whose value is known at
+/// generation time and emitted as a compile-time constant.
 fn emit_fixed_response(
     name: &proc_macro2::Ident,
     variant: &proc_macro2::Ident,
     code: u16,
     body: &Option<ResponseBody>,
-) -> Result<(TokenStream, TokenStream)> {
+) -> Result<TokenStream> {
     let code = proc_macro2::Literal::u16_unsuffixed(code);
     let status = quote! {
         const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(#code) {
@@ -252,85 +224,68 @@ fn emit_fixed_response(
             Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
         };
     };
-    let result = match body {
+    let arm = match body {
         Some(ResponseBody::Single(body)) => {
-            let ty = emit_type(&body.ty)?;
-            let variant_def = quote! { #variant(#ty) };
             let term = response_body_term(body.kind);
-            let arm = quote! {
+            quote! {
                 #name::#variant(body) => {
                     #status
                     (STATUS, #term).into_response()
                 }
-            };
-            (variant_def, arm)
+            }
         }
         Some(ResponseBody::Negotiated(negotiated)) => {
-            let ty = negotiated.name.to_token();
-            let variant_def = quote! { #variant(#ty) };
             let arms = negotiated_response_arms(negotiated, &quote! { STATUS }, false);
-            let arm = quote! {
+            quote! {
                 #name::#variant(body) => {
                     #status
                     match body {
                         #(#arms)*
                     }
                 }
-            };
-            (variant_def, arm)
+            }
         }
         None => {
-            let variant_def = quote! { #variant };
-            let arm = quote! {
+            quote! {
                 #name::#variant => {
                     #status
                     STATUS.into_response()
                 }
-            };
-            (variant_def, arm)
+            }
         }
     };
-    return Ok(result);
+    return Ok(arm);
 }
 
-/// Emit the variant and `IntoResponse` arm for a `default`/range response, whose
-/// concrete status code is not fixed by the spec and is therefore carried in the
-/// variant and supplied by the handler at runtime.
+/// Emit the `IntoResponse` arm for a `default`/range response, whose concrete
+/// status code is not fixed by the spec and is carried in the variant.
 fn emit_dynamic_response(
     name: &proc_macro2::Ident,
     variant: &proc_macro2::Ident,
     body: &Option<ResponseBody>,
-) -> Result<(TokenStream, TokenStream)> {
-    let result = match body {
+) -> Result<TokenStream> {
+    let arm = match body {
         Some(ResponseBody::Single(body)) => {
-            let ty = emit_type(&body.ty)?;
-            let variant_def = quote! { #variant(axum::http::StatusCode, #ty) };
             let term = response_body_term(body.kind);
-            let arm = quote! {
+            quote! {
                 #name::#variant(status, body) => (status, #term).into_response(),
-            };
-            (variant_def, arm)
+            }
         }
         Some(ResponseBody::Negotiated(negotiated)) => {
-            let ty = negotiated.name.to_token();
-            let variant_def = quote! { #variant(axum::http::StatusCode, #ty) };
             let arms = negotiated_response_arms(negotiated, &quote! { status }, false);
-            let arm = quote! {
+            quote! {
                 #name::#variant(status, body) => match body {
                     #(#arms)*
                 },
-            };
-            (variant_def, arm)
+            }
         }
         None => {
-            let variant_def = quote! { #variant(axum::http::StatusCode) };
-            let arm = quote! {
+            quote! {
                 #name::#variant(status) => status.into_response(),
-            };
-            (variant_def, arm)
+            }
         }
     };
-    return Ok(result);
+    return Ok(arm);
 }
 
 /// Emit the `Router` builder, grouping operations that share a path so they map
@@ -449,37 +404,10 @@ fn emit_response_with_headers(
     name: &proc_macro2::Ident,
     variant: &proc_macro2::Ident,
     case: &ResponseCase,
-) -> Result<(TokenStream, TokenStream)> {
+) -> Result<TokenStream> {
     let dynamic = !matches!(case.status, ResponseStatus::Fixed(_));
 
-    // Field definitions.
-    let mut field_defs: Vec<TokenStream> = Vec::new();
-    if dynamic {
-        field_defs.push(quote! { status: axum::http::StatusCode });
-    }
-    if let Some(body) = &case.body {
-        let ty = match body {
-            ResponseBody::Single(body) => emit_type(&body.ty)?,
-            ResponseBody::Negotiated(negotiated) => {
-                let ident = negotiated.name.to_token();
-                quote! { #ident }
-            }
-        };
-        field_defs.push(quote! { body: #ty });
-    }
-    let mut header_field_defs = Vec::with_capacity(case.headers.len());
-    for header in &case.headers {
-        header_field_defs.push(emit_response_header_field(header)?);
-    }
-
-    let variant_def = quote! {
-        #variant {
-            #(#field_defs,)*
-            #(#header_field_defs)*
-        }
-    };
-
-    // Destructure pattern (bind every field we defined).
+    // Destructure pattern (bind every field the shared variant defines).
     let mut binds: Vec<TokenStream> = Vec::new();
     if dynamic {
         binds.push(quote! { status });
@@ -540,80 +468,43 @@ fn emit_response_with_headers(
         }
     };
 
-    return Ok((variant_def, arm));
-}
-
-/// Emit one struct-variant field for a response header (required → `T`,
-/// optional → `Option<T>`), with its doc attribute.
-fn emit_response_header_field(header: &ResponseHeader) -> Result<TokenStream> {
-    let ident = header.name.to_token();
-    let doc = doc_attr(&header.doc);
-    let mut ty = emit_type(&header.ty)?;
-    if !header.required {
-        ty = quote! { Option<#ty> };
-    }
-    return Ok(quote! {
-        #doc
-        #ident: #ty,
-    });
+    return Ok(arm);
 }
 
 /// Emit the best-effort insertion of one response header into `header_map`.
-/// Uses a lowercased static header name; a value that fails to encode as a
-/// `HeaderValue` is skipped (never panics).
+/// Response headers are carried as `Option<T>`; a present value that fails to
+/// encode as a `HeaderValue` is skipped (never panics).
 fn emit_response_header_insert(header: &ResponseHeader) -> TokenStream {
     let ident = header.name.to_token();
     let lower_name = header.header_name.to_ascii_lowercase();
-    let insert = quote! {
-        if let Ok(value) = axum::http::HeaderValue::from_str(&#ident.to_string()) {
-            header_map.insert(axum::http::HeaderName::from_static(#lower_name), value);
-        }
-    };
-    if header.required {
-        return insert;
-    }
     return quote! {
         if let Some(#ident) = #ident {
-            #insert
+            if let Ok(value) = axum::http::HeaderValue::from_str(&#ident.to_string()) {
+                header_map.insert(axum::http::HeaderName::from_static(#lower_name), value);
+            }
         }
     };
 }
 
-/// Emit a header struct and its hand-written `FromRequestParts` implementation.
+/// Emit the hand-written `FromRequestParts` implementation for an operation's
+/// header struct (defined by [`crate::emit::operation`]).
 ///
 /// Header values are read and parsed individually from the request parts, so
 /// the struct cannot derive `serde::Deserialize` the way the query struct does.
 /// A missing required header, a non-text value, or a value that fails to parse
 /// yields a `400 Bad Request` carrying a short plaintext reason.
-fn emit_headers(headers: &Headers) -> Result<Vec<TokenStream>> {
+fn emit_headers_extractor(headers: &Headers) -> Result<TokenStream> {
     let name = headers.name.to_token();
 
-    let mut field_defs = Vec::with_capacity(headers.params.len());
     let mut bindings = Vec::with_capacity(headers.params.len());
     let mut idents = Vec::with_capacity(headers.params.len());
     for param in &headers.params {
         let ident = param.name.to_token();
-        let doc = doc_attr(&param.doc);
-        let mut ty = emit_type(&param.ty)?;
-        if !param.required {
-            ty = quote! { Option<#ty> };
-        }
-        field_defs.push(quote! {
-            #doc
-            pub #ident: #ty,
-        });
         bindings.push(emit_header_binding(param)?);
         idents.push(ident);
     }
 
-    let struct_def = quote! {
-        #[derive(Debug, Clone)]
-        pub struct #name {
-            #(#field_defs)*
-        }
-    };
-
-    let extractor = quote! {
+    return Ok(quote! {
         impl<S> axum::extract::FromRequestParts<S> for #name
         where
             S: Send + Sync,
@@ -628,9 +519,7 @@ fn emit_headers(headers: &Headers) -> Result<Vec<TokenStream>> {
                 return Ok(Self { #(#idents),* });
             }
         }
-    };
-
-    return Ok(vec![struct_def, extractor]);
+    });
 }
 
 /// Emit the `let <field> = ...;` binding that reads and parses one header,
@@ -684,38 +573,22 @@ fn emit_header_binding(param: &HeaderParam) -> Result<TokenStream> {
     });
 }
 
-/// Emit a cookie struct and its hand-written `FromRequestParts` implementation,
-/// backed by `axum_extra`'s `CookieJar`. A missing required cookie or a value
-/// that fails to parse yields a `400 Bad Request` with a short plaintext reason.
-fn emit_cookies(cookies: &Cookies) -> Result<Vec<TokenStream>> {
+/// Emit the hand-written `FromRequestParts` implementation for an operation's
+/// cookie struct (defined by [`crate::emit::operation`]), backed by
+/// `axum_extra`'s `CookieJar`. A missing required cookie or a value that fails
+/// to parse yields a `400 Bad Request` with a short plaintext reason.
+fn emit_cookies_extractor(cookies: &Cookies) -> Result<TokenStream> {
     let name = cookies.name.to_token();
 
-    let mut field_defs = Vec::with_capacity(cookies.params.len());
     let mut bindings = Vec::with_capacity(cookies.params.len());
     let mut idents = Vec::with_capacity(cookies.params.len());
     for param in &cookies.params {
         let ident = param.name.to_token();
-        let doc = doc_attr(&param.doc);
-        let mut ty = emit_type(&param.ty)?;
-        if !param.required {
-            ty = quote! { Option<#ty> };
-        }
-        field_defs.push(quote! {
-            #doc
-            pub #ident: #ty,
-        });
         bindings.push(emit_cookie_binding(param)?);
         idents.push(ident);
     }
 
-    let struct_def = quote! {
-        #[derive(Debug, Clone)]
-        pub struct #name {
-            #(#field_defs)*
-        }
-    };
-
-    let extractor = quote! {
+    return Ok(quote! {
         impl<S> axum::extract::FromRequestParts<S> for #name
         where
             S: Send + Sync,
@@ -731,9 +604,7 @@ fn emit_cookies(cookies: &Cookies) -> Result<Vec<TokenStream>> {
                 return Ok(Self { #(#idents),* });
             }
         }
-    };
-
-    return Ok(vec![struct_def, extractor]);
+    });
 }
 
 /// Emit the `let <field> = ...;` binding that reads and parses one cookie from
@@ -788,8 +659,9 @@ fn emit_cookie_binding(param: &CookieParam) -> Result<TokenStream> {
     });
 }
 
-/// Emit a `multipart/form-data` extractor: a per-operation struct of decoded
-/// fields plus a hand-written `axum::extract::FromRequest` implementation.
+/// Emit the hand-written `axum::extract::FromRequest` implementation for an
+/// operation's `multipart/form-data` struct (defined by
+/// [`crate::emit::operation`]).
 ///
 /// axum has no typed multipart extractor, so the implementation drives
 /// `axum::extract::Multipart`, reads each declared field (text scalars are
@@ -797,11 +669,7 @@ fn emit_cookie_binding(param: &CookieParam) -> Result<TokenStream> {
 /// returns a `400 Bad Request` with a short plaintext reason on a missing
 /// required field or an unparseable value. Unknown fields are ignored; a
 /// repeated field keeps its last value.
-///
-/// The struct is generated per operation (rather than reusing a component
-/// model), so multipart works under any model configuration — including
-/// `models: false` with cross-file `import-mapping`.
-fn emit_multipart(multipart: &Multipart) -> Result<Vec<TokenStream>> {
+fn emit_multipart_extractor(multipart: &Multipart) -> Result<TokenStream> {
     let name = multipart.name.to_token();
 
     let mut accumulators = Vec::with_capacity(multipart.fields.len());
@@ -815,9 +683,7 @@ fn emit_multipart(multipart: &Multipart) -> Result<Vec<TokenStream>> {
         inits.push(emit_multipart_init(field));
     }
 
-    let struct_def = crate::emit::emit_multipart_struct(multipart)?;
-
-    let impl_block = quote! {
+    return Ok(quote! {
         impl<S> axum::extract::FromRequest<S> for #name
         where
             S: Send + Sync,
@@ -849,9 +715,7 @@ fn emit_multipart(multipart: &Multipart) -> Result<Vec<TokenStream>> {
                 return Ok(Self { #(#inits),* });
             }
         }
-    };
-
-    return Ok(vec![struct_def, impl_block]);
+    });
 }
 
 /// Emit the `match` arm that reads one multipart field into its accumulator: raw
@@ -913,15 +777,16 @@ fn emit_multipart_init(field: &MultipartField) -> TokenStream {
     };
 }
 
-/// Emit a `Content-Type`-dispatched request body: an enum with one variant per
-/// supported content type plus a hand-written `axum::extract::FromRequest`.
+/// Emit the hand-written `axum::extract::FromRequest` implementation for an
+/// operation's `Content-Type`-dispatched request body enum (defined by
+/// [`crate::emit::operation`]).
 ///
 /// The implementation reads the request's `Content-Type` header, matches it
 /// against each declared content type in priority order (JSON > form > text),
 /// and delegates to the matching axum extractor. A recognised type that fails
 /// to decode yields a `400 Bad Request`; an unrecognised or missing type yields
 /// a `415 Unsupported Media Type`.
-fn emit_request_body(request: &NegotiatedBody) -> Result<Vec<TokenStream>> {
+fn emit_request_body_extractor(request: &NegotiatedBody) -> Result<TokenStream> {
     let name = request.name.to_token();
 
     let mut arms = Vec::with_capacity(request.variants.len());
@@ -929,9 +794,7 @@ fn emit_request_body(request: &NegotiatedBody) -> Result<Vec<TokenStream>> {
         arms.push(emit_request_body_arm(&name, variant)?);
     }
 
-    let enum_def = crate::emit::emit_negotiated_body_enum(request)?;
-
-    let impl_block = quote! {
+    return Ok(quote! {
         impl<S> axum::extract::FromRequest<S> for #name
         where
             S: Send + Sync,
@@ -963,9 +826,7 @@ fn emit_request_body(request: &NegotiatedBody) -> Result<Vec<TokenStream>> {
                 ));
             }
         }
-    };
-
-    return Ok(vec![enum_def, impl_block]);
+    });
 }
 
 /// Emit the `from_request` arm that decodes one content-type representation:

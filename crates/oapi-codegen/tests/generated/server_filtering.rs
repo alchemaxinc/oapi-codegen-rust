@@ -10,6 +10,24 @@ pub struct Stats {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListPetsResponse {
+    /// ok
+    Ok(Pet),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetStatsResponse {
+    /// ok
+    Ok(Stats),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HealthCheckResponse {
+    /// ok
+    Ok,
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     fn list_pets(&self) -> impl std::future::Future<Output = ListPetsResponse> + Send;
@@ -17,12 +35,6 @@ pub trait Api: Clone + Send + Sync + 'static {
     fn health_check(
         &self,
     ) -> impl std::future::Future<Output = HealthCheckResponse> + Send;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ListPetsResponse {
-    /// ok
-    Ok(Pet),
 }
 
 impl axum::response::IntoResponse for ListPetsResponse {
@@ -41,12 +53,6 @@ impl axum::response::IntoResponse for ListPetsResponse {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetStatsResponse {
-    /// ok
-    Ok(Stats),
-}
-
 impl axum::response::IntoResponse for GetStatsResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
@@ -61,12 +67,6 @@ impl axum::response::IntoResponse for GetStatsResponse {
             }
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum HealthCheckResponse {
-    /// ok
-    Ok,
 }
 
 impl axum::response::IntoResponse for HealthCheckResponse {

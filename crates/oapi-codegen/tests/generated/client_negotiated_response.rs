@@ -5,6 +5,18 @@ pub struct Report {
     pub id: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetReportResponseOkBody {
+    Json(Report),
+    Text(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetReportResponse {
+    /// A report as JSON or text.
+    Ok(GetReportResponseOkBody),
+}
+
 /// Errors returned by the generated client.
 #[derive(Debug)]
 pub enum ClientError {
@@ -50,18 +62,6 @@ impl From<reqwest::Error> for ClientError {
     fn from(error: reqwest::Error) -> Self {
         return ClientError::Http(error);
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetReportResponseOkBody {
-    Json(Report),
-    Text(String),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetReportResponse {
-    /// A report as JSON or text.
-    Ok(GetReportResponseOkBody),
 }
 
 /// A blocking HTTP client for the API.

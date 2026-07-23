@@ -444,7 +444,8 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 ];
 
 /// Fixtures generated with both the server and client enabled, exercising the
-/// combined `server`/`client` submodule layout with shared root models.
+/// flat crate-root layout in which the server and client share one file and the
+/// same per-operation types alongside the component models.
 const COMBINED_FIXTURES: &[&str] = &["combined_server_client", "combined_response_name_collision"];
 
 /// Absolute path to the crate's `tests` directory.
@@ -976,7 +977,7 @@ fn client_unsupported_features_are_rejected() {
 }
 
 /// Configuration that enables both the axum server and the `reqwest` client, so
-/// they are emitted together into `server` and `client` submodules.
+/// they are emitted together flat at the crate root.
 fn combined_config() -> oapi_codegen::Config {
     return oapi_codegen::Config {
         generate: oapi_codegen::config::Generate {
@@ -986,6 +987,18 @@ fn combined_config() -> oapi_codegen::Config {
         },
         ..Default::default()
     };
+}
+
+/// The combined configuration for `stem`. `combined_response_name_collision`
+/// carries a schema named `GetWidgetResponse` that clashes with the generated
+/// response enum, so it sets `response-type-suffix` to `Resp` to move the enum
+/// aside (`GetWidgetResp`); every other fixture uses the default suffix.
+fn combined_config_for(stem: &str) -> oapi_codegen::Config {
+    let mut config = combined_config();
+    if stem == "combined_response_name_collision" {
+        config.output_options.response_type_suffix = Some("Resp".to_owned());
+    }
+    return config;
 }
 
 /// Regenerate `stem`'s combined server+client output and assert it matches the
@@ -999,7 +1012,7 @@ fn assert_combined_generated_matches(stem: &str) {
     let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
     let generated_file = dir.join("generated").join(format!("{stem}.rs"));
 
-    let generated = oapi_codegen::generate(&fixture, &combined_config()).unwrap_or_else(|err| {
+    let generated = oapi_codegen::generate(&fixture, &combined_config_for(stem)).unwrap_or_else(|err| {
         panic!("generating combined `{stem}` failed: {err}");
     });
 
@@ -1038,6 +1051,20 @@ macro_rules! combined_generated_tests {
 }
 
 combined_generated_tests!(combined_server_client, combined_response_name_collision);
+
+/// Without `response-type-suffix`, a schema named like an operation's response
+/// enum must fail generation rather than silently rename either item.
+#[test]
+fn response_name_collision_without_suffix_fails() {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join("combined_response_name_collision.yaml");
+    let err = oapi_codegen::generate(&fixture, &combined_config())
+        .expect_err("expected a type-name collision without response-type-suffix");
+    assert!(
+        matches!(err, oapi_codegen::Error::TypeNameCollision { .. }),
+        "expected TypeNameCollision, got: {err:?}",
+    );
+}
 
 /// The combined `#[test]`s must cover exactly the combined fixtures.
 #[test]

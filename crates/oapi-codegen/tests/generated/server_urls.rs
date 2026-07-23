@@ -79,17 +79,17 @@ pub fn sandbox(version: SandboxVersion) -> Result<String, String> {
     return Ok(url);
 }
 
-/// Server behaviour: implement one method per operation.
-pub trait Api: Clone + Send + Sync + 'static {
-    /// Liveness probe.
-    fn ping(&self) -> impl std::future::Future<Output = PingResponse> + Send;
-}
-
 /// Liveness probe.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PingResponse {
     /// The service is reachable.
     NoContent,
+}
+
+/// Server behaviour: implement one method per operation.
+pub trait Api: Clone + Send + Sync + 'static {
+    /// Liveness probe.
+    fn ping(&self) -> impl std::future::Future<Output = PingResponse> + Send;
 }
 
 impl axum::response::IntoResponse for PingResponse {

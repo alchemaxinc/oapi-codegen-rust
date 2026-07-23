@@ -530,7 +530,7 @@ fn generated_server_writes_response_headers() {
         async fn get_widgets(&self) -> GetWidgetsResponse {
             return GetWidgetsResponse::Ok {
                 body: vec!["w1".to_owned()],
-                x_request_id: "abc-123".to_owned(),
+                x_request_id: Some("abc-123".to_owned()),
                 x_rate_limit_remaining: Some(SAMPLE_RATE_LIMIT_REMAINING),
             };
         }
@@ -539,7 +539,7 @@ fn generated_server_writes_response_headers() {
     // The `Ok` variant renders its headers into the response.
     let response = GetWidgetsResponse::Ok {
         body: vec!["w1".to_owned()],
-        x_request_id: "abc-123".to_owned(),
+        x_request_id: Some("abc-123".to_owned()),
         x_rate_limit_remaining: Some(SAMPLE_RATE_LIMIT_REMAINING),
     }
     .into_response();
@@ -564,7 +564,7 @@ fn generated_server_writes_response_headers() {
     // An unset optional header is absent.
     let response = GetWidgetsResponse::Ok {
         body: Vec::new(),
-        x_request_id: "abc-123".to_owned(),
+        x_request_id: Some("abc-123".to_owned()),
         x_rate_limit_remaining: None,
     }
     .into_response();
@@ -574,7 +574,7 @@ fn generated_server_writes_response_headers() {
     let response = GetWidgetsResponse::Default {
         status: axum::http::StatusCode::BAD_GATEWAY,
         body: "boom".to_owned(),
-        x_request_id: "abc-123".to_owned(),
+        x_request_id: Some("abc-123".to_owned()),
     }
     .into_response();
     assert_eq!(response.status(), axum::http::StatusCode::BAD_GATEWAY);

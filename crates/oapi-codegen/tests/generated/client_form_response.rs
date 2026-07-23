@@ -5,6 +5,12 @@ pub struct Form {
     pub name: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetFormResponse {
+    /// A form-encoded body.
+    Ok(Form),
+}
+
 /// Errors returned by the generated client.
 #[derive(Debug)]
 pub enum ClientError {
@@ -50,12 +56,6 @@ impl From<reqwest::Error> for ClientError {
     fn from(error: reqwest::Error) -> Self {
         return ClientError::Http(error);
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetFormResponse {
-    /// A form-encoded body.
-    Ok(Form),
 }
 
 /// A blocking HTTP client for the API.

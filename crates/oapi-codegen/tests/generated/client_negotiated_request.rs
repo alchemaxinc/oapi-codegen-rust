@@ -5,6 +5,18 @@ pub struct Thing {
     pub name: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateThingRequestBody {
+    Json(Thing),
+    Form(Thing),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateThingResponse {
+    /// Created.
+    NoContent,
+}
+
 /// Errors returned by the generated client.
 #[derive(Debug)]
 pub enum ClientError {
@@ -50,18 +62,6 @@ impl From<reqwest::Error> for ClientError {
     fn from(error: reqwest::Error) -> Self {
         return ClientError::Http(error);
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateThingRequestBody {
-    Json(Thing),
-    Form(Thing),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateThingResponse {
-    /// Created.
-    NoContent,
 }
 
 /// A blocking HTTP client for the API.

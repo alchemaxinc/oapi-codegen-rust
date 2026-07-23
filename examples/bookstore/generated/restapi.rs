@@ -51,10 +51,83 @@ pub struct ListBooksQuery {
     pub limit: Option<i32>,
 }
 
+/// List books, optionally filtered.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListBooksResponse {
+    /// The matching books.
+    Ok(Vec<crate::apimodel::catalog::Book>),
+}
+
 #[derive(Debug, Clone)]
 pub struct CreateBookHeaders {
     /// Unique key so a retried create is not duplicated.
     pub idempotency_key: String,
+}
+
+/// Add a book to the catalog.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateBookResponse {
+    /// The book was created.
+    Created(crate::apimodel::catalog::Book),
+    /// The request was malformed.
+    BadRequest(crate::apimodel::common::ErrorResponse),
+    /// Authentication is required or has failed.
+    Unauthorized(crate::apimodel::common::ErrorResponse),
+}
+
+/// Fetch a single book by id.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetBookResponse {
+    /// The requested book.
+    Ok(crate::apimodel::catalog::Book),
+    /// No resource matched the request.
+    NotFound,
+    /// An unexpected error; the handler sets the status code.
+    Default(http::StatusCode, crate::apimodel::common::ErrorResponse),
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadBookCoverMultipart {
+    pub image: Vec<u8>,
+    pub filename: String,
+    pub caption: Option<String>,
+}
+
+/// Upload or replace a book's cover image.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UploadBookCoverResponse {
+    /// The cover image was stored.
+    NoContent,
+    /// No resource matched the request.
+    NotFound,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubmitReviewRequestBody {
+    Json(crate::apimodel::catalog::NewReview),
+    Form(crate::apimodel::catalog::NewReview),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubmitReviewResponseCreatedBody {
+    Json(crate::apimodel::catalog::Review),
+    Text(String),
+}
+
+/// Submit a review as JSON or a form; read it back as JSON or plain text.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubmitReviewResponse {
+    /// The review was stored; returned as JSON or plain text.
+    Created(SubmitReviewResponseCreatedBody),
+    /// No resource matched the request.
+    NotFound,
+}
+
+/// Liveness probe returning a free-form document.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetHealthResponse {
+    /// An opaque service-health document.
+    Ok(serde_json::Value),
 }
 
 impl<S> axum::extract::FromRequestParts<S> for CreateBookHeaders
@@ -88,13 +161,6 @@ where
         };
         return Ok(Self { idempotency_key });
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct UploadBookCoverMultipart {
-    pub image: Vec<u8>,
-    pub filename: String,
-    pub caption: Option<String>,
 }
 
 impl<S> axum::extract::FromRequest<S> for UploadBookCoverMultipart
@@ -180,12 +246,6 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SubmitReviewRequestBody {
-    Json(crate::apimodel::catalog::NewReview),
-    Form(crate::apimodel::catalog::NewReview),
-}
-
 impl<S> axum::extract::FromRequest<S> for SubmitReviewRequestBody
 where
     S: Send + Sync,
@@ -241,12 +301,6 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SubmitReviewResponseCreatedBody {
-    Json(crate::apimodel::catalog::Review),
-    Text(String),
-}
-
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// List books, optionally filtered.
@@ -281,13 +335,6 @@ pub trait Api: Clone + Send + Sync + 'static {
     fn get_health(&self) -> impl std::future::Future<Output = GetHealthResponse> + Send;
 }
 
-/// List books, optionally filtered.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ListBooksResponse {
-    /// The matching books.
-    Ok(Vec<crate::apimodel::catalog::Book>),
-}
-
 impl axum::response::IntoResponse for ListBooksResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
@@ -302,17 +349,6 @@ impl axum::response::IntoResponse for ListBooksResponse {
             }
         }
     }
-}
-
-/// Add a book to the catalog.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateBookResponse {
-    /// The book was created.
-    Created(crate::apimodel::catalog::Book),
-    /// The request was malformed.
-    BadRequest(crate::apimodel::common::ErrorResponse),
-    /// Authentication is required or has failed.
-    Unauthorized(crate::apimodel::common::ErrorResponse),
 }
 
 impl axum::response::IntoResponse for CreateBookResponse {
@@ -349,17 +385,6 @@ impl axum::response::IntoResponse for CreateBookResponse {
     }
 }
 
-/// Fetch a single book by id.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetBookResponse {
-    /// The requested book.
-    Ok(crate::apimodel::catalog::Book),
-    /// No resource matched the request.
-    NotFound,
-    /// An unexpected error; the handler sets the status code.
-    Default(axum::http::StatusCode, crate::apimodel::common::ErrorResponse),
-}
-
 impl axum::response::IntoResponse for GetBookResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
@@ -388,15 +413,6 @@ impl axum::response::IntoResponse for GetBookResponse {
     }
 }
 
-/// Upload or replace a book's cover image.
-#[derive(Debug, Clone, PartialEq)]
-pub enum UploadBookCoverResponse {
-    /// The cover image was stored.
-    NoContent,
-    /// No resource matched the request.
-    NotFound,
-}
-
 impl axum::response::IntoResponse for UploadBookCoverResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
@@ -420,15 +436,6 @@ impl axum::response::IntoResponse for UploadBookCoverResponse {
             }
         }
     }
-}
-
-/// Submit a review as JSON or a form; read it back as JSON or plain text.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SubmitReviewResponse {
-    /// The review was stored; returned as JSON or plain text.
-    Created(SubmitReviewResponseCreatedBody),
-    /// No resource matched the request.
-    NotFound,
 }
 
 impl axum::response::IntoResponse for SubmitReviewResponse {
@@ -461,13 +468,6 @@ impl axum::response::IntoResponse for SubmitReviewResponse {
             }
         }
     }
-}
-
-/// Liveness probe returning a free-form document.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetHealthResponse {
-    /// An opaque service-health document.
-    Ok(serde_json::Value),
 }
 
 impl axum::response::IntoResponse for GetHealthResponse {

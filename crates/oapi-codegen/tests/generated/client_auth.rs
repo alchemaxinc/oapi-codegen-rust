@@ -5,53 +5,6 @@ pub struct Message {
     pub text: String,
 }
 
-/// Errors returned by the generated client.
-#[derive(Debug)]
-pub enum ClientError {
-    /// The `reqwest` request failed to send or complete, including any
-    /// body decoding `reqwest` performs internally (such as JSON).
-    Http(reqwest::Error),
-    /// The server returned a status code the operation does not declare.
-    UnexpectedStatus(reqwest::StatusCode),
-    /// The response `Content-Type` matched none of the representations the
-    /// operation declares for its status.
-    UnexpectedContentType(String),
-    /// A response body failed to deserialize (e.g. malformed
-    /// form-urlencoded content).
-    Decode(String),
-}
-impl std::fmt::Display for ClientError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ClientError::Http(error) => return write!(f, "HTTP request failed: {error}"),
-            ClientError::UnexpectedStatus(status) => {
-                return write!(f, "unexpected response status: {status}");
-            }
-            ClientError::UnexpectedContentType(content_type) => {
-                return write!(f, "unexpected response content type: {content_type}");
-            }
-            ClientError::Decode(message) => {
-                return write!(f, "failed to decode response body: {message}");
-            }
-        }
-    }
-}
-impl std::error::Error for ClientError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ClientError::Http(error) => return Some(error),
-            ClientError::UnexpectedStatus(_)
-            | ClientError::UnexpectedContentType(_)
-            | ClientError::Decode(_) => return None,
-        }
-    }
-}
-impl From<reqwest::Error> for ClientError {
-    fn from(error: reqwest::Error) -> Self {
-        return ClientError::Http(error);
-    }
-}
-
 /// Fetch the caller's profile, authenticated by the global bearer scheme.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetProfileResponse {
@@ -97,6 +50,53 @@ pub enum SearchResponse {
 pub enum GetSessionResponse {
     /// The session data.
     Ok(Message),
+}
+
+/// Errors returned by the generated client.
+#[derive(Debug)]
+pub enum ClientError {
+    /// The `reqwest` request failed to send or complete, including any
+    /// body decoding `reqwest` performs internally (such as JSON).
+    Http(reqwest::Error),
+    /// The server returned a status code the operation does not declare.
+    UnexpectedStatus(reqwest::StatusCode),
+    /// The response `Content-Type` matched none of the representations the
+    /// operation declares for its status.
+    UnexpectedContentType(String),
+    /// A response body failed to deserialize (e.g. malformed
+    /// form-urlencoded content).
+    Decode(String),
+}
+impl std::fmt::Display for ClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ClientError::Http(error) => return write!(f, "HTTP request failed: {error}"),
+            ClientError::UnexpectedStatus(status) => {
+                return write!(f, "unexpected response status: {status}");
+            }
+            ClientError::UnexpectedContentType(content_type) => {
+                return write!(f, "unexpected response content type: {content_type}");
+            }
+            ClientError::Decode(message) => {
+                return write!(f, "failed to decode response body: {message}");
+            }
+        }
+    }
+}
+impl std::error::Error for ClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ClientError::Http(error) => return Some(error),
+            ClientError::UnexpectedStatus(_)
+            | ClientError::UnexpectedContentType(_)
+            | ClientError::Decode(_) => return None,
+        }
+    }
+}
+impl From<reqwest::Error> for ClientError {
+    fn from(error: reqwest::Error) -> Self {
+        return ClientError::Http(error);
+    }
 }
 
 /// A blocking HTTP client for the API.

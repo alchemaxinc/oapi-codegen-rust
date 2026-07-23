@@ -24,6 +24,13 @@ pub struct ListBooksQuery {
     pub page_token: Option<String>,
 }
 
+/// List books, filtered by query parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListBooksResponse {
+    /// The matching books.
+    Ok(Vec<Book>),
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// List books, filtered by query parameters.
@@ -31,13 +38,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         query: ListBooksQuery,
     ) -> impl std::future::Future<Output = ListBooksResponse> + Send;
-}
-
-/// List books, filtered by query parameters.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ListBooksResponse {
-    /// The matching books.
-    Ok(Vec<Book>),
 }
 
 impl axum::response::IntoResponse for ListBooksResponse {

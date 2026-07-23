@@ -12,7 +12,7 @@ pub mod servers;
 
 pub use crate::lower::paths::generate_service;
 pub use crate::lower::prune::prune_unused_models;
-pub use crate::lower::rename::qualify_service_models;
+pub use crate::lower::rename::check_type_name_collisions;
 pub use crate::lower::rename::rewrite_service;
 pub use crate::lower::rename::type_renames;
 pub use crate::lower::schema::generate_models;

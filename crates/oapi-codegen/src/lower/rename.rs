@@ -15,6 +15,7 @@ use std::collections::HashSet;
 
 use openapiv3::ReferenceOr;
 
+use crate::error::Result;
 use crate::ir::EnumKind;
 use crate::ir::Item;
 use crate::ir::Module;
@@ -82,29 +83,6 @@ pub fn rewrite_service(service: &mut Service, renames: &HashMap<String, String>)
             && let Some(custom) = renames.get(name.as_str())
         {
             *name = custom.clone();
-        }
-    });
-}
-
-/// Qualify every model reference in `service` with the `super::` path.
-///
-/// When the server and client generators are emitted into sibling submodules
-/// while the shared models stay at the crate root, a bare `Named` reference in a
-/// submodule would resolve against that submodule's own items first — an
-/// operation's response enum, for instance, shares the model's identifier and
-/// would shadow it, producing a recursive (self-referential) type. Rewriting
-/// each model reference to an [`RustType::External`] rooted at `super` names the
-/// crate-root model unambiguously and removes any need for a `use super::*;`
-/// glob. Must run after [`crate::lower::prune_unused_models`], whose reachability
-/// walk only follows `Named` references.
-pub fn qualify_service_models(service: &mut Service) {
-    visit_service_types(service, &mut |ty| {
-        if let RustType::Named(name) = ty {
-            let name = std::mem::take(name);
-            *ty = RustType::External {
-                module: "super".to_owned(),
-                name,
-            };
         }
     });
 }
@@ -213,4 +191,70 @@ fn rewrite_type(ty: &mut RustType, renames: &HashMap<String, String>) {
         }
         _ => {}
     }
+}
+/// Fail generation if a per-operation type name would collide with a
+/// component-model name emitted in the same file.
+///
+/// In the flat layout, component models and per-operation types (response
+/// enums, parameter structs, request/response body enums) share the crate root.
+/// A model whose name matches a generated type — most commonly a schema named
+/// `<Op>Response` — would produce two items with the same name. Rather than
+/// silently rename, generation fails so the author resolves the clash
+/// deliberately: rename the schema with `x-rust-name`, or, for a response-enum
+/// clash, set `output-options.response-type-suffix`. Only locally emitted models
+/// are considered; import-mapped models are referenced through a qualified path
+/// and cannot collide with a crate-root type.
+pub fn check_type_name_collisions(service: &Service, module: &Module) -> Result<()> {
+    let models: HashSet<&str> = module.items.iter().map(|item| return item.name()).collect();
+    for operation in &service.operations {
+        ensure_free(&operation.response_enum, "response enum", true, &models)?;
+        if let Some(query) = &operation.query {
+            ensure_free(&query.name, "query-parameter struct", false, &models)?;
+        }
+        if let Some(headers) = &operation.headers {
+            ensure_free(&headers.name, "header-parameter struct", false, &models)?;
+        }
+        if let Some(cookies) = &operation.cookies {
+            ensure_free(&cookies.name, "cookie-parameter struct", false, &models)?;
+        }
+        match &operation.request {
+            Some(RequestPayload::Multipart(multipart)) => {
+                ensure_free(&multipart.name, "multipart request struct", false, &models)?;
+            }
+            Some(RequestPayload::Negotiated(request)) => {
+                ensure_free(&request.name, "request-body enum", false, &models)?;
+            }
+            Some(RequestPayload::Single(_)) | None => {}
+        }
+        for response in &operation.responses {
+            if let Some(ResponseBody::Negotiated(body)) = &response.body {
+                ensure_free(&body.name, "response-body enum", false, &models)?;
+            }
+        }
+    }
+    return Ok(());
+}
+
+/// Return a [`Error::TypeNameCollision`] when `name` is already taken by an
+/// emitted component model. `is_response` selects the remedy hint, since only
+/// the response enum can be renamed through `response-type-suffix`.
+fn ensure_free(
+    name: &crate::naming::RustIdent,
+    artifact: &str,
+    is_response: bool,
+    models: &HashSet<&str>,
+) -> Result<()> {
+    if !models.contains(name.logical()) {
+        return Ok(());
+    }
+    let hint = if is_response {
+        "set `output-options.response-type-suffix` to a distinct suffix, or rename the schema with `x-rust-name`"
+    } else {
+        "rename the schema with `x-rust-name`"
+    };
+    return Err(crate::error::Error::TypeNameCollision {
+        name: name.logical().to_owned(),
+        artifact: artifact.to_owned(),
+        hint: hint.to_owned(),
+    });
 }

@@ -49,11 +49,19 @@ places. This lists where `oapi-codegen-rust` deviates from
 - `x-go-*` keys are ignored (accepted, no effect). See
   [extensions](extensions.md).
 
-## Combined output via submodules
+## Combined output at the crate root
 
-- Emitting server and client together puts shared component models at the crate
-  root and the two targets in `server` / `client` submodules, resolving the
-  same-named/different-shaped per-operation items.
+- Models, per-operation types (response enums, parameter structs, request/
+  response body enums), and both the server and client interfaces are emitted
+  flat at the crate root. Server and client share one file and the same
+  per-operation types, so a consumer refers to them directly (e.g.
+  `use api::GetPetResponse`).
+- A generated per-operation type whose name matches an emitted component model
+  (most commonly a schema named `<Op>Response`) fails generation rather than
+  renaming either item silently. Resolve the clash by renaming the schema with
+  `x-rust-name`, or, for a response-enum clash, set
+  `output-options.response-type-suffix` to move the enum aside
+  (`GetWidgetResponse` → `GetWidgetResp`) while the schema keeps its name.
 
 ## OpenAPI 3.0
 

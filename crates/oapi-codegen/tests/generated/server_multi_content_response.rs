@@ -13,16 +13,37 @@ pub enum GetReportResponseOkBody {
     Text(String),
 }
 
+/// Fetch the report as JSON or plain text (handler chooses).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetReportResponse {
+    /// The report, as JSON or plain text.
+    Ok(GetReportResponseOkBody),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExportReportResponseDefaultBody {
     Json(Report),
     Text(String),
 }
 
+/// Export the report; the handler also sets the status code.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExportReportResponse {
+    /// The report, as JSON or plain text.
+    Default(http::StatusCode, ExportReportResponseDefaultBody),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetSummaryResponseOkBody {
     Json(Report),
     Text(String),
+}
+
+/// Fetch the summary as JSON or plain text, with a header.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetSummaryResponse {
+    /// The summary, as JSON or plain text.
+    Ok { body: GetSummaryResponseOkBody, x_report_id: Option<String> },
 }
 
 /// Server behaviour: implement one method per operation.
@@ -37,13 +58,6 @@ pub trait Api: Clone + Send + Sync + 'static {
     fn get_summary(
         &self,
     ) -> impl std::future::Future<Output = GetSummaryResponse> + Send;
-}
-
-/// Fetch the report as JSON or plain text (handler chooses).
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetReportResponse {
-    /// The report, as JSON or plain text.
-    Ok(GetReportResponseOkBody),
 }
 
 impl axum::response::IntoResponse for GetReportResponse {
@@ -67,13 +81,6 @@ impl axum::response::IntoResponse for GetReportResponse {
     }
 }
 
-/// Export the report; the handler also sets the status code.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ExportReportResponse {
-    /// The report, as JSON or plain text.
-    Default(axum::http::StatusCode, ExportReportResponseDefaultBody),
-}
-
 impl axum::response::IntoResponse for ExportReportResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
@@ -89,13 +96,6 @@ impl axum::response::IntoResponse for ExportReportResponse {
             }
         }
     }
-}
-
-/// Fetch the summary as JSON or plain text, with a header.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetSummaryResponse {
-    /// The summary, as JSON or plain text.
-    Ok { body: GetSummaryResponseOkBody, x_report_id: Option<String> },
 }
 
 impl axum::response::IntoResponse for GetSummaryResponse {

@@ -5,6 +5,13 @@ pub struct Pet {
     pub id: i64,
 }
 
+/// Fetch a single pet by id.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetPetResponse {
+    /// The requested pet.
+    Ok(Pet),
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// Fetch a single pet by id.
@@ -12,13 +19,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         pet_id: i64,
     ) -> impl std::future::Future<Output = GetPetResponse> + Send;
-}
-
-/// Fetch a single pet by id.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetPetResponse {
-    /// The requested pet.
-    Ok(Pet),
 }
 
 impl axum::response::IntoResponse for GetPetResponse {
