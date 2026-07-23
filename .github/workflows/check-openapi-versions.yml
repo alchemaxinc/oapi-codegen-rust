@@ -4,10 +4,12 @@ on:
   schedule:
     - cron: "0 0 1 * *" # Run on the 1st of every month at midnight
 
-# Probes the upstream OpenAPI specification releases, compares them against the
-# highest version we support in .github/openapi-versions.json, and for every
-# newer minor version opens a tracking issue (asking Copilot for a deep dive)
-# and adds a "Planned" row to the README support matrix. Both actions are
+# Probes the upstream OpenAPI specification releases and subtracts the versions
+# we already support in .github/openapi-versions.json. For every released minor
+# version we do not support it opens a tracking issue (asking Copilot for a deep
+# dive) and adds a "Planned" row to the README support matrix. Working from an
+# explicit supported set (rather than a single high-water mark) means gaps are
+# handled: supporting 3.2 before 3.1 still leaves 3.1 tracked. Both actions are
 # idempotent, so reruns never create duplicates.
 
 env:
@@ -32,34 +34,40 @@ jobs:
           token: ${{ steps.app.outputs.token }}
           ref: ${{ env.BASE_BRANCH }}
 
-      - name: Detect new OpenAPI versions
+      - name: Detect unsupported OpenAPI versions
         id: detect
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
-          highest=$(jq -r '.highest_supported' .github/openapi-versions.json)
-          new=$(gh api repos/OAI/OpenAPI-Specification/releases --paginate \
+          # Minor versions we already support, and our lowest supported version
+          # (the floor below which upstream releases are intentionally ignored).
+          supported=$(jq -r '.supported[]' .github/openapi-versions.json | sort -u)
+          floor=$(printf '%s\n' "$supported" | sort -t. -k1,1n -k2,2n | head -n1)
+
+          # Minor versions upstream has released (stable only).
+          released=$(gh api repos/OAI/OpenAPI-Specification/releases --paginate \
             --jq '.[] | select(.prerelease == false) | .tag_name' \
             | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
-            | awk -F. '{ print $1 "." $2 }' \
-            | sort -u -t. -k1,1n -k2,2n \
-            | awk -F. -v h="$highest" \
-                'BEGIN { split(h, c, ".") }
-                 ($1 + 0 > c[1] + 0) || ($1 + 0 == c[1] + 0 && $2 + 0 > c[2] + 0)')
-          echo "highest=$highest" >> "$GITHUB_OUTPUT"
+            | awk -F. '{ print $1 "." $2 }' | sort -u)
+
+          # Unsupported = released minus supported, restricted to >= floor.
+          new=$(comm -23 <(printf '%s\n' "$released") <(printf '%s\n' "$supported") \
+            | awk -F. -v f="$floor" \
+                'BEGIN { split(f, c, ".") }
+                 ($1 + 0 > c[1] + 0) || ($1 + 0 == c[1] + 0 && $2 + 0 >= c[2] + 0)')
+
           {
             echo "new<<EOF"
             echo "$new"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          echo "::notice::Highest supported OpenAPI version: $highest"
-          echo "::notice::New OpenAPI versions: $(echo "$new" | tr '\n' ' ')"
+          echo "::notice::Supported OpenAPI versions: $(echo "$supported" | tr '\n' ' ')"
+          echo "::notice::Unsupported OpenAPI versions: $(echo "$new" | tr '\n' ' ')"
 
       - name: File tracking issues and update support matrix
         if: steps.detect.outputs.new != ''
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          HIGHEST: ${{ steps.detect.outputs.highest }}
           NEW_VERSIONS: ${{ steps.detect.outputs.new }}
         run: |
           # Column widths come from the table separator, so inserted rows stay
@@ -81,11 +89,11 @@ jobs:
                 --body "$(printf '%s\n' \
                   "@copilot" \
                   "" \
-                  "OpenAPI **$minor** has been released upstream (see the [OpenAPI Specification releases](https://github.com/OAI/OpenAPI-Specification/releases)), but \`oapi-codegen-rust\` currently supports up to OpenAPI **$HIGHEST**." \
+                  "OpenAPI **$minor** has been released upstream (see the [OpenAPI Specification releases](https://github.com/OAI/OpenAPI-Specification/releases)), but is not yet supported by \`oapi-codegen-rust\`." \
                   "" \
                   "Please do a thorough deep dive into what it would take to support OpenAPI $minor here:" \
                   "" \
-                  "- Summarise the notable specification changes in OpenAPI $minor relative to $HIGHEST." \
+                  "- Summarise the notable specification changes in OpenAPI $minor relative to the versions we already support." \
                   "- Identify the concrete parts of the implementation (loader, lowering, IR, emitters, config, tests) that would need to change." \
                   "- Call out the biggest challenges, ambiguities, and design decisions to be made." \
                   "- Propose a rough, staged plan of action to reach parity, in line with how previous versions were added." \
