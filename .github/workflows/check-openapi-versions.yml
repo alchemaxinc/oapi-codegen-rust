@@ -4,8 +4,15 @@ on:
   schedule:
     - cron: "0 0 1 * *" # Run on the 1st of every month at midnight
 
+# Probes the upstream OpenAPI specification releases, compares them against the
+# highest version we support in .github/openapi-versions.json, and for every
+# newer minor version opens a tracking issue (asking Copilot for a deep dive)
+# and adds a "Planned" row to the README support matrix. Both actions are
+# idempotent, so reruns never create duplicates.
+
 env:
-  PRETTIER_VERSION: "3.9.5"
+  BASE_BRANCH: develop
+  PR_TITLE: "docs: track newly released OpenAPI specification versions"
 
 jobs:
   check-openapi-versions:
@@ -19,47 +26,110 @@ jobs:
           client-id: ${{ vars.HOUSEKEEPING_BOT_APP_ID }}
           private-key: ${{ secrets.HOUSEKEEPING_BOT_PRIVATE_KEY }}
 
-      - name: Checkout code
-        uses: actions/checkout@v7
+      - name: Checkout and setup
+        uses: alchemaxinc/composite-toolbox/checkout-and-setup@v1
         with:
           token: ${{ steps.app.outputs.token }}
-          ref: develop
-          fetch-depth: 0
+          ref: ${{ env.BASE_BRANCH }}
 
-      - name: Reconcile OpenAPI versions
-        id: check
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          ISSUE_LABEL: enhancement
-          ISSUE_TYPE: Feature
-        run: .github/scripts/check-openapi-versions.sh
-
-      - name: Format changed files
-        if: steps.check.outputs.changed == 'true'
-        run: npx prettier@${{ env.PRETTIER_VERSION }} --write README.md .github/openapi-versions.json
-
-      - name: Open pull request
-        if: steps.check.outputs.changed == 'true'
+      - name: Detect new OpenAPI versions
+        id: detect
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
-          set -euo pipefail
-          branch="chore/openapi-version-tracking"
-          title="chore(openapi): track newly released OpenAPI versions"
+          highest=$(jq -r '.highest_supported' .github/openapi-versions.json)
+          new=$(gh api repos/OAI/OpenAPI-Specification/releases --paginate \
+            --jq '.[] | select(.prerelease == false) | .tag_name' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | awk -F. '{ print $1 "." $2 }' \
+            | sort -u -t. -k1,1n -k2,2n \
+            | awk -F. -v h="$highest" \
+                'BEGIN { split(h, c, ".") }
+                 ($1 + 0 > c[1] + 0) || ($1 + 0 == c[1] + 0 && $2 + 0 > c[2] + 0)')
+          echo "highest=$highest" >> "$GITHUB_OUTPUT"
+          {
+            echo "new<<EOF"
+            echo "$new"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Highest supported OpenAPI version: $highest"
+          echo "::notice::New OpenAPI versions: $(echo "$new" | tr '\n' ' ')"
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: File tracking issues and update support matrix
+        if: steps.detect.outputs.new != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          HIGHEST: ${{ steps.detect.outputs.highest }}
+          NEW_VERSIONS: ${{ steps.detect.outputs.new }}
+        run: |
+          # Column widths come from the table separator, so inserted rows stay
+          # aligned exactly as Prettier renders them and CI's format check passes.
+          sep=$(grep -m1 -E '^\| -+ \|' README.md | sed 's/^| //; s/ |$//')
+          IFS='|' read -r c1 c2 c3 <<< "$sep"
+          w1=$(printf '%s' "$c1" | tr -cd '-' | wc -c | tr -d ' ')
+          w2=$(printf '%s' "$c2" | tr -cd '-' | wc -c | tr -d ' ')
+          w3=$(printf '%s' "$c3" | tr -cd '-' | wc -c | tr -d ' ')
 
-          git switch -c "$branch"
-          git add README.md .github/openapi-versions.json
-          git commit -m "$title"
-          git push --force-with-lease origin "$branch"
+          for minor in $NEW_VERSIONS; do
+            title="Support OpenAPI $minor"
 
-          if ! gh pr view "$branch" --json state --jq '.state' 2>/dev/null | grep -qx OPEN; then
-            gh pr create \
-              --base develop \
-              --head "$branch" \
-              --title "$title" \
-              --body "Automated update from the OpenAPI version check workflow: new upstream spec versions were detected and are now tracked in the README support matrix and \`.github/openapi-versions.json\`. Tracking issues have been filed for each new version."
-          fi
+            url=$(gh issue list --state all --search "$title in:title" \
+              --json title,url --jq "[.[] | select(.title == \"$title\")][0].url // empty")
+
+            if [ -z "$url" ]; then
+              url=$(gh issue create --title "$title" --label enhancement --type Feature \
+                --body "$(printf '%s\n' \
+                  "@copilot" \
+                  "" \
+                  "OpenAPI **$minor** has been released upstream (see the [OpenAPI Specification releases](https://github.com/OAI/OpenAPI-Specification/releases)), but \`oapi-codegen-rust\` currently supports up to OpenAPI **$HIGHEST**." \
+                  "" \
+                  "Please do a thorough deep dive into what it would take to support OpenAPI $minor here:" \
+                  "" \
+                  "- Summarise the notable specification changes in OpenAPI $minor relative to $HIGHEST." \
+                  "- Identify the concrete parts of the implementation (loader, lowering, IR, emitters, config, tests) that would need to change." \
+                  "- Call out the biggest challenges, ambiguities, and design decisions to be made." \
+                  "- Propose a rough, staged plan of action to reach parity, in line with how previous versions were added." \
+                  "" \
+                  "_Filed automatically by the OpenAPI version check workflow._")")
+              echo "::notice::Opened tracking issue for OpenAPI $minor: $url"
+            else
+              echo "::notice::Reusing existing tracking issue for OpenAPI $minor: $url"
+            fi
+
+            if ! grep -q "^| v${minor}.0 " README.md; then
+              row=$(printf '| %-*s | %-*s | %-*s |' \
+                "$w1" "v${minor}.0" "$w2" "Planned" "$w3" "Tracking [here]($url).")
+              awk -v row="$row" \
+                '/^\| v3\./ { last = NR } { lines[NR] = $0 }
+                 END { for (i = 1; i <= NR; i++) { print lines[i]; if (i == last) print row } }' \
+                README.md > README.md.tmp
+              mv README.md.tmp README.md
+            fi
+          done
+
+      - name: Check for changes
+        id: changes
+        uses: alchemaxinc/composite-toolbox/check-changes@v1
+        with:
+          files: README.md
+
+      - name: Check for existing pull request
+        id: existing
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: alchemaxinc/update-deps/shared/actions/check-existing-pr@v2
+        with:
+          token: ${{ steps.app.outputs.token }}
+          pr-title: ${{ env.PR_TITLE }}
+          base-branch: ${{ env.BASE_BRANCH }}
+
+      - name: Open pull request
+        if: steps.changes.outputs.has_changes == 'true' && steps.existing.outputs.exists != 'true'
+        uses: alchemaxinc/composite-toolbox/create-pr@v1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          base-branch: ${{ env.BASE_BRANCH }}
+          branch-prefix: openapi-version-tracking
+          files: README.md
+          commit-message: ${{ env.PR_TITLE }}
+          pr-title: ${{ env.PR_TITLE }}
+          pr-body: "Automated update: new OpenAPI specification versions were detected upstream. This PR adds them to the support matrix; tracking issues have been filed for each."
