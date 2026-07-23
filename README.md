@@ -9,6 +9,8 @@ Generate idiomatic Rust APIs and clients from OpenAPI 3 specifications, inspired
 cargo install oapi-codegen
 ```
 
+From this repository's root (e.g., after cloning), try the included bookstore example:
+
 ```console
 $ oapi-codegen --config-file examples/bookstore/oapi-codegen-server.yaml examples/bookstore/openapi.yaml
 ✓ wrote generated/restapi.rs
