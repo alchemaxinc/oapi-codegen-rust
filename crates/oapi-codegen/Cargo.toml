@@ -15,17 +15,17 @@ workspace = true
 
 [dependencies]
 anstream = "1.0.0"
-clap = { version = "4.6.1", features = ["derive"] }
+clap = { version = "4.6.4", features = ["derive"] }
 http = "1.4.2"
 indexmap = "2.14.0"
 openapiv3 = "2.2.0"
 owo-colors = "4.3.0"
-prettyplease = "0.2.37"
-proc-macro2 = "1.0.106"
-quote = "1.0.46"
-serde = { version = "1.0.228", features = ["derive"] }
+prettyplease = "0.3.0"
+proc-macro2 = "1.0.107"
+quote = "1.0.47"
+serde = { version = "1.0.229", features = ["derive"] }
 serde_yaml = "0.9.34"
-syn = { version = "2.0.118", features = ["full"] }
+syn = { version = "3.0.3", features = ["full"] }
 
 [dev-dependencies]
 axum = { version = "0.8.9", features = ["multipart"] }
@@ -34,9 +34,9 @@ chrono = { version = "0.4.45", features = ["serde"] }
 clap-markdown = "0.1.5"
 openapiv3 = "2.2.0"
 percent-encoding = "2.3.2"
-reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "multipart"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "multipart", "query", "form"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
 trycmd = "1.2.1"
-uuid = { version = "1.23.4", features = ["serde"] }
+uuid = { version = "1.24.0", features = ["serde"] }
