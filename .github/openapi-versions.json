@@ -1,0 +1,22 @@
+{
+  "$comment": "Single source of truth for OpenAPI Specification version support. The README support matrix is generated from this file by `make update-versions`; edit this file (not the README) and re-run that target. New versions are appended automatically by the detect-openapi-release workflow.",
+  "repository": "alchemaxinc/oapi-codegen-rust",
+  "upstream": "OAI/OpenAPI-Specification",
+  "versions": [
+    {
+      "version": "3.0.0",
+      "status": "supported",
+      "supported_since": "v1.0.0"
+    },
+    {
+      "version": "3.1.0",
+      "status": "planned",
+      "tracking_issue": 33
+    },
+    {
+      "version": "3.2.0",
+      "status": "planned",
+      "tracking_issue": 48
+    }
+  ]
+}

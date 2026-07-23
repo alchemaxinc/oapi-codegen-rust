@@ -57,6 +57,10 @@ update-generated: ## Refresh generated files from the coverage fixtures
 update-docs: ## Refresh docs/cli.md from the clap CLI definition
 	UPDATE_DOCS=1 cargo test -p oapi-codegen --test cli_docs
 
+.PHONY: update-versions
+update-versions: ## Refresh the README OpenAPI support matrix from .github/openapi-versions.json
+	UPDATE_VERSIONS=1 cargo test -p oapi-codegen --test openapi_versions
+
 .PHONY: generate-example
 generate-example: ## Regenerate the composed bookstore example from its OpenAPI spec
 	cd examples/bookstore && \
@@ -70,11 +74,12 @@ verify-generated: ## Regenerate all generated files and fail if they drift from 
 	$(MAKE) generate-example
 	$(MAKE) update-generated
 	$(MAKE) update-docs
-	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md)" ]; then \
+	$(MAKE) update-versions
+	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md README.md)" ]; then \
 		echo "ERROR: generated files are out of date."; \
-		echo "Run 'make generate-example', 'make update-generated' and 'make update-docs', then commit the result."; \
-		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
-		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
+		echo "Run 'make generate-example', 'make update-generated', 'make update-docs' and 'make update-versions', then commit the result."; \
+		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md README.md; \
+		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md README.md; \
 		exit 1; \
 	fi
 	@echo "Generated files are up to date."
