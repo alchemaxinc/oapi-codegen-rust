@@ -2,12 +2,16 @@ name: Detect OpenAPI Release
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 3 * * 1" # Run every Monday at 03:00 UTC
+    - cron: "0 3 1 * *" # 03:00 UTC on the 1st of every month
 
-# The mutating work (creating issues, pushing a branch, opening a PR) is done
-# with the housekeeping GitHub App token minted below, not GITHUB_TOKEN.
 permissions:
   contents: read
+
+env:
+  UPSTREAM: OAI/OpenAPI-Specification
+  MANIFEST: .github/openapi-versions.json
+  ISSUE_TEMPLATE: .github/openapi-issue-template.md
+  ISSUE_LABEL: openapi-version
 
 jobs:
   detect-openapi-release:
@@ -21,179 +25,80 @@ jobs:
           client-id: ${{ vars.HOUSEKEEPING_BOT_APP_ID }}
           private-key: ${{ secrets.HOUSEKEEPING_BOT_PRIVATE_KEY }}
 
-      - name: Checkout develop
-        uses: actions/checkout@v7
+      - name: Checkout and setup
+        uses: alchemaxinc/composite-toolbox/checkout-and-setup@v1
         with:
           token: ${{ steps.app.outputs.token }}
           ref: develop
-          fetch-depth: 0
 
       - name: Setup Rust toolchain
         uses: ./.github/actions/setup-rust
 
-      # Detect OpenAPI Specification minor lines published upstream that are not
-      # yet tracked in .github/openapi-versions.json. For each new line: open (or
-      # reuse) a tracking issue, hand it to Copilot for a code-wide assessment,
-      # and append the version to the manifest as `planned`.
-      - name: Detect and track new OpenAPI versions
-        id: track
+      - name: Find untracked OpenAPI versions
+        id: find
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          UPSTREAM: OAI/OpenAPI-Specification
-          REPOSITORY: ${{ github.repository }}
-          MANIFEST: .github/openapi-versions.json
-          ISSUE_TEMPLATE: .github/openapi-issue-template.md
-          ISSUE_LABEL: openapi-version
         run: |
           set -euo pipefail
+          tracked="$(jq -r '.versions[].version | split(".")[:2] | join(".")' "$MANIFEST" | sort -u)"
+          latest="$(gh release list --repo "$UPSTREAM" --exclude-drafts --exclude-pre-releases \
+            --json tagName --jq '.[].tagName' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)"
 
-          owner="${REPOSITORY%%/*}"
-          repo="${REPOSITORY##*/}"
+          declare -A newest
+          while read -r version; do
+            [ -z "$version" ] && continue
+            newest["${version%.*}"]="$version"
+          done <<< "$latest"
 
-          # major.minor lines already recorded in the manifest.
-          known="$(jq -r '.versions[].version' "$MANIFEST" \
-            | awk -F. '{ print $1"."$2 }' | sort -u)"
-
-          # Stable, non-prerelease upstream releases, normalised to x.y.z and
-          # sorted ascending so the highest patch of each minor line wins.
-          candidates="$(gh api --paginate "repos/${UPSTREAM}/releases" \
-            --jq '.[] | select(.prerelease == false and .draft == false) | .tag_name' \
-            | sed 's/^v//' \
-            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
-            | sort -V || true)"
-
-          declare -A best
-          for v in $candidates; do
-            mm="$(awk -F. '{ print $1"."$2 }' <<<"$v")"
-            best["$mm"]="$v"
+          new=""
+          for line in "${!newest[@]}"; do
+            grep -qxF "$line" <<< "$tracked" || new+="${newest[$line]} "
           done
+          echo "versions=$(echo $new)" >> "$GITHUB_OUTPUT"
 
-          # Ensure the tracking label exists (idempotent).
-          gh label create "$ISSUE_LABEL" \
-            --repo "$REPOSITORY" \
-            --color "5319e7" \
-            --description "Tracks support for a new OpenAPI Specification version" \
-            2>/dev/null || true
+      - name: Open tracking issues
+        id: issues
+        if: steps.find.outputs.versions != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERSIONS: ${{ steps.find.outputs.versions }}
+        run: |
+          set -euo pipefail
+          gh label create "$ISSUE_LABEL" --repo "$GITHUB_REPOSITORY" --color 5319e7 \
+            --description "Tracks support for a new OpenAPI Specification version" 2>/dev/null || true
 
-          assign_copilot() {
-            local number="$1" bot_id issue_id
-            bot_id="$(gh api graphql -f query='
-              query($owner:String!,$name:String!){
-                repository(owner:$owner,name:$name){
-                  suggestedActors(capabilities:[CAN_BE_ASSIGNED], first:100){
-                    nodes{ login __typename ... on Bot { id } ... on User { id } }
-                  }
-                }
-              }' -f owner="$owner" -f name="$repo" \
-              --jq '.data.repository.suggestedActors.nodes[] | select(.login=="copilot-swe-agent") | .id' 2>/dev/null || true)"
-            if [ -z "$bot_id" ]; then
-              echo "Copilot coding agent not available for assignment; relying on the @copilot mention in the issue body."
-              return 0
-            fi
-            issue_id="$(gh api graphql -f query='
-              query($owner:String!,$name:String!,$number:Int!){
-                repository(owner:$owner,name:$name){ issue(number:$number){ id } }
-              }' -f owner="$owner" -f name="$repo" -F number="$number" \
-              --jq '.data.repository.issue.id' 2>/dev/null || true)"
-            if [ -n "$issue_id" ]; then
-              gh api graphql -f query='
-                mutation($assignable:ID!,$actor:ID!){
-                  replaceActorsForAssignable(input:{assignableId:$assignable, actorIds:[$actor]}){ clientMutationId }
-                }' -f assignable="$issue_id" -f actor="$bot_id" >/dev/null 2>&1 \
-                || echo "Assigning Copilot to #$number failed; the @copilot mention still stands."
-            fi
-          }
-
-          summary=""
-          created=0
-          for mm in "${!best[@]}"; do
-            if grep -qx "$mm" <<<"$known"; then
-              continue
-            fi
-
-            version="${best[$mm]}"
-            title="Support OpenAPI v${version}"
-            tag="v${version}"
-            release_url="https://github.com/${UPSTREAM}/releases/tag/${tag}"
-            published_at="$(gh api "repos/${UPSTREAM}/releases/tags/${tag}" --jq '.published_at' 2>/dev/null || echo "")"
-            [ -z "$published_at" ] && published_at="an upstream release"
-
-            # Reuse an existing tracking issue if one is already open, so weekly
-            # re-runs before the PR merges stay idempotent.
-            number="$(gh issue list --repo "$REPOSITORY" --state open \
-              --label "$ISSUE_LABEL" --search "$title in:title" \
-              --json number,title \
-              --jq ".[] | select(.title==\"$title\") | .number" | head -n1 || true)"
-
+          summary="Newly detected OpenAPI Specification versions:"$'\n'
+          for version in $VERSIONS; do
+            title="Support OpenAPI v$version"
+            number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$ISSUE_LABEL" \
+              --search "$title in:title" --json number,title \
+              --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
             if [ -z "$number" ]; then
-              body="$(sed \
-                -e "s|{{VERSION}}|${version}|g" \
-                -e "s|{{TAG}}|${tag}|g" \
-                -e "s|{{RELEASE_URL}}|${release_url}|g" \
-                -e "s|{{PUBLISHED_AT}}|${published_at}|g" \
-                -e "s|{{REPOSITORY}}|${REPOSITORY}|g" \
-                "$ISSUE_TEMPLATE")"
-              number="$(gh issue create --repo "$REPOSITORY" \
-                --title "$title" \
-                --label "$ISSUE_LABEL" \
-                --body "$body" \
-                | grep -oE '[0-9]+$')"
-              echo "Created issue #$number for OpenAPI v$version"
-              assign_copilot "$number"
-            else
-              echo "Reusing existing issue #$number for OpenAPI v$version"
+              body="$(sed -e "s|{{VERSION}}|$version|g" -e "s|{{REPOSITORY}}|$GITHUB_REPOSITORY|g" "$ISSUE_TEMPLATE")"
+              number="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+                --label "$ISSUE_LABEL" --body "$body" | grep -oE '[0-9]+$')"
             fi
-
-            # Append the new version to the manifest as planned, linked to its
-            # tracking issue, keeping entries sorted by version.
-            tmp="$(mktemp)"
-            jq --arg version "$version" --argjson issue "$number" '
-              .versions += [{ "version": $version, "status": "planned", "tracking_issue": $issue }]
-              | .versions |= (sort_by(.version | split(".") | map(tonumber)))
-            ' "$MANIFEST" > "$tmp"
-            mv "$tmp" "$MANIFEST"
-
-            summary="${summary}- OpenAPI v${version} — tracking #${number}"$'\n'
-            created=$((created + 1))
+            jq --arg v "$version" --argjson n "$number" \
+              '.versions += [{version: $v, status: "planned", tracking_issue: $n}]
+               | .versions |= sort_by(.version | split(".") | map(tonumber))' \
+              "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+            summary+="- OpenAPI v$version — #$number"$'\n'
           done
 
-          echo "count=${created}" >> "$GITHUB_OUTPUT"
-          {
-            echo "summary<<EOF"
-            printf '%s' "$summary"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          { echo "summary<<EOF"; echo "$summary"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
-      - name: Regenerate README support matrix
-        if: steps.track.outputs.count != '0'
+      - name: Regenerate support matrix
+        if: steps.find.outputs.versions != ''
         run: make update-versions
 
-      # Match the repository's pinned Prettier version so the generated README
-      # passes the `prettier --check` CI job.
-      - name: Format README
-        if: steps.track.outputs.count != '0'
-        run: npx --yes prettier@3.9.5 --write README.md
-
       - name: Open pull request
-        if: steps.track.outputs.count != '0'
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          SUMMARY: ${{ steps.track.outputs.summary }}
-        run: |
-          set -euo pipefail
-
-          branch="detect-openapi/$(date -u +%Y%m%d)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch"
-          git add .github/openapi-versions.json README.md
-          git commit -m "chore(openapi): track newly released OpenAPI versions"
-          git push --force-with-lease --set-upstream origin "$branch"
-
-          if [ -z "$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --json number --jq '.[].number')" ]; then
-            gh pr create --repo "$GITHUB_REPOSITORY" \
-              --base develop \
-              --head "$branch" \
-              --title "chore(openapi): track newly released OpenAPI versions" \
-              --body "$(printf 'Automatically opened by the `detect-openapi-release` workflow.\n\nNewly detected OpenAPI Specification versions:\n\n%s\nThe README support matrix was regenerated from `.github/openapi-versions.json`. Each tracking issue has been handed to Copilot for a code-wide assessment of the work required.' "$SUMMARY")"
-          fi
+        if: steps.find.outputs.versions != ''
+        uses: alchemaxinc/composite-toolbox/create-pr@v1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          base-branch: develop
+          branch-prefix: detect-openapi
+          files: ${{ env.MANIFEST }} README.md
+          commit-message: "chore(openapi): track newly released OpenAPI versions"
+          pr-title: "chore(openapi): track newly released OpenAPI versions"
+          pr-body: ${{ steps.issues.outputs.summary }}
