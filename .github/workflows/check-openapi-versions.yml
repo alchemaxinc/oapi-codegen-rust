@@ -44,20 +44,25 @@ jobs:
         run: |
           # Minor versions we already support, and our lowest supported version
           # (the floor below which upstream releases are intentionally ignored).
-          supported=$(jq -r '.supported[]' .github/openapi-versions.json | sort -u)
-          floor=$(printf '%s\n' "$supported" | sort -t. -k1,1n -k2,2n | head -n1)
+          # sort -V keeps double-digit minors (e.g. 3.10) ordered correctly.
+          supported=$(jq -r '.supported[]' .github/openapi-versions.json | sort -V -u)
+          floor=$(printf '%s\n' "$supported" | head -n1)
 
           # Minor versions upstream has released (stable only).
           released=$(gh api repos/OAI/OpenAPI-Specification/releases --paginate \
             --jq '.[] | select(.prerelease == false) | .tag_name' \
             | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
-            | awk -F. '{ print $1 "." $2 }' | sort -u)
+            | awk -F. '{ print $1 "." $2 }' | sort -V -u)
 
-          # Unsupported = released minus supported, restricted to >= floor.
-          new=$(comm -23 <(printf '%s\n' "$released") <(printf '%s\n' "$supported") \
-            | awk -F. -v f="$floor" \
-                'BEGIN { split(f, c, ".") }
-                 ($1 + 0 > c[1] + 0) || ($1 + 0 == c[1] + 0 && $2 + 0 >= c[2] + 0)')
+          # Unsupported = released minus supported, restricted to >= floor. The
+          # set difference is computed in awk (not comm) so it does not depend on
+          # the inputs sharing a byte-wise sort order.
+          new=$(awk -F. -v floor="$floor" \
+            'BEGIN { split(floor, f, ".") }
+             FNR == NR { supported[$0] = 1; next }
+             ($0 in supported) { next }
+             ($1 + 0 > f[1] + 0) || ($1 + 0 == f[1] + 0 && $2 + 0 >= f[2] + 0)' \
+            <(printf '%s\n' "$supported") <(printf '%s\n' "$released"))
 
           {
             echo "new<<EOF"
@@ -103,7 +108,7 @@ jobs:
             if ! grep -q "^| v${minor}.0 " README.md; then
               row="| v${minor}.0 | Planned | Tracking [here]($url). |"
               awk -v row="$row" \
-                '/^\| v3\./ { last = NR } { lines[NR] = $0 }
+                '/^\| v[0-9]+\./ { last = NR } { lines[NR] = $0 }
                  END { for (i = 1; i <= NR; i++) { print lines[i]; if (i == last) print row } }' \
                 README.md > README.md.tmp
               mv README.md.tmp README.md
