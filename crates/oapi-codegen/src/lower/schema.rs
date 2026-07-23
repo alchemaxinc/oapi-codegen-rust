@@ -28,12 +28,11 @@ use crate::ir::UnionVariant;
 use crate::loader::Spec;
 use crate::loader::ref_target_name;
 use crate::naming::Case;
+use crate::naming::X_RUST_NAME;
 use crate::naming::to_ident;
 
 /// The `x-rust-type` extension: emit a verbatim Rust type expression.
 const X_RUST_TYPE: &str = "x-rust-type";
-/// The `x-rust-name` extension: override a generated type or field identifier.
-const X_RUST_NAME: &str = "x-rust-name";
 /// The `x-rust-serde-skip` extension: drop a field via `#[serde(skip)]`.
 const X_RUST_SERDE_SKIP: &str = "x-rust-serde-skip";
 /// The `x-omitempty` extension: force `skip_serializing_if` on/off for a field.

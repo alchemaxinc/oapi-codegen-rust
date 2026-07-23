@@ -52,6 +52,21 @@ pub struct Generate {
     pub server_urls: bool,
 }
 
+/// Config key of the [`Config::output_options`] section, as written in a config
+/// file. Must match the `kebab-case` serde name; guarded by a deserialization
+/// test.
+pub(crate) const OUTPUT_OPTIONS_KEY: &str = "output-options";
+
+/// Config key of [`OutputOptions::response_type_suffix`], as written in a config
+/// file. Must match the `kebab-case` serde name; guarded by a deserialization
+/// test.
+pub(crate) const RESPONSE_TYPE_SUFFIX_KEY: &str = "response-type-suffix";
+
+/// Seed for a response enum's name suffix when
+/// [`OutputOptions::response_type_suffix`] is unset; `to_ident(_, Pascal)` turns
+/// it into the `Response` that terminates every default `<Op>Response` enum.
+pub(crate) const DEFAULT_RESPONSE_SUFFIX: &str = "response";
+
 /// Output tuning options.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -102,5 +117,29 @@ impl Config {
             };
         })?;
         return Ok(config);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_keys_match_serde_names() {
+        let yaml = format!("{OUTPUT_OPTIONS_KEY}:\n  {RESPONSE_TYPE_SUFFIX_KEY}: Resp\n",);
+        let config: Config = serde_yaml::from_str(&yaml).expect("config parses");
+        assert_eq!(
+            config.output_options.response_type_suffix.as_deref(),
+            Some("Resp"),
+            "OUTPUT_OPTIONS_KEY/RESPONSE_TYPE_SUFFIX_KEY drifted from the serde field names",
+        );
+    }
+
+    #[test]
+    fn default_response_suffix_pascalizes_to_response() {
+        use crate::naming::Case;
+        use crate::naming::to_ident;
+
+        assert_eq!(to_ident(DEFAULT_RESPONSE_SUFFIX, Case::Pascal).logical(), "Response");
     }
 }

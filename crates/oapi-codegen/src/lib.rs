@@ -54,7 +54,7 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
             .output_options
             .response_type_suffix
             .as_deref()
-            .unwrap_or("response");
+            .unwrap_or(crate::config::DEFAULT_RESPONSE_SUFFIX);
         let mut service = lower::generate_service(&spec, &config.import_mapping, response_type_suffix)?;
         lower::rewrite_service(&mut service, &lower::type_renames(&spec));
         if !config.output_options.skip_prune {

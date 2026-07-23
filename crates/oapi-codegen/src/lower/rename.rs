@@ -15,6 +15,9 @@ use std::collections::HashSet;
 
 use openapiv3::ReferenceOr;
 
+use crate::config::DEFAULT_RESPONSE_SUFFIX;
+use crate::config::OUTPUT_OPTIONS_KEY;
+use crate::config::RESPONSE_TYPE_SUFFIX_KEY;
 use crate::error::Result;
 use crate::ir::EnumKind;
 use crate::ir::Item;
@@ -25,11 +28,9 @@ use crate::ir::RustType;
 use crate::ir::Service;
 use crate::loader::Spec;
 use crate::naming::Case;
+use crate::naming::X_RUST_NAME;
 use crate::naming::deconflict_ident;
 use crate::naming::to_ident;
-
-/// The `x-rust-name` extension: override a generated type or field identifier.
-const X_RUST_NAME: &str = "x-rust-name";
 
 /// Map of original schema name to the final Rust type identifier that references
 /// to it must resolve to, for every top-level schema whose emitted name differs
@@ -248,13 +249,19 @@ fn ensure_free(
         return Ok(());
     }
     let hint = if is_response {
-        "set `output-options.response-type-suffix` to a distinct suffix, or rename the schema with `x-rust-name`"
+        let default_suffix = to_ident(DEFAULT_RESPONSE_SUFFIX, Case::Pascal);
+        format!(
+            "set `{OUTPUT_OPTIONS_KEY}.{RESPONSE_TYPE_SUFFIX_KEY}` in your configuration file to a \
+             suffix other than the default `{}` (for example `{RESPONSE_TYPE_SUFFIX_KEY}: Resp`, \
+             which renames the enum to `<Op>Resp`), or rename the schema with `{X_RUST_NAME}`",
+            default_suffix.logical(),
+        )
     } else {
-        "rename the schema with `x-rust-name`"
+        format!("rename the schema with `{X_RUST_NAME}`")
     };
     return Err(crate::error::Error::TypeNameCollision {
         name: name.logical().to_owned(),
         artifact: artifact.to_owned(),
-        hint: hint.to_owned(),
+        hint,
     });
 }

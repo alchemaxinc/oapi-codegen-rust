@@ -27,11 +27,9 @@ use crate::ir::ServerUrlParamType;
 use crate::ir::ServerUrls;
 use crate::loader::Spec;
 use crate::naming::Case;
+use crate::naming::X_RUST_NAME;
 use crate::naming::deconflict_ident;
 use crate::naming::to_ident;
-
-/// The `x-rust-name` extension: override a server's generated identifier.
-const X_RUST_NAME: &str = "x-rust-name";
 
 /// Prefix applied to server identifiers derived from a description or URL, so a
 /// bare description like `Production` becomes `ServerUrlProduction`.
