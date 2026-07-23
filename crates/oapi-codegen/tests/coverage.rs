@@ -1055,7 +1055,7 @@ fn combined_generated_tests_cover_combined_fixtures() {
 /// real serde/chrono/uuid.
 #[test]
 fn generated_outputs_are_compile_checked() {
-    let source = include_str!("generated_compiles.rs");
+    let source = include_str!("generated.rs");
     let stems = fixtures_with(Status::Supported)
         .into_iter()
         .chain(SERVER_FIXTURES.iter().copied())
