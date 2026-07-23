@@ -95,8 +95,8 @@ fn documentation_root_readme_examples() {
     let repo_root = std::fs::canonicalize(&repo_root)
         .unwrap_or_else(|err| panic!("resolving repo root `{}` failed: {err}", repo_root.display()));
 
-    // Idiomatic trycmd requires adding a `README.in` folder into the root dir, which I found incredibly polluting.
-    // They're fine to exist inside `test/` folders and the like, but for ensuring that the root README.md does not get out-of-sync, I found this workaround acceptable.
+    // trycmd's default README workflow uses a sibling `README.in/` directory; we avoid adding that at the repo root.
+    // Instead, run `README.md` from the repo root and clean up any `generated/` output it creates.
     let _lock = lock_working_dir();
     let _cwd = WorkingDirGuard::change_to(&repo_root).remove_on_drop(repo_root.join("generated"));
     trycmd::TestCases::new().case(repo_root.join(README_MD));
