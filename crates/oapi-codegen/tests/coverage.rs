@@ -448,6 +448,15 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// same per-operation types alongside the component models.
 const COMBINED_FIXTURES: &[&str] = &["combined_server_client", "combined_response_name_collision"];
 
+/// Combined fixtures whose generation must fail because a component schema is
+/// named like a crate-root interface type the flat layout emits (`Api`,
+/// `Client`, `ClientError`). Each is rejected with a `TypeNameCollision`.
+const COMBINED_UNSUPPORTED_FIXTURES: &[&str] = &[
+    "combined_reserved_name_api",
+    "combined_reserved_name_client",
+    "combined_reserved_name_client_error",
+];
+
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {
     return Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -1066,36 +1075,24 @@ fn response_name_collision_without_suffix_fails() {
     );
 }
 
-/// A spec whose only component schema is `schema_name`, referenced by a single
-/// operation's `200` response so it survives pruning and reaches the
-/// collision check.
-fn spec_with_schema_named(schema_name: &str) -> String {
-    return format!(
-        "openapi: 3.0.3\n\
-         info:\n  title: reserved\n  version: '1.0.0'\n\
-         paths:\n  /ping:\n    get:\n      operationId: ping\n      responses:\n\
-         \x20       '200':\n          description: ok\n          content:\n\
-         \x20           application/json:\n              schema:\n\
-         \x20               $ref: '#/components/schemas/{schema_name}'\n\
-         components:\n  schemas:\n    {schema_name}:\n      type: object\n\
-         \x20     properties:\n        id:\n          type: string\n",
-    );
-}
-
 /// A component schema whose name equals a reserved interface type name emitted
 /// by the requested targets must fail generation rather than produce two items
 /// with the same name at the crate root.
 #[test]
 fn reserved_interface_name_collision_fails() {
+    let dir = tests_dir();
     let cases = [
-        ("Api", "server interface trait"),
-        ("Client", "client struct"),
-        ("ClientError", "client error enum"),
+        ("combined_reserved_name_api", "Api", "server interface trait"),
+        ("combined_reserved_name_client", "Client", "client struct"),
+        (
+            "combined_reserved_name_client_error",
+            "ClientError",
+            "client error enum",
+        ),
     ];
-    for (schema_name, artifact) in cases {
-        let path = std::env::temp_dir().join(format!("reserved_{schema_name}.yaml"));
-        std::fs::write(&path, spec_with_schema_named(schema_name)).expect("writing temp spec failed");
-        let err = oapi_codegen::generate(&path, &combined_config())
+    for (stem, schema_name, artifact) in cases {
+        let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+        let err = oapi_codegen::generate(&fixture, &combined_config())
             .expect_err(&format!("expected a collision for schema named `{schema_name}`"));
         match err {
             oapi_codegen::Error::TypeNameCollision {
@@ -1114,9 +1111,8 @@ fn reserved_interface_name_collision_fails() {
 /// client-only generation.
 #[test]
 fn reserved_interface_name_is_target_scoped() {
-    let path = std::env::temp_dir().join("reserved_api_client_only.yaml");
-    std::fs::write(&path, spec_with_schema_named("Api")).expect("writing temp spec failed");
-    oapi_codegen::generate(&path, &client_config())
+    let fixture = tests_dir().join("fixtures").join("combined_reserved_name_api.yaml");
+    oapi_codegen::generate(&fixture, &client_config())
         .expect("a schema named `Api` must not collide when only the client is generated");
 }
 
@@ -1208,6 +1204,7 @@ fn fixtures_and_test_table_agree() {
         .chain(CLIENT_FIXTURES.iter().copied())
         .chain(CLIENT_UNSUPPORTED_FIXTURES.iter().copied())
         .chain(COMBINED_FIXTURES.iter().copied())
+        .chain(COMBINED_UNSUPPORTED_FIXTURES.iter().copied())
         .collect();
 
     for stem in &referenced {
