@@ -445,7 +445,7 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 
 /// Fixtures generated with both the server and client enabled, exercising the
 /// combined `server`/`client` submodule layout with shared root models.
-const COMBINED_FIXTURES: &[&str] = &["combined_server_client"];
+const COMBINED_FIXTURES: &[&str] = &["combined_server_client", "combined_response_name_collision"];
 
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {
@@ -1037,7 +1037,7 @@ macro_rules! combined_generated_tests {
     };
 }
 
-combined_generated_tests!(combined_server_client);
+combined_generated_tests!(combined_server_client, combined_response_name_collision);
 
 /// The combined `#[test]`s must cover exactly the combined fixtures.
 #[test]

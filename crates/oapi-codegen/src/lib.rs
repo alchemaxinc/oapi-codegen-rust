@@ -56,8 +56,8 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
             lower::prune_unused_models(&mut module, &service);
         }
         if want_server && want_client {
-            let needs_super = lower::references_models(&service);
-            return emit::emit_with_service_and_client(&module, &service, server_urls.as_ref(), needs_super);
+            lower::qualify_service_models(&mut service);
+            return emit::emit_with_service_and_client(&module, &service, server_urls.as_ref());
         }
         if want_server {
             return emit::emit_with_service(&module, &service, server_urls.as_ref());

@@ -120,7 +120,15 @@ impl Mapper<'_> {
             SchemaKind::OneOf { one_of } | SchemaKind::AnyOf { any_of: one_of } => {
                 Item::Enum(self.make_union(name, one_of, data)?)
             }
-            SchemaKind::AllOf { all_of } => Item::Struct(self.merge_all_of(name, all_of, data)?),
+            SchemaKind::AllOf { all_of } => match self.single_ref_all_of(all_of)? {
+                Some(target) => Item::Alias(Alias {
+                    name: self.type_name_ident(name),
+                    doc: doc_of(data),
+                    deprecated: deprecation_of(data),
+                    ty: RustType::Named(target),
+                }),
+                None => Item::Struct(self.merge_all_of(name, all_of, data)?),
+            },
             SchemaKind::Type(_) => {
                 let ty = self.type_from_schema(name, schema)?;
                 Item::Alias(Alias {
@@ -237,6 +245,51 @@ impl Mapper<'_> {
             omit_empty,
             serde_skip,
         });
+    }
+
+    /// Return the referenced schema name when `members` is a single `$ref`
+    /// member, for collapsing a one-element `allOf` at the top level into a type
+    /// alias. Only `$ref` members qualify: a single inline member is left to the
+    /// struct-merge path so a schema never aliases itself.
+    fn single_ref_all_of(&self, members: &[ReferenceOr<Schema>]) -> Result<Option<String>> {
+        let [ReferenceOr::Reference { reference }] = members else {
+            return Ok(None);
+        };
+        let target = ref_target_name(reference).ok_or_else(|| {
+            return Error::UnsupportedRef {
+                reference: reference.clone(),
+                reason: "allOf ref must reference a schema".to_owned(),
+            };
+        })?;
+        return Ok(Some(target.to_owned()));
+    }
+
+    /// Collapse a single-member `allOf` to the type of its sole member.
+    ///
+    /// A one-element `allOf` carries no composition — it exists only to attach
+    /// sibling keywords (`nullable`, `description`) to a `$ref`, which is the
+    /// canonical OpenAPI 3.0 way to annotate or make a reference nullable. In
+    /// that case the wrapper must resolve to the referenced type itself (reusing
+    /// the shared named schema, and working for enum/union targets too) rather
+    /// than synthesizing a duplicate struct. Multi-member `allOf` is genuine
+    /// composition and returns `None` so the caller merges it as before.
+    fn collapse_single_all_of(&mut self, hint: &str, members: &[ReferenceOr<Schema>]) -> Result<Option<RustType>> {
+        let [only] = members else {
+            return Ok(None);
+        };
+        let ty = match only {
+            ReferenceOr::Reference { reference } => {
+                let target = ref_target_name(reference).ok_or_else(|| {
+                    return Error::UnsupportedRef {
+                        reference: reference.clone(),
+                        reason: "allOf ref must reference a schema".to_owned(),
+                    };
+                })?;
+                RustType::Named(target.to_owned())
+            }
+            ReferenceOr::Item(schema) => self.type_from_schema(hint, schema)?,
+        };
+        return Ok(Some(ty));
     }
 
     /// Merge an `allOf` into a single flat struct, resolving `$ref` members to
@@ -463,9 +516,13 @@ impl Mapper<'_> {
                 RustType::Named(hint.to_owned())
             }
             SchemaKind::AllOf { all_of } => {
-                let strukt = self.merge_all_of(hint, all_of, data)?;
-                self.extra.push(Item::Struct(strukt));
-                RustType::Named(hint.to_owned())
+                if let Some(ty) = self.collapse_single_all_of(hint, all_of)? {
+                    ty
+                } else {
+                    let strukt = self.merge_all_of(hint, all_of, data)?;
+                    self.extra.push(Item::Struct(strukt));
+                    RustType::Named(hint.to_owned())
+                }
             }
             SchemaKind::Any(_) => RustType::Value,
             SchemaKind::Not { .. } => {
