@@ -84,12 +84,11 @@ pub fn emit_with_service_and_client(
     module: &Module,
     service: &Service,
     server_urls: Option<&ServerUrls>,
-    needs_super: bool,
 ) -> Result<String> {
     let mut root = module_items(module)?;
     root.extend(server_url_items(server_urls)?);
-    let server = reexported_submodule("server", &axum::AxumServer.emit(service)?, needs_super)?;
-    let client = reexported_submodule("client", &reqwest::ReqwestClient.emit(service)?, needs_super)?;
+    let server = reexported_submodule("server", &axum::AxumServer.emit(service)?)?;
+    let client = reexported_submodule("client", &reqwest::ReqwestClient.emit(service)?)?;
 
     let mut out = String::from(HEADER);
     let mut sections = Vec::new();
@@ -127,16 +126,12 @@ fn module_items(module: &Module) -> Result<Vec<TokenStream>> {
 }
 
 /// Wrap a generator's items in `pub mod #name { … }`, rendering each item one
-/// blank line apart (as at the top level) and indenting the body one level. A
-/// leading `use super::*;` is added when `needs_super` is set so the submodule
-/// can name the root-level models.
-fn reexported_submodule(name: &str, items: &[TokenStream], needs_super: bool) -> Result<String> {
-    let mut inner = Vec::with_capacity(items.len() + 1);
-    if needs_super {
-        inner.push(quote! { use super::*; });
-    }
-    inner.extend_from_slice(items);
-    let body = render_body(&inner)?;
+/// blank line apart (as at the top level) and indenting the body one level. The
+/// submodule references crate-root models through `super::`-qualified paths (see
+/// [`crate::lower::qualify_service_models`]), so no `use super::*;` glob is
+/// needed.
+fn reexported_submodule(name: &str, items: &[TokenStream]) -> Result<String> {
+    let body = render_body(items)?;
     let indented = indent(&body);
     return Ok(format!("pub mod {name} {{\n{indented}}}\n"));
 }

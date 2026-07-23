@@ -77,57 +77,104 @@ pub fn rewrite_service(service: &mut Service, renames: &HashMap<String, String>)
     if renames.is_empty() {
         return;
     }
+    visit_service_types(service, &mut |ty| {
+        if let RustType::Named(name) = ty
+            && let Some(custom) = renames.get(name.as_str())
+        {
+            *name = custom.clone();
+        }
+    });
+}
+
+/// Qualify every model reference in `service` with the `super::` path.
+///
+/// When the server and client generators are emitted into sibling submodules
+/// while the shared models stay at the crate root, a bare `Named` reference in a
+/// submodule would resolve against that submodule's own items first — an
+/// operation's response enum, for instance, shares the model's identifier and
+/// would shadow it, producing a recursive (self-referential) type. Rewriting
+/// each model reference to an [`RustType::External`] rooted at `super` names the
+/// crate-root model unambiguously and removes any need for a `use super::*;`
+/// glob. Must run after [`crate::lower::prune_unused_models`], whose reachability
+/// walk only follows `Named` references.
+pub fn qualify_service_models(service: &mut Service) {
+    visit_service_types(service, &mut |ty| {
+        if let RustType::Named(name) = ty {
+            let name = std::mem::take(name);
+            *ty = RustType::External {
+                module: "super".to_owned(),
+                name,
+            };
+        }
+    });
+}
+
+/// Apply `visit` to every leaf [`RustType`] referenced by the service's
+/// operation signatures (path/query/header/cookie params, request and response
+/// bodies, and response headers). Container types (`Vec`/`Map`/`Option`) are
+/// traversed to their leaf; `visit` receives the leaf in place.
+fn visit_service_types(service: &mut Service, visit: &mut dyn FnMut(&mut RustType)) {
     for operation in &mut service.operations {
         for param in &mut operation.path_params {
-            rewrite_type(&mut param.ty, renames);
+            visit_type(&mut param.ty, visit);
         }
         if let Some(query) = &mut operation.query {
             for field in &mut query.fields {
-                rewrite_type(&mut field.ty, renames);
+                visit_type(&mut field.ty, visit);
             }
             if let Some(additional) = &mut query.additional_properties {
-                rewrite_type(additional, renames);
+                visit_type(additional, visit);
             }
         }
         if let Some(headers) = &mut operation.headers {
             for param in &mut headers.params {
-                rewrite_type(&mut param.ty, renames);
+                visit_type(&mut param.ty, visit);
             }
         }
         if let Some(cookies) = &mut operation.cookies {
             for param in &mut cookies.params {
-                rewrite_type(&mut param.ty, renames);
+                visit_type(&mut param.ty, visit);
             }
         }
         if let Some(request) = &mut operation.request {
             match request {
-                RequestPayload::Single(body) => rewrite_type(&mut body.ty, renames),
+                RequestPayload::Single(body) => visit_type(&mut body.ty, visit),
                 RequestPayload::Multipart(multipart) => {
                     for field in &mut multipart.fields {
-                        rewrite_type(&mut field.ty, renames);
+                        visit_type(&mut field.ty, visit);
                     }
                 }
                 RequestPayload::Negotiated(negotiated) => {
                     for variant in &mut negotiated.variants {
-                        rewrite_type(&mut variant.body.ty, renames);
+                        visit_type(&mut variant.body.ty, visit);
                     }
                 }
             }
         }
         for response in &mut operation.responses {
             match &mut response.body {
-                Some(ResponseBody::Single(body)) => rewrite_type(&mut body.ty, renames),
+                Some(ResponseBody::Single(body)) => visit_type(&mut body.ty, visit),
                 Some(ResponseBody::Negotiated(negotiated)) => {
                     for variant in &mut negotiated.variants {
-                        rewrite_type(&mut variant.body.ty, renames);
+                        visit_type(&mut variant.body.ty, visit);
                     }
                 }
                 None => {}
             }
             for header in &mut response.headers {
-                rewrite_type(&mut header.ty, renames);
+                visit_type(&mut header.ty, visit);
             }
         }
+    }
+}
+
+/// Recurse container types to their leaf, applying `visit` to the leaf in place.
+fn visit_type(ty: &mut RustType, visit: &mut dyn FnMut(&mut RustType)) {
+    match ty {
+        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) => {
+            visit_type(inner, visit);
+        }
+        leaf => visit(leaf),
     }
 }
 

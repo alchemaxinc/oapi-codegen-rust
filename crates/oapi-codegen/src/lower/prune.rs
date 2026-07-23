@@ -98,15 +98,6 @@ fn struct_refs(s: &Struct) -> Vec<String> {
         .collect();
 }
 
-/// Whether the service directly references any named component model.
-///
-/// When both the server and client are emitted into submodules, each submodule
-/// needs `use super::*;` to bring the root-level models into scope — but only if
-/// it actually references one, since an unused glob import fails `-D warnings`.
-pub(crate) fn references_models(service: &Service) -> bool {
-    return !service_refs(service).is_empty();
-}
-
 /// Every named type the service's operations reference directly.
 fn service_refs(service: &Service) -> Vec<String> {
     let mut refs = Vec::new();

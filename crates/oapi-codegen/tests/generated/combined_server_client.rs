@@ -9,8 +9,6 @@ pub struct Order {
 }
 
 pub mod server {
-    use super::*;
-
     /// Server behaviour: implement one method per operation.
     pub trait Api: Clone + Send + Sync + 'static {
         /// Fetch a single order by identifier.
@@ -22,7 +20,7 @@ pub mod server {
         fn replace_order(
             &self,
             order_id: String,
-            body: Order,
+            body: super::Order,
         ) -> impl std::future::Future<Output = ReplaceOrderResponse> + Send;
     }
 
@@ -30,7 +28,7 @@ pub mod server {
     #[derive(Debug, Clone, PartialEq)]
     pub enum GetOrderResponse {
         /// The requested order.
-        Ok(Order),
+        Ok(super::Order),
         /// No order has that identifier.
         NotFound,
     }
@@ -64,7 +62,7 @@ pub mod server {
     #[derive(Debug, Clone, PartialEq)]
     pub enum ReplaceOrderResponse {
         /// The updated order.
-        Ok(Order),
+        Ok(super::Order),
     }
 
     impl axum::response::IntoResponse for ReplaceOrderResponse {
@@ -103,15 +101,13 @@ pub mod server {
     async fn replace_order_handler<T: Api>(
         axum::extract::State(api): axum::extract::State<T>,
         axum::extract::Path(order_id): axum::extract::Path<String>,
-        axum::Json(body): axum::Json<Order>,
+        axum::Json(body): axum::Json<super::Order>,
     ) -> ReplaceOrderResponse {
         api.replace_order(order_id, body).await
     }
 }
 
 pub mod client {
-    use super::*;
-
     /// Errors returned by the generated client.
     #[derive(Debug)]
     pub enum ClientError {
@@ -169,7 +165,7 @@ pub mod client {
     #[derive(Debug, Clone, PartialEq)]
     pub enum GetOrderResponse {
         /// The requested order.
-        Ok(Order),
+        Ok(super::Order),
         /// No order has that identifier.
         NotFound,
     }
@@ -178,7 +174,7 @@ pub mod client {
     #[derive(Debug, Clone, PartialEq)]
     pub enum ReplaceOrderResponse {
         /// The updated order.
-        Ok(Order),
+        Ok(super::Order),
     }
 
     /// A blocking HTTP client for the API.
@@ -221,7 +217,7 @@ pub mod client {
             let response = self.http.request(reqwest::Method::GET, url).send()?;
             let status = response.status();
             if status.as_u16() == 200 {
-                let body: Order = response.json()?;
+                let body: super::Order = response.json()?;
                 return Ok(GetOrderResponse::Ok(body));
             }
             if status.as_u16() == 404 {
@@ -233,7 +229,7 @@ pub mod client {
         pub fn replace_order(
             &self,
             order_id: String,
-            body: Order,
+            body: super::Order,
         ) -> Result<ReplaceOrderResponse, ClientError> {
             let url = format!(
                 "{}/orders/{}", self.base_url, percent_encoding::utf8_percent_encode(order_id
@@ -244,7 +240,7 @@ pub mod client {
             let response = request.send()?;
             let status = response.status();
             if status.as_u16() == 200 {
-                let body: Order = response.json()?;
+                let body: super::Order = response.json()?;
                 return Ok(ReplaceOrderResponse::Ok(body));
             }
             return Err(ClientError::UnexpectedStatus(status));

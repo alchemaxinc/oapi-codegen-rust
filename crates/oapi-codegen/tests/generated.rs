@@ -164,6 +164,9 @@ mod generated {
     pub mod combined_server_client {
         include!("generated/combined_server_client.rs");
     }
+    pub mod combined_response_name_collision {
+        include!("generated/combined_response_name_collision.rs");
+    }
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`

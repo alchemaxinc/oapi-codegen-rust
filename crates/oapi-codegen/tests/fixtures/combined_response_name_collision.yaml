@@ -1,0 +1,55 @@
+openapi: 3.0.3
+info:
+  title: Widget API
+  version: 1.0.0
+paths:
+  /widgets/{widgetId}:
+    get:
+      operationId: getWidget
+      summary: Fetch a single widget by identifier.
+      parameters:
+        - name: widgetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The requested widget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetWidgetResponse"
+    put:
+      operationId: replaceWidget
+      summary: Replace a widget in full.
+      parameters:
+        - name: widgetId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GetWidgetResponse"
+      responses:
+        "200":
+          description: The updated widget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetWidgetResponse"
+components:
+  schemas:
+    GetWidgetResponse:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        label:
+          type: string
