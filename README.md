@@ -1,6 +1,6 @@
 # oapi-codegen-rust
 
-Generate idiomatic Rust APIs and clients from OpenAPI 3 specifications, inspired by
+Generate idiomatic Rust APIs and clients from OpenAPI 3 specifications, using the same approach as
 [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen).
 
 ## Quickstart
@@ -62,3 +62,12 @@ decisions to support.
 - [Configuration](docs/configuration.md)
 - [OpenAPI extensions](docs/extensions.md)
 - [Design decisions vs. Go](docs/design.md)
+
+## Long-term maintainablilty
+
+This projects attempts to circumvent an often-occuring undesirable aspect of maintainance rot, by automating as much as
+possible of the tedious unneeded human-in-the-loop work, such as automatic dependency updates and the like. Contrary, for
+more complex tasks such as feature work and bug fixes, human intervention is still required.
+
+The intended outcome of this approach is to guarantee a stable but recurring update cycle, as well as catch up-front
+when new versions of OpenAPI itself is released.
