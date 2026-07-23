@@ -31,6 +31,14 @@ use crate::ir::Service;
 /// The blocking `reqwest` client emitter.
 pub struct ReqwestClient;
 
+/// Name of the emitted client struct; reserved at the crate root so a component
+/// schema cannot collide with it (see [`crate::emit::reserved_type_names`]).
+pub(crate) const CLIENT_STRUCT_NAME: &str = "Client";
+
+/// Name of the emitted client error enum; reserved at the crate root so a
+/// component schema cannot collide with it.
+pub(crate) const CLIENT_ERROR_NAME: &str = "ClientError";
+
 impl crate::emit::ClientEmitter for ReqwestClient {
     fn emit(&self, service: &Service) -> Result<Vec<TokenStream>> {
         return client_items(service);
@@ -102,8 +110,9 @@ fn client_error() -> TokenStream {
             /// The response `Content-Type` matched none of the representations the
             /// operation declares for its status.
             UnexpectedContentType(String),
-            /// A response body failed to deserialize (e.g. malformed
-            /// form-urlencoded content).
+            /// The response could not be decoded: a body that failed to
+            /// deserialize (e.g. malformed form-urlencoded content), or a
+            /// required response header that was missing or unparsable.
             Decode(String),
         }
 
@@ -118,7 +127,7 @@ fn client_error() -> TokenStream {
                         return write!(f, "unexpected response content type: {content_type}");
                     }
                     ClientError::Decode(message) => {
-                        return write!(f, "failed to decode response body: {message}");
+                        return write!(f, "failed to decode response: {message}");
                     }
                 }
             }

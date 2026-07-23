@@ -100,9 +100,9 @@ fn emit_cookies_struct(cookies: &Cookies) -> Result<TokenStream> {
 /// Emit an operation's response enum: one variant per declared response.
 ///
 /// A `default`/range response carries the concrete [`http::StatusCode`] the
-/// server chose; declared response headers are carried as `Option<T>`, since a
-/// client cannot assume a non-compliant server honoured a required-header
-/// contract. The server sets these to `Some(_)` when it emits the response.
+/// server chose. A declared response header is carried as `T` when the spec
+/// marks it required and `Option<T>` when optional; the client decoder treats a
+/// required header as mandatory, erroring when it is missing or unparsable.
 fn emit_response_enum(operation: &Operation) -> Result<TokenStream> {
     let name = operation.response_enum.to_token();
     let doc = doc_attr(&operation.doc);

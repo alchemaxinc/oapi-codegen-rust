@@ -67,6 +67,41 @@ pub struct Targets {
     pub client: bool,
 }
 
+/// A fixed type name the generator emits at the crate root for a given target,
+/// which a component-schema model must not collide with.
+#[derive(Debug, Clone, Copy)]
+pub struct ReservedTypeName {
+    /// The reserved Rust identifier (e.g. `Api`).
+    pub name: &'static str,
+    /// Human-readable description of what emits it (e.g. `server interface
+    /// trait`), used in the collision error.
+    pub description: &'static str,
+}
+
+/// The crate-root type names the requested `targets` emit. A component schema
+/// whose generated name matches one of these would produce a duplicate item, so
+/// [`crate::lower::check_type_name_collisions`] rejects it up front.
+pub fn reserved_type_names(targets: Targets) -> Vec<ReservedTypeName> {
+    let mut names = Vec::new();
+    if targets.server {
+        names.push(ReservedTypeName {
+            name: axum::API_TRAIT_NAME,
+            description: "server interface trait",
+        });
+    }
+    if targets.client {
+        names.push(ReservedTypeName {
+            name: reqwest::CLIENT_STRUCT_NAME,
+            description: "client struct",
+        });
+        names.push(ReservedTypeName {
+            name: reqwest::CLIENT_ERROR_NAME,
+            description: "client error enum",
+        });
+    }
+    return names;
+}
+
 /// Render a module as a flat file: the shared component models and per-operation
 /// types at the crate root, followed by the requested generator interfaces.
 ///

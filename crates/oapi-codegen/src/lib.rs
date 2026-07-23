@@ -60,11 +60,11 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
-        lower::check_type_name_collisions(&service, &module)?;
         let targets = emit::Targets {
             server: want_server,
             client: want_client,
         };
+        lower::check_type_name_collisions(&service, &module, &emit::reserved_type_names(targets))?;
         return emit::emit_flat(&module, &service, server_urls.as_ref(), targets);
     }
     return emit::emit_module(&module, server_urls.as_ref());

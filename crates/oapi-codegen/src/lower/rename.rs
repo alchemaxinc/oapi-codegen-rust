@@ -18,6 +18,7 @@ use openapiv3::ReferenceOr;
 use crate::config::DEFAULT_RESPONSE_SUFFIX;
 use crate::config::OUTPUT_OPTIONS_KEY;
 use crate::config::RESPONSE_TYPE_SUFFIX_KEY;
+use crate::emit::ReservedTypeName;
 use crate::error::Result;
 use crate::ir::EnumKind;
 use crate::ir::Item;
@@ -196,17 +197,28 @@ fn rewrite_type(ty: &mut RustType, renames: &HashMap<String, String>) {
 /// Fail generation if a per-operation type name would collide with a
 /// component-model name emitted in the same file.
 ///
-/// In the flat layout, component models and per-operation types (response
-/// enums, parameter structs, request/response body enums) share the crate root.
-/// A model whose name matches a generated type — most commonly a schema named
-/// `<Op>Response` — would produce two items with the same name. Rather than
-/// silently rename, generation fails so the author resolves the clash
-/// deliberately: rename the schema with `x-rust-name`, or, for a response-enum
-/// clash, set `output-options.response-type-suffix`. Only locally emitted models
-/// are considered; import-mapped models are referenced through a qualified path
-/// and cannot collide with a crate-root type.
-pub fn check_type_name_collisions(service: &Service, module: &Module) -> Result<()> {
+/// In the flat layout, component models, per-operation types (response enums,
+/// parameter structs, request/response body enums), and the requested generator
+/// interfaces (`reserved`, e.g. the `Api` trait or `Client` struct) all share
+/// the crate root. A model whose name matches one of those — most commonly a
+/// schema named `<Op>Response`, or a schema literally named `Api`/`Client` —
+/// would produce two items with the same name. Rather than silently rename,
+/// generation fails so the author resolves the clash deliberately: rename the
+/// schema with `x-rust-name`, or, for a response-enum clash, set
+/// `output-options.response-type-suffix`. Only locally emitted models are
+/// considered; import-mapped models are referenced through a qualified path and
+/// cannot collide with a crate-root type.
+pub fn check_type_name_collisions(service: &Service, module: &Module, reserved: &[ReservedTypeName]) -> Result<()> {
     let models: HashSet<&str> = module.items.iter().map(|item| return item.name()).collect();
+    for name in reserved {
+        if models.contains(name.name) {
+            return Err(crate::error::Error::TypeNameCollision {
+                name: name.name.to_owned(),
+                artifact: name.description.to_owned(),
+                hint: format!("rename the schema with `{X_RUST_NAME}`"),
+            });
+        }
+    }
     for operation in &service.operations {
         ensure_free(&operation.response_enum, "response enum", true, &models)?;
         if let Some(query) = &operation.query {

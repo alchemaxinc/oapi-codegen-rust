@@ -22,8 +22,9 @@ pub enum ClientError {
     /// The response `Content-Type` matched none of the representations the
     /// operation declares for its status.
     UnexpectedContentType(String),
-    /// A response body failed to deserialize (e.g. malformed
-    /// form-urlencoded content).
+    /// The response could not be decoded: a body that failed to
+    /// deserialize (e.g. malformed form-urlencoded content), or a
+    /// required response header that was missing or unparsable.
     Decode(String),
 }
 impl std::fmt::Display for ClientError {
@@ -37,7 +38,7 @@ impl std::fmt::Display for ClientError {
                 return write!(f, "unexpected response content type: {content_type}");
             }
             ClientError::Decode(message) => {
-                return write!(f, "failed to decode response body: {message}");
+                return write!(f, "failed to decode response: {message}");
             }
         }
     }

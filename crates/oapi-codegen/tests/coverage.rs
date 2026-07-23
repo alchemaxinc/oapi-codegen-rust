@@ -1066,6 +1066,84 @@ fn response_name_collision_without_suffix_fails() {
     );
 }
 
+/// A spec whose only component schema is `schema_name`, referenced by a single
+/// operation's `200` response so it survives pruning and reaches the
+/// collision check.
+fn spec_with_schema_named(schema_name: &str) -> String {
+    return format!(
+        "openapi: 3.0.3\n\
+         info:\n  title: reserved\n  version: '1.0.0'\n\
+         paths:\n  /ping:\n    get:\n      operationId: ping\n      responses:\n\
+         \x20       '200':\n          description: ok\n          content:\n\
+         \x20           application/json:\n              schema:\n\
+         \x20               $ref: '#/components/schemas/{schema_name}'\n\
+         components:\n  schemas:\n    {schema_name}:\n      type: object\n\
+         \x20     properties:\n        id:\n          type: string\n",
+    );
+}
+
+/// A component schema whose name equals a reserved interface type name emitted
+/// by the requested targets must fail generation rather than produce two items
+/// with the same name at the crate root.
+#[test]
+fn reserved_interface_name_collision_fails() {
+    let cases = [
+        ("Api", "server interface trait"),
+        ("Client", "client struct"),
+        ("ClientError", "client error enum"),
+    ];
+    for (schema_name, artifact) in cases {
+        let path = std::env::temp_dir().join(format!("reserved_{schema_name}.yaml"));
+        std::fs::write(&path, spec_with_schema_named(schema_name)).expect("writing temp spec failed");
+        let err = oapi_codegen::generate(&path, &combined_config())
+            .expect_err(&format!("expected a collision for schema named `{schema_name}`"));
+        match err {
+            oapi_codegen::Error::TypeNameCollision {
+                name, artifact: got, ..
+            } => {
+                assert_eq!(name, schema_name);
+                assert_eq!(got, artifact);
+            }
+            other => panic!("expected TypeNameCollision for `{schema_name}`, got: {other:?}"),
+        }
+    }
+}
+
+/// A reserved name is only reserved when its target is requested: the
+/// server-only `Api` trait must not block a schema named `Api` in a
+/// client-only generation.
+#[test]
+fn reserved_interface_name_is_target_scoped() {
+    let path = std::env::temp_dir().join("reserved_api_client_only.yaml");
+    std::fs::write(&path, spec_with_schema_named("Api")).expect("writing temp spec failed");
+    oapi_codegen::generate(&path, &client_config())
+        .expect("a schema named `Api` must not collide when only the client is generated");
+}
+
+/// Every reserved interface name must actually be declared in the combined
+/// output, so renaming an emitted interface without updating its reserved-name
+/// constant (which would let a real collision slip through) breaks this test.
+#[test]
+fn reserved_names_are_declared_in_combined_output() {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join("combined_server_client.yaml");
+    let generated =
+        oapi_codegen::generate(&fixture, &combined_config()).expect("generating combined server+client output failed");
+    let targets = oapi_codegen::emit::Targets {
+        server: true,
+        client: true,
+    };
+    for reserved in oapi_codegen::emit::reserved_type_names(targets) {
+        let declaration = format!(" {}", reserved.name);
+        assert!(
+            generated.contains(&declaration),
+            "reserved name `{}` ({}) is not declared in the combined output",
+            reserved.name,
+            reserved.description,
+        );
+    }
+}
+
 /// The combined `#[test]`s must cover exactly the combined fixtures.
 #[test]
 fn combined_generated_tests_cover_combined_fixtures() {

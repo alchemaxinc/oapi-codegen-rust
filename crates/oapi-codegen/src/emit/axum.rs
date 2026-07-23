@@ -29,6 +29,10 @@ use crate::naming::operations::axum_handler_name;
 /// The axum server-interface emitter.
 pub struct AxumServer;
 
+/// Name of the emitted server trait; reserved at the crate root so a component
+/// schema cannot collide with it (see [`crate::emit::reserved_type_names`]).
+pub(crate) const API_TRAIT_NAME: &str = "Api";
+
 impl crate::emit::ServerEmitter for AxumServer {
     fn emit(&self, service: &Service) -> Result<Vec<TokenStream>> {
         return service_items(service);
