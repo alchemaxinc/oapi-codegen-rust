@@ -475,23 +475,28 @@ fn emit_response_with_headers(
     return Ok(arm);
 }
 
-/// Emit the insertion of one response header into `header_map`. A value that
-/// fails to encode as a `HeaderValue` is skipped (never panics); an optional
-/// header is only inserted when present.
+/// Emit the insertion of one response header into `header_map`. A required
+/// header whose value cannot encode as a `HeaderValue` aborts the arm with a
+/// `500`, since dropping it would violate the declared contract; an optional
+/// header is inserted only when present, and is silently skipped if its value
+/// cannot encode.
 fn emit_response_header_insert(header: &ResponseHeader) -> TokenStream {
     let ident = header.name.to_token();
     let lower_name = header.header_name.to_ascii_lowercase();
-    let insert = quote! {
-        if let Ok(value) = axum::http::HeaderValue::from_str(&#ident.to_string()) {
-            header_map.insert(axum::http::HeaderName::from_static(#lower_name), value);
-        }
-    };
     if header.required {
-        return insert;
+        return quote! {
+            let value = match axum::http::HeaderValue::from_str(&#ident.to_string()) {
+                Ok(value) => value,
+                Err(_) => return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            };
+            header_map.insert(axum::http::HeaderName::from_static(#lower_name), value);
+        };
     }
     return quote! {
         if let Some(#ident) = #ident {
-            #insert
+            if let Ok(value) = axum::http::HeaderValue::from_str(&#ident.to_string()) {
+                header_map.insert(axum::http::HeaderName::from_static(#lower_name), value);
+            }
         }
     };
 }

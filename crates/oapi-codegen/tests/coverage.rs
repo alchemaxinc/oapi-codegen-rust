@@ -1075,6 +1075,23 @@ fn response_name_collision_without_suffix_fails() {
     );
 }
 
+/// An empty `response-type-suffix` is treated as unset: it must fall back to
+/// the default suffix rather than emit suffix-less response enums, so the
+/// collision fixture fails exactly as it does without any suffix.
+#[test]
+fn empty_response_suffix_falls_back_to_default() {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join("combined_response_name_collision.yaml");
+    let mut config = combined_config();
+    config.output_options.response_type_suffix = Some(String::new());
+    let err = oapi_codegen::generate(&fixture, &config)
+        .expect_err("an empty response-type-suffix must fall back to the default and still collide");
+    assert!(
+        matches!(err, oapi_codegen::Error::TypeNameCollision { .. }),
+        "expected TypeNameCollision, got: {err:?}",
+    );
+}
+
 /// A component schema whose name equals a reserved interface type name emitted
 /// by the requested targets must fail generation rather than produce two items
 /// with the same name at the crate root.
