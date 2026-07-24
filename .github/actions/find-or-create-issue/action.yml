@@ -1,0 +1,50 @@
+name: Find or create issue
+description: >-
+  Idempotently finds an open/existing issue by exact title, or creates a new
+  one. Used by scheduled workflows that alert on a recurring condition (e.g.
+  a failing dependency audit) so repeated runs reuse one issue instead of
+  filing a duplicate every time.
+
+inputs:
+  title:
+    description: Exact issue title to search for and, if not found, create.
+    required: true
+  body:
+    description: Markdown body to use when creating a new issue.
+    required: true
+  label:
+    description: Label to apply when creating a new issue.
+    required: false
+    default: ""
+  type:
+    description: Issue type to apply when creating a new issue (e.g. "Feature", "Bug").
+    required: false
+    default: ""
+  state:
+    description: Issue state to search within ("open" or "all").
+    required: false
+    default: "all"
+  token:
+    description: Token passed to `gh` as GH_TOKEN for issue list/create calls.
+    required: true
+
+outputs:
+  url:
+    description: URL of the existing or newly created issue.
+    value: ${{ steps.run.outputs.url }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        url="$("${{ github.action_path }}/find-or-create-issue.sh" \
+          --title "${{ inputs.title }}" \
+          --body "${{ inputs.body }}" \
+          --label "${{ inputs.label }}" \
+          --type "${{ inputs.type }}" \
+          --state "${{ inputs.state }}")"
+        echo "url=$url" >> "$GITHUB_OUTPUT"

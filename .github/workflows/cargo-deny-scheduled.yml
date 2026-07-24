@@ -1,0 +1,99 @@
+name: Scheduled Dependency Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily — new RUSTSEC advisories can be published against dependencies
+    # already merged into main, with no code change to trigger the PR-gated
+    # cargo-deny job in ci.yml. This catches those.
+    - cron: "0 6 * * *"
+
+# Runs `cargo deny check advisories` against main. On failure, files a
+# tracking issue via the shared find-or-create-issue composite action (same
+# idempotent search-or-create pattern as check-openapi-versions.yml), so
+# repeated daily failures for the same advisory reuse one open issue instead
+# of spamming a new one per run.
+
+env:
+  CARGO_DENY_VERSION: "0.20.2"
+
+jobs:
+  cargo-deny-advisories:
+    name: cargo-deny (advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create temporary GitHub App Token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          owner: ${{ github.repository_owner }}
+          client-id: ${{ vars.HOUSEKEEPING_BOT_APP_ID }}
+          private-key: ${{ secrets.HOUSEKEEPING_BOT_PRIVATE_KEY }}
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - name: Cache cargo-deny
+        id: cache-cargo-deny
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/cargo-deny
+          key: v1-cargo-deny-${{ env.CARGO_DENY_VERSION }}-x86_64-linux-musl
+
+      - name: Install cargo-deny
+        if: steps.cache-cargo-deny.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/cargo-deny"
+          curl -fsSL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C "$HOME/.local/cargo-deny" --strip-components=1
+
+      - name: Check for new advisories against main
+        id: check
+        run: |
+          echo "$HOME/.local/cargo-deny" >> "$GITHUB_PATH"
+          set +e
+          output=$("$HOME/.local/cargo-deny/cargo-deny" check --hide-inclusion-graph advisories 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          {
+            echo "output<<EOF"
+            echo "$output"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Build issue body
+        id: body
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          CHECK_OUTPUT: ${{ steps.check.outputs.output }}
+        run: |
+          {
+            echo "body<<EOF"
+            printf '%s\n' \
+              "The scheduled dependency audit (\`cargo deny check advisories\`) is failing against \`main\`." \
+              "" \
+              '```' \
+              "$CHECK_OUTPUT" \
+              '```' \
+              "" \
+              "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              "" \
+              "_Filed automatically by the scheduled dependency audit workflow. This issue is reused across consecutive failures and should be closed once the advisory is resolved._"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: File or reuse tracking issue
+        if: failure() && steps.check.outcome == 'failure'
+        uses: ./.github/actions/find-or-create-issue
+        with:
+          token: ${{ steps.app.outputs.token }}
+          state: open
+          label: security
+          title: "cargo-deny: advisory check failing on main"
+          body: ${{ steps.body.outputs.body }}

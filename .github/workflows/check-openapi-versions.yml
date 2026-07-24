@@ -82,32 +82,32 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           NEW_VERSIONS: ${{ steps.detect.outputs.new }}
         run: |
+          # Reuses the find-or-create-issue composite action's backing
+          # script directly by path (rather than `uses:`), since composite
+          # actions can only be invoked once per step and this needs one call
+          # per newly detected version inside this loop.
           for minor in $NEW_VERSIONS; do
             title="Support OpenAPI $minor"
 
-            url=$(gh issue list --state all --search "$title in:title" \
-              --json title,url --jq "[.[] | select(.title == \"$title\")][0].url // empty")
-
-            if [ -z "$url" ]; then
-              url=$(gh issue create --title "$title" --label enhancement --type Feature \
-                --body "$(printf '%s\n' \
-                  "OpenAPI **$minor** has been released upstream (see the [OpenAPI Specification releases](https://github.com/OAI/OpenAPI-Specification/releases)), but is not yet supported by \`oapi-codegen-rust\`." \
-                  "" \
-                  "> [!NOTE]" \
-                  "> This issue is not auto-assigned (GitHub App tokens can't assign Copilot as an agent). A maintainer should assign it to @copilot manually once it's ready to be picked up." \
-                  "" \
-                  "Please do a thorough deep dive into what it would take to support OpenAPI $minor here:" \
-                  "" \
-                  "- Summarise the notable specification changes in OpenAPI $minor relative to the versions we already support." \
-                  "- Identify the concrete parts of the implementation (loader, lowering, IR, emitters, config, tests) that would need to change." \
-                  "- Call out the biggest challenges, ambiguities, and design decisions to be made." \
-                  "- Propose a rough, staged plan of action to reach parity, in line with how previous versions were added." \
-                  "" \
-                  "_Filed automatically by the OpenAPI version check workflow._")")
-              echo "::notice::Opened tracking issue for OpenAPI $minor: $url"
-            else
-              echo "::notice::Reusing existing tracking issue for OpenAPI $minor: $url"
-            fi
+            url=$(.github/actions/find-or-create-issue/find-or-create-issue.sh \
+              --state all \
+              --label enhancement \
+              --type Feature \
+              --title "$title" \
+              --body "$(printf '%s\n' \
+                "OpenAPI **$minor** has been released upstream (see the [OpenAPI Specification releases](https://github.com/OAI/OpenAPI-Specification/releases)), but is not yet supported by \`oapi-codegen-rust\`." \
+                "" \
+                "> [!NOTE]" \
+                "> This issue is not auto-assigned (GitHub App tokens can't assign Copilot as an agent). A maintainer should assign it to @copilot manually once it's ready to be picked up." \
+                "" \
+                "Please do a thorough deep dive into what it would take to support OpenAPI $minor here:" \
+                "" \
+                "- Summarise the notable specification changes in OpenAPI $minor relative to the versions we already support." \
+                "- Identify the concrete parts of the implementation (loader, lowering, IR, emitters, config, tests) that would need to change." \
+                "- Call out the biggest challenges, ambiguities, and design decisions to be made." \
+                "- Propose a rough, staged plan of action to reach parity, in line with how previous versions were added." \
+                "" \
+                "_Filed automatically by the OpenAPI version check workflow._")")
 
             # Append an unformatted row; the next step runs Prettier to align it.
             if ! grep -Fq "| v${minor}.0 " README.md; then

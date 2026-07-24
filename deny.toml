@@ -1,0 +1,41 @@
+# cargo-deny configuration — https://embarkstudios.github.io/cargo-deny/
+#
+# Run locally with `cargo deny check` (requires `cargo install cargo-deny --locked`).
+# CI installs a pinned prebuilt binary (see .github/workflows/ci.yml) so this
+# file is the single source of truth for what's allowed in the dependency graph.
+
+[graph]
+# Check advisories/bans/licenses/sources against every platform this workspace
+# can target, not just the host running `cargo deny`.
+targets = []
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+# Flag (but don't yet hard-fail on) crates the RustSec DB marks unmaintained,
+# e.g. serde_yaml — surface it in CI output without blocking merges until a
+# migration is planned. Flip to "deny" once serde_yaml is replaced or an
+# explicit ignore with a tracking issue is added below.
+unmaintained = "workspace"
+ignore = [
+    # "RUSTSEC-XXXX-YYYY", # crate-name: reason + tracking issue link
+]
+
+[bans]
+# Duplicate versions of the same crate bloat builds but aren't a hard failure
+# on their own; surface them without blocking merges.
+multiple-versions = "warn"
+wildcards = "deny"
+deny = []
+
+[licenses]
+# Workspace itself is MIT (see Cargo.toml); allow-list covers the licenses
+# used across the current dependency tree plus common permissive variants.
+allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-3-Clause", "Unicode-3.0"]
+confidence-threshold = 0.8
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
