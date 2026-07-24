@@ -25,6 +25,8 @@ use crate::ir::ResponseBody;
 use crate::ir::RustType;
 use crate::ir::Service;
 use crate::ir::Struct;
+use crate::naming::Case;
+use crate::naming::to_ident;
 
 /// Whether a model is reachable as a request payload and/or a response payload.
 #[derive(Debug, Default, Clone, Copy)]
@@ -131,11 +133,16 @@ fn item_references(item: &Item) -> Vec<String> {
 }
 
 /// Collect every [`RustType::Named`] reachable within `ty` (through `Vec`,
-/// `Map`, and `Option` wrappers). External and verbatim types name no generated
+/// `Map`, and `Option` wrappers), canonicalized to the PascalCase identifier the
+/// emitter and item names use. A bare `Named` still holds the original schema
+/// name (the rename pass only rewrites `x-rust-name`/collision cases), so the
+/// name is run through [`to_ident`] to match `Item::name` — otherwise a
+/// non-PascalCase schema name would fail the usage lookup and fall back to
+/// deriving both serde traits. External and verbatim types name no generated
 /// model, so they contribute nothing.
 fn collect_named(ty: &RustType, out: &mut Vec<String>) {
     match ty {
-        RustType::Named(name) => out.push(name.clone()),
+        RustType::Named(name) => out.push(to_ident(name, Case::Pascal).logical().to_owned()),
         RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) => collect_named(inner, out),
         _ => {}
     }
@@ -202,9 +209,7 @@ mod tests {
     use crate::ir::Operation;
     use crate::ir::ResponseCase;
     use crate::ir::ResponseStatus;
-    use crate::naming::Case;
     use crate::naming::RustIdent;
-    use crate::naming::to_ident;
 
     fn tname(name: &str) -> RustIdent {
         return to_ident(name, Case::Pascal);
@@ -335,5 +340,38 @@ mod tests {
         let serde = derives.get("FloorHeating").copied().expect("alias reached");
         assert!(serde.serialize);
         assert!(!serde.deserialize);
+    }
+
+    #[test]
+    fn non_pascal_schema_name_is_matched_after_canonicalization() {
+        // The referencing field carries the raw schema name (`floor_heating`),
+        // which a bare `RustType::Named` preserves, while the item's name is
+        // canonicalized to `FloorHeating`. The usage walk must canonicalize the
+        // reference the same way or it would miss the model and wrongly fall
+        // back to deriving both serde traits.
+        let module = Module {
+            items: vec![
+                strukt("Thing", vec![named_field("floor", "floor_heating")]),
+                strukt("floor_heating", vec![]),
+            ],
+        };
+        let service = Service {
+            operations: vec![response_operation("Thing")],
+            security_schemes: Vec::new(),
+        };
+        let targets = Targets {
+            server: true,
+            client: false,
+        };
+        let derives = model_derives(&module, &service, targets);
+        let serde = derives
+            .get("FloorHeating")
+            .copied()
+            .expect("model reached via canonicalized name");
+        assert!(serde.serialize);
+        assert!(
+            !serde.deserialize,
+            "a response-only model must skip Deserialize even when its schema name is not PascalCase"
+        );
     }
 }
