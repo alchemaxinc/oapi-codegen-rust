@@ -90,7 +90,7 @@ jobs:
 
             if [ -z "$url" ]; then
               url=$(gh issue create --title "$title" --label enhancement --type Feature \
-                --assignee copilot \
+                --assignee "@copilot" \
                 --body "$(printf '%s\n' \
                   "OpenAPI **$minor** has been released upstream (see the [OpenAPI Specification releases](https://github.com/OAI/OpenAPI-Specification/releases)), but is not yet supported by \`oapi-codegen-rust\`." \
                   "" \
