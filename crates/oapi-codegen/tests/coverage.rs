@@ -1072,18 +1072,16 @@ fn response_name_collision_without_suffix_fails() {
     let fixture = dir.join("fixtures").join("combined_response_name_collision.yaml");
     let err = oapi_codegen::generate(&fixture, &combined_config())
         .expect_err("expected a type-name collision without response-type-suffix");
-    assert!(
-        matches!(err, oapi_codegen::Error::TypeNameCollision { .. }),
-        "expected TypeNameCollision, got: {err:?}",
-    );
-    let message = err.to_string();
-    let x_rust_name = message.find("x-rust-name").expect("hint should mention x-rust-name");
-    let suffix = message
+    let oapi_codegen::Error::TypeNameCollision { hint, .. } = &err else {
+        panic!("expected TypeNameCollision, got: {err:?}");
+    };
+    let x_rust_name = hint.find("x-rust-name").expect("hint should mention x-rust-name");
+    let suffix = hint
         .find("response-type-suffix")
         .expect("hint should mention response-type-suffix");
     assert!(
         x_rust_name < suffix,
-        "hint should lead with the surgical `x-rust-name` remedy before `response-type-suffix`, got: {message}",
+        "hint should lead with the surgical `x-rust-name` remedy before `response-type-suffix`, got: {hint}",
     );
 }
 
