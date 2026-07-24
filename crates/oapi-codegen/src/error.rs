@@ -91,6 +91,19 @@ pub enum Error {
         reason: String,
     },
 
+    /// A parameter declared `in: path` has no matching `{placeholder}` in the
+    /// operation's path template. An OpenAPI path parameter must appear in the
+    /// path, and lowering it from the template would otherwise silently drop it
+    /// from the generated signature.
+    InvalidPathParameter {
+        /// HTTP method of the offending operation.
+        method: String,
+        /// Templated request path of the offending operation.
+        path: String,
+        /// The declared path-parameter name with no matching placeholder.
+        name: String,
+    },
+
     /// A generated per-operation type name collided with a component-model name
     /// emitted in the same file.
     TypeNameCollision {
@@ -148,6 +161,12 @@ impl std::fmt::Display for Error {
             Error::UnsupportedOperation { method, path, reason } => {
                 return write!(f, "unsupported operation `{method} {path}`: {reason}");
             }
+            Error::InvalidPathParameter { method, path, name } => {
+                return write!(
+                    f,
+                    "path parameter `{name}` on `{method} {path}` is declared `in: path` but the path template has no `{{{name}}}` placeholder"
+                );
+            }
             Error::TypeNameCollision { name, artifact, hint } => {
                 return write!(
                     f,
@@ -177,6 +196,7 @@ impl std::error::Error for Error {
             | Error::UnsupportedRef { .. }
             | Error::UnsupportedSchema { .. }
             | Error::TypeNameCollision { .. }
+            | Error::InvalidPathParameter { .. }
             | Error::UnsupportedOperation { .. } => return None,
         }
     }
