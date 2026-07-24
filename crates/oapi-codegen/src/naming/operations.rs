@@ -11,8 +11,11 @@ pub fn operation_method_name(raw: &str) -> RustIdent {
     return to_ident(raw, Case::Snake);
 }
 
-pub fn response_enum_name(op: &RustIdent) -> RustIdent {
-    return to_ident(&format!("{}_response", op.logical()), Case::Pascal);
+/// The generated response-enum name for an operation, `<Op><Suffix>` (the
+/// suffix defaults to `Response`; override it via `response-type-suffix` to
+/// resolve a clash with a component schema of the same name).
+pub fn response_enum_name(op: &RustIdent, suffix: &str) -> RustIdent {
+    return to_ident(&format!("{}_{}", op.logical(), suffix), Case::Pascal);
 }
 
 pub fn query_struct_name(op: &RustIdent) -> RustIdent {
@@ -65,13 +68,14 @@ mod tests {
     fn derives_operation_artifact_names() {
         let list_pets = op("list_pets");
         assert_eq!(operation_method_name("listPets").logical(), "list_pets");
-        assert_eq!(response_enum_name(&list_pets).logical(), "ListPetsResponse");
+        assert_eq!(response_enum_name(&list_pets, "response").logical(), "ListPetsResponse");
         assert_eq!(query_struct_name(&list_pets).logical(), "ListPetsQuery");
         assert_eq!(headers_struct_name(&list_pets).logical(), "ListPetsHeaders");
         assert_eq!(cookies_struct_name(&list_pets).logical(), "ListPetsCookies");
         assert_eq!(multipart_struct_name(&list_pets).logical(), "ListPetsMultipart");
         assert_eq!(request_body_enum_name(&list_pets).logical(), "ListPetsRequestBody");
-        let response = response_enum_name(&list_pets);
+        assert_eq!(response_enum_name(&list_pets, "Resp").logical(), "ListPetsResp");
+        let response = response_enum_name(&list_pets, "response");
         let ok = to_ident("ok", Case::Pascal);
         assert_eq!(
             response_body_enum_name(&response, &ok).logical(),

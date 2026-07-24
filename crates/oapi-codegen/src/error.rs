@@ -91,6 +91,17 @@ pub enum Error {
         reason: String,
     },
 
+    /// A generated per-operation type name collided with a component-model name
+    /// emitted in the same file.
+    TypeNameCollision {
+        /// The clashing Rust identifier.
+        name: String,
+        /// The generated artifact that clashed (e.g. `response enum`).
+        artifact: String,
+        /// How to resolve the clash.
+        hint: String,
+    },
+
     /// The generated token stream was not valid Rust (internal bug).
     InvalidGeneratedCode {
         /// Underlying syn parse error.
@@ -137,6 +148,12 @@ impl std::fmt::Display for Error {
             Error::UnsupportedOperation { method, path, reason } => {
                 return write!(f, "unsupported operation `{method} {path}`: {reason}");
             }
+            Error::TypeNameCollision { name, artifact, hint } => {
+                return write!(
+                    f,
+                    "generated {artifact} `{name}` collides with a component schema of the same name; {hint}"
+                );
+            }
             Error::InvalidGeneratedCode { source } => {
                 return write!(f, "generated code was not valid Rust: {source}");
             }
@@ -159,6 +176,7 @@ impl std::error::Error for Error {
             | Error::UnresolvedRef(_)
             | Error::UnsupportedRef { .. }
             | Error::UnsupportedSchema { .. }
+            | Error::TypeNameCollision { .. }
             | Error::UnsupportedOperation { .. } => return None,
         }
     }

@@ -444,8 +444,18 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 ];
 
 /// Fixtures generated with both the server and client enabled, exercising the
-/// combined `server`/`client` submodule layout with shared root models.
+/// flat crate-root layout in which the server and client share one file and the
+/// same per-operation types alongside the component models.
 const COMBINED_FIXTURES: &[&str] = &["combined_server_client", "combined_response_name_collision"];
+
+/// Combined fixtures whose generation must fail because a component schema is
+/// named like a crate-root interface type the flat layout emits (`Api`,
+/// `Client`, `ClientError`). Each is rejected with a `TypeNameCollision`.
+const COMBINED_UNSUPPORTED_FIXTURES: &[&str] = &[
+    "combined_reserved_name_api",
+    "combined_reserved_name_client",
+    "combined_reserved_name_client_error",
+];
 
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {
@@ -976,7 +986,7 @@ fn client_unsupported_features_are_rejected() {
 }
 
 /// Configuration that enables both the axum server and the `reqwest` client, so
-/// they are emitted together into `server` and `client` submodules.
+/// they are emitted together flat at the crate root.
 fn combined_config() -> oapi_codegen::Config {
     return oapi_codegen::Config {
         generate: oapi_codegen::config::Generate {
@@ -986,6 +996,18 @@ fn combined_config() -> oapi_codegen::Config {
         },
         ..Default::default()
     };
+}
+
+/// The combined configuration for `stem`. `combined_response_name_collision`
+/// carries a schema named `GetWidgetResponse` that clashes with the generated
+/// response enum, so it sets `response-type-suffix` to `Resp` to move the enum
+/// aside (`GetWidgetResp`); every other fixture uses the default suffix.
+fn combined_config_for(stem: &str) -> oapi_codegen::Config {
+    let mut config = combined_config();
+    if stem == "combined_response_name_collision" {
+        config.output_options.response_type_suffix = Some("Resp".to_owned());
+    }
+    return config;
 }
 
 /// Regenerate `stem`'s combined server+client output and assert it matches the
@@ -999,7 +1021,7 @@ fn assert_combined_generated_matches(stem: &str) {
     let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
     let generated_file = dir.join("generated").join(format!("{stem}.rs"));
 
-    let generated = oapi_codegen::generate(&fixture, &combined_config()).unwrap_or_else(|err| {
+    let generated = oapi_codegen::generate(&fixture, &combined_config_for(stem)).unwrap_or_else(|err| {
         panic!("generating combined `{stem}` failed: {err}");
     });
 
@@ -1038,6 +1060,115 @@ macro_rules! combined_generated_tests {
 }
 
 combined_generated_tests!(combined_server_client, combined_response_name_collision);
+
+/// Without `response-type-suffix`, a schema named like an operation's response
+/// enum must fail generation rather than silently rename either item.
+#[test]
+fn response_name_collision_without_suffix_fails() {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join("combined_response_name_collision.yaml");
+    let err = oapi_codegen::generate(&fixture, &combined_config())
+        .expect_err("expected a type-name collision without response-type-suffix");
+    assert!(
+        matches!(err, oapi_codegen::Error::TypeNameCollision { .. }),
+        "expected TypeNameCollision, got: {err:?}",
+    );
+}
+
+/// An empty `response-type-suffix` is treated as unset: it must fall back to
+/// the default suffix rather than emit suffix-less response enums, so the
+/// collision fixture fails exactly as it does without any suffix.
+#[test]
+fn empty_response_suffix_falls_back_to_default() {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join("combined_response_name_collision.yaml");
+    let mut config = combined_config();
+    config.output_options.response_type_suffix = Some(String::new());
+    let err = oapi_codegen::generate(&fixture, &config)
+        .expect_err("an empty response-type-suffix must fall back to the default and still collide");
+    assert!(
+        matches!(err, oapi_codegen::Error::TypeNameCollision { .. }),
+        "expected TypeNameCollision, got: {err:?}",
+    );
+}
+
+/// A component schema whose name equals a reserved interface type name emitted
+/// by the requested targets must fail generation rather than produce two items
+/// with the same name at the crate root.
+#[test]
+fn reserved_interface_name_collision_fails() {
+    let dir = tests_dir();
+    let cases = [
+        ("combined_reserved_name_api", "Api", "server interface trait"),
+        ("combined_reserved_name_client", "Client", "client struct"),
+        (
+            "combined_reserved_name_client_error",
+            "ClientError",
+            "client error enum",
+        ),
+    ];
+    for (stem, schema_name, artifact) in cases {
+        let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+        let err = oapi_codegen::generate(&fixture, &combined_config())
+            .expect_err(&format!("expected a collision for schema named `{schema_name}`"));
+        match err {
+            oapi_codegen::Error::TypeNameCollision {
+                name, artifact: got, ..
+            } => {
+                assert_eq!(name, schema_name);
+                assert_eq!(got, artifact);
+            }
+            other => panic!("expected TypeNameCollision for `{schema_name}`, got: {other:?}"),
+        }
+    }
+}
+
+/// A reserved name is only reserved when its target is requested: the
+/// server-only `Api` trait must not block a schema named `Api` in a
+/// client-only generation.
+#[test]
+fn reserved_interface_name_is_target_scoped() {
+    let fixture = tests_dir().join("fixtures").join("combined_reserved_name_api.yaml");
+    oapi_codegen::generate(&fixture, &client_config())
+        .expect("a schema named `Api` must not collide when only the client is generated");
+}
+
+/// Whether `generated` declares `name` as a `trait`, `struct`, or `enum` item.
+/// The match requires an item keyword before the name and a non-identifier
+/// character after it, so a longer identifier that merely shares the prefix
+/// (e.g. `ClientError` when looking for `Client`) does not count.
+fn declares_type(generated: &str, name: &str) -> bool {
+    return ["trait", "struct", "enum"].iter().any(|keyword| {
+        let needle = format!("{keyword} {name}");
+        return generated.match_indices(&needle).any(|(index, matched)| {
+            let after = generated[index + matched.len()..].chars().next();
+            return after.is_none_or(|next| return !next.is_alphanumeric() && next != '_');
+        });
+    });
+}
+
+/// Every reserved interface name must actually be declared in the combined
+/// output, so renaming an emitted interface without updating its reserved-name
+/// constant (which would let a real collision slip through) breaks this test.
+#[test]
+fn reserved_names_are_declared_in_combined_output() {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join("combined_server_client.yaml");
+    let generated =
+        oapi_codegen::generate(&fixture, &combined_config()).expect("generating combined server+client output failed");
+    let targets = oapi_codegen::emit::Targets {
+        server: true,
+        client: true,
+    };
+    for reserved in oapi_codegen::emit::reserved_type_names(targets) {
+        assert!(
+            declares_type(&generated, reserved.name),
+            "reserved name `{}` ({}) is not declared in the combined output",
+            reserved.name,
+            reserved.description,
+        );
+    }
+}
 
 /// The combined `#[test]`s must cover exactly the combined fixtures.
 #[test]
@@ -1103,6 +1234,7 @@ fn fixtures_and_test_table_agree() {
         .chain(CLIENT_FIXTURES.iter().copied())
         .chain(CLIENT_UNSUPPORTED_FIXTURES.iter().copied())
         .chain(COMBINED_FIXTURES.iter().copied())
+        .chain(COMBINED_UNSUPPORTED_FIXTURES.iter().copied())
         .collect();
 
     for stem in &referenced {

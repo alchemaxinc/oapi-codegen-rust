@@ -11,18 +11,18 @@ pub struct Session {
     pub token: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoginResponse {
+    /// The issued session, form-encoded.
+    Ok(Session),
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     fn login(
         &self,
         body: Credentials,
     ) -> impl std::future::Future<Output = LoginResponse> + Send;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum LoginResponse {
-    /// The issued session, form-encoded.
-    Ok(Session),
 }
 
 impl axum::response::IntoResponse for LoginResponse {

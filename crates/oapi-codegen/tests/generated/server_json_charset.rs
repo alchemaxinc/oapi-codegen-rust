@@ -5,18 +5,18 @@ pub struct Thing {
     pub name: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateThingResponse {
+    /// ok
+    Ok(Thing),
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     fn create_thing(
         &self,
         body: Thing,
     ) -> impl std::future::Future<Output = CreateThingResponse> + Send;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateThingResponse {
-    /// ok
-    Ok(Thing),
 }
 
 impl axum::response::IntoResponse for CreateThingResponse {

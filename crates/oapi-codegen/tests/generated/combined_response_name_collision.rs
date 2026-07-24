@@ -7,231 +7,211 @@ pub struct GetWidgetResponse {
     pub label: Option<String>,
 }
 
-pub mod server {
-    /// Server behaviour: implement one method per operation.
-    pub trait Api: Clone + Send + Sync + 'static {
-        /// Fetch a single widget by identifier.
-        fn get_widget(
-            &self,
-            widget_id: String,
-        ) -> impl std::future::Future<Output = GetWidgetResponse> + Send;
-        /// Replace a widget in full.
-        fn replace_widget(
-            &self,
-            widget_id: String,
-            body: super::GetWidgetResponse,
-        ) -> impl std::future::Future<Output = ReplaceWidgetResponse> + Send;
-    }
+/// Fetch a single widget by identifier.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetWidgetResp {
+    /// The requested widget.
+    Ok(GetWidgetResponse),
+}
 
+/// Replace a widget in full.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReplaceWidgetResp {
+    /// The updated widget.
+    Ok(GetWidgetResponse),
+}
+
+/// Server behaviour: implement one method per operation.
+pub trait Api: Clone + Send + Sync + 'static {
     /// Fetch a single widget by identifier.
-    #[derive(Debug, Clone, PartialEq)]
-    pub enum GetWidgetResponse {
-        /// The requested widget.
-        Ok(super::GetWidgetResponse),
-    }
-
-    impl axum::response::IntoResponse for GetWidgetResponse {
-        fn into_response(self) -> axum::response::Response {
-            match self {
-                GetWidgetResponse::Ok(body) => {
-                    const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
-                        200,
-                    ) {
-                        Ok(status) => status,
-                        Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
-                    };
-                    (STATUS, axum::Json(body)).into_response()
-                }
-            }
-        }
-    }
-
+    fn get_widget(
+        &self,
+        widget_id: String,
+    ) -> impl std::future::Future<Output = GetWidgetResp> + Send;
     /// Replace a widget in full.
-    #[derive(Debug, Clone, PartialEq)]
-    pub enum ReplaceWidgetResponse {
-        /// The updated widget.
-        Ok(super::GetWidgetResponse),
-    }
+    fn replace_widget(
+        &self,
+        widget_id: String,
+        body: GetWidgetResponse,
+    ) -> impl std::future::Future<Output = ReplaceWidgetResp> + Send;
+}
 
-    impl axum::response::IntoResponse for ReplaceWidgetResponse {
-        fn into_response(self) -> axum::response::Response {
-            match self {
-                ReplaceWidgetResponse::Ok(body) => {
-                    const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
-                        200,
-                    ) {
-                        Ok(status) => status,
-                        Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
-                    };
-                    (STATUS, axum::Json(body)).into_response()
-                }
+impl axum::response::IntoResponse for GetWidgetResp {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            GetWidgetResp::Ok(body) => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    200,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
             }
         }
-    }
-
-    /// Build an axum `Router` that dispatches each route to `api`.
-    pub fn router<T: Api>(api: T) -> axum::Router {
-        axum::Router::new()
-            .route(
-                "/widgets/{widgetId}",
-                axum::routing::get(get_widget_handler::<T>).put(replace_widget_handler::<T>),
-            )
-            .with_state(api)
-    }
-
-    async fn get_widget_handler<T: Api>(
-        axum::extract::State(api): axum::extract::State<T>,
-        axum::extract::Path(widget_id): axum::extract::Path<String>,
-    ) -> GetWidgetResponse {
-        api.get_widget(widget_id).await
-    }
-
-    async fn replace_widget_handler<T: Api>(
-        axum::extract::State(api): axum::extract::State<T>,
-        axum::extract::Path(widget_id): axum::extract::Path<String>,
-        axum::Json(body): axum::Json<super::GetWidgetResponse>,
-    ) -> ReplaceWidgetResponse {
-        api.replace_widget(widget_id, body).await
     }
 }
 
-pub mod client {
-    /// Errors returned by the generated client.
-    #[derive(Debug)]
-    pub enum ClientError {
-        /// The `reqwest` request failed to send or complete, including any
-        /// body decoding `reqwest` performs internally (such as JSON).
-        Http(reqwest::Error),
-        /// The server returned a status code the operation does not declare.
-        UnexpectedStatus(reqwest::StatusCode),
-        /// The response `Content-Type` matched none of the representations the
-        /// operation declares for its status.
-        UnexpectedContentType(String),
-        /// A response body failed to deserialize (e.g. malformed
-        /// form-urlencoded content).
-        Decode(String),
-    }
-    impl std::fmt::Display for ClientError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                ClientError::Http(error) => return write!(f, "HTTP request failed: {error}"),
-                ClientError::UnexpectedStatus(status) => {
-                    return write!(f, "unexpected response status: {status}");
-                }
-                ClientError::UnexpectedContentType(content_type) => {
-                    return write!(f, "unexpected response content type: {content_type}");
-                }
-                ClientError::Decode(message) => {
-                    return write!(f, "failed to decode response body: {message}");
-                }
+impl axum::response::IntoResponse for ReplaceWidgetResp {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            ReplaceWidgetResp::Ok(body) => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    200,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
             }
         }
     }
-    impl std::error::Error for ClientError {
-        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-            match self {
-                ClientError::Http(error) => return Some(error),
-                ClientError::UnexpectedStatus(_)
-                | ClientError::UnexpectedContentType(_)
-                | ClientError::Decode(_) => return None,
+}
+
+/// Build an axum `Router` that dispatches each route to `api`.
+pub fn router<T: Api>(api: T) -> axum::Router {
+    axum::Router::new()
+        .route(
+            "/widgets/{widgetId}",
+            axum::routing::get(get_widget_handler::<T>).put(replace_widget_handler::<T>),
+        )
+        .with_state(api)
+}
+
+async fn get_widget_handler<T: Api>(
+    axum::extract::State(api): axum::extract::State<T>,
+    axum::extract::Path(widget_id): axum::extract::Path<String>,
+) -> GetWidgetResp {
+    api.get_widget(widget_id).await
+}
+
+async fn replace_widget_handler<T: Api>(
+    axum::extract::State(api): axum::extract::State<T>,
+    axum::extract::Path(widget_id): axum::extract::Path<String>,
+    axum::Json(body): axum::Json<GetWidgetResponse>,
+) -> ReplaceWidgetResp {
+    api.replace_widget(widget_id, body).await
+}
+
+/// Errors returned by the generated client.
+#[derive(Debug)]
+pub enum ClientError {
+    /// The `reqwest` request failed to send or complete, including any
+    /// body decoding `reqwest` performs internally (such as JSON).
+    Http(reqwest::Error),
+    /// The server returned a status code the operation does not declare.
+    UnexpectedStatus(reqwest::StatusCode),
+    /// The response `Content-Type` matched none of the representations the
+    /// operation declares for its status.
+    UnexpectedContentType(String),
+    /// The response could not be decoded: a body that failed to
+    /// deserialize (e.g. malformed form-urlencoded content), or a
+    /// required response header that was missing or unparsable.
+    Decode(String),
+}
+impl std::fmt::Display for ClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ClientError::Http(error) => return write!(f, "HTTP request failed: {error}"),
+            ClientError::UnexpectedStatus(status) => {
+                return write!(f, "unexpected response status: {status}");
+            }
+            ClientError::UnexpectedContentType(content_type) => {
+                return write!(f, "unexpected response content type: {content_type}");
+            }
+            ClientError::Decode(message) => {
+                return write!(f, "failed to decode response: {message}");
             }
         }
     }
-    impl From<reqwest::Error> for ClientError {
-        fn from(error: reqwest::Error) -> Self {
-            return ClientError::Http(error);
+}
+impl std::error::Error for ClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ClientError::Http(error) => return Some(error),
+            ClientError::UnexpectedStatus(_)
+            | ClientError::UnexpectedContentType(_)
+            | ClientError::Decode(_) => return None,
         }
     }
-
-    const PATH_PARAM_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
-        .remove(b'-')
-        .remove(b'.')
-        .remove(b'_')
-        .remove(b'~');
-
-    /// Fetch a single widget by identifier.
-    #[derive(Debug, Clone, PartialEq)]
-    pub enum GetWidgetResponse {
-        /// The requested widget.
-        Ok(super::GetWidgetResponse),
+}
+impl From<reqwest::Error> for ClientError {
+    fn from(error: reqwest::Error) -> Self {
+        return ClientError::Http(error);
     }
+}
 
-    /// Replace a widget in full.
-    #[derive(Debug, Clone, PartialEq)]
-    pub enum ReplaceWidgetResponse {
-        /// The updated widget.
-        Ok(super::GetWidgetResponse),
+const PATH_PARAM_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
+/// A blocking HTTP client for the API.
+///
+/// `base_url` is used as a prefix for every request path and should not
+/// carry a trailing slash (e.g. `https://api.example.com`).
+#[derive(Debug, Clone)]
+pub struct Client {
+    base_url: String,
+    http: reqwest::blocking::Client,
+}
+
+impl Client {
+    /// Build a client targeting `base_url` with a default blocking
+    /// `reqwest::blocking::Client`.
+    pub fn new(base_url: impl Into<String>) -> Result<Self, ClientError> {
+        let http = reqwest::blocking::Client::builder().build()?;
+        return Ok(Self {
+            base_url: base_url.into(),
+            http,
+        });
     }
-
-    /// A blocking HTTP client for the API.
-    ///
-    /// `base_url` is used as a prefix for every request path and should not
-    /// carry a trailing slash (e.g. `https://api.example.com`).
-    #[derive(Debug, Clone)]
-    pub struct Client {
-        base_url: String,
+    /// Build a client targeting `base_url` with a caller-provided
+    /// `reqwest::blocking::Client` (e.g. preconfigured with timeouts).
+    pub fn with_client(
+        base_url: impl Into<String>,
         http: reqwest::blocking::Client,
+    ) -> Self {
+        return Self {
+            base_url: base_url.into(),
+            http,
+        };
     }
-
-    impl Client {
-        /// Build a client targeting `base_url` with a default blocking
-        /// `reqwest::blocking::Client`.
-        pub fn new(base_url: impl Into<String>) -> Result<Self, ClientError> {
-            let http = reqwest::blocking::Client::builder().build()?;
-            return Ok(Self {
-                base_url: base_url.into(),
-                http,
-            });
+    /// Fetch a single widget by identifier.
+    pub fn get_widget(&self, widget_id: String) -> Result<GetWidgetResp, ClientError> {
+        let url = format!(
+            "{}/widgets/{}", self.base_url,
+            percent_encoding::utf8_percent_encode(widget_id.as_str(),
+            PATH_PARAM_ENCODE_SET)
+        );
+        let response = self.http.request(reqwest::Method::GET, url).send()?;
+        let status = response.status();
+        if status.as_u16() == 200 {
+            let body: GetWidgetResponse = response.json()?;
+            return Ok(GetWidgetResp::Ok(body));
         }
-        /// Build a client targeting `base_url` with a caller-provided
-        /// `reqwest::blocking::Client` (e.g. preconfigured with timeouts).
-        pub fn with_client(
-            base_url: impl Into<String>,
-            http: reqwest::blocking::Client,
-        ) -> Self {
-            return Self {
-                base_url: base_url.into(),
-                http,
-            };
+        return Err(ClientError::UnexpectedStatus(status));
+    }
+    /// Replace a widget in full.
+    pub fn replace_widget(
+        &self,
+        widget_id: String,
+        body: GetWidgetResponse,
+    ) -> Result<ReplaceWidgetResp, ClientError> {
+        let url = format!(
+            "{}/widgets/{}", self.base_url,
+            percent_encoding::utf8_percent_encode(widget_id.as_str(),
+            PATH_PARAM_ENCODE_SET)
+        );
+        let mut request = self.http.request(reqwest::Method::PUT, url);
+        request = request.json(&body);
+        let response = request.send()?;
+        let status = response.status();
+        if status.as_u16() == 200 {
+            let body: GetWidgetResponse = response.json()?;
+            return Ok(ReplaceWidgetResp::Ok(body));
         }
-        /// Fetch a single widget by identifier.
-        pub fn get_widget(
-            &self,
-            widget_id: String,
-        ) -> Result<GetWidgetResponse, ClientError> {
-            let url = format!(
-                "{}/widgets/{}", self.base_url,
-                percent_encoding::utf8_percent_encode(widget_id.as_str(),
-                PATH_PARAM_ENCODE_SET)
-            );
-            let response = self.http.request(reqwest::Method::GET, url).send()?;
-            let status = response.status();
-            if status.as_u16() == 200 {
-                let body: super::GetWidgetResponse = response.json()?;
-                return Ok(GetWidgetResponse::Ok(body));
-            }
-            return Err(ClientError::UnexpectedStatus(status));
-        }
-        /// Replace a widget in full.
-        pub fn replace_widget(
-            &self,
-            widget_id: String,
-            body: super::GetWidgetResponse,
-        ) -> Result<ReplaceWidgetResponse, ClientError> {
-            let url = format!(
-                "{}/widgets/{}", self.base_url,
-                percent_encoding::utf8_percent_encode(widget_id.as_str(),
-                PATH_PARAM_ENCODE_SET)
-            );
-            let mut request = self.http.request(reqwest::Method::PUT, url);
-            request = request.json(&body);
-            let response = request.send()?;
-            let status = response.status();
-            if status.as_u16() == 200 {
-                let body: super::GetWidgetResponse = response.json()?;
-                return Ok(ReplaceWidgetResponse::Ok(body));
-            }
-            return Err(ClientError::UnexpectedStatus(status));
-        }
+        return Err(ClientError::UnexpectedStatus(status));
     }
 }

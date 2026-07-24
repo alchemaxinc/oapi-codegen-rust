@@ -21,6 +21,96 @@ pub struct ErrorResponse {
     pub message: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct ListWidgetsQuery {
+    /// Free-text search term.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub q: Option<String>,
+    /// Only return widgets carrying every given tag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    pub limit: i32,
+    pub region: String,
+}
+
+/// List widgets, filtered by query parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListWidgetsResponse {
+    /// The matching widgets.
+    Ok(Vec<Widget>),
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateWidgetHeaders {
+    /// Unique key so a retried create is not duplicated.
+    pub idempotency_key: String,
+    pub x_trace_id: Option<String>,
+}
+
+/// Create a widget.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateWidgetResponse {
+    /// The widget was created.
+    Created {
+        body: Widget,
+        /// URL of the created widget.
+        location: Option<String>,
+    },
+    /// The request was malformed.
+    BadRequest(ErrorResponse),
+    /// An unexpected error.
+    Default(http::StatusCode, ErrorResponse),
+}
+
+/// Fetch a single widget by id.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetWidgetResponse {
+    /// The requested widget.
+    Ok(Widget),
+    /// No widget matched the id.
+    NotFound,
+    /// A server-side error.
+    Status5xx(http::StatusCode, ErrorResponse),
+}
+
+/// Replace a widget from a form submission.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReplaceWidgetResponse {
+    /// The updated widget.
+    Ok(Widget),
+}
+
+#[derive(Debug, Clone)]
+pub struct DeleteWidgetCookies {
+    /// Opaque session token.
+    pub session: String,
+}
+
+/// Delete a widget, authenticated by a session cookie.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeleteWidgetResponse {
+    /// The widget was deleted.
+    NoContent,
+}
+
+/// Attach a plain-text note to a widget.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AddNoteResponse {
+    /// The note was stored; its rendering is returned as text.
+    Created {
+        body: String,
+        /// Identifier assigned to the stored note.
+        x_note_id: String,
+    },
+}
+
+/// Fetch a widget snapshot by its numeric revision.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetWidgetRevisionResponse {
+    /// The widget at that revision.
+    Ok(Widget),
+}
+
 /// Errors returned by the generated client.
 #[derive(Debug)]
 pub enum ClientError {
@@ -32,8 +122,9 @@ pub enum ClientError {
     /// The response `Content-Type` matched none of the representations the
     /// operation declares for its status.
     UnexpectedContentType(String),
-    /// A response body failed to deserialize (e.g. malformed
-    /// form-urlencoded content).
+    /// The response could not be decoded: a body that failed to
+    /// deserialize (e.g. malformed form-urlencoded content), or a
+    /// required response header that was missing or unparsable.
     Decode(String),
 }
 impl std::fmt::Display for ClientError {
@@ -47,7 +138,7 @@ impl std::fmt::Display for ClientError {
                 return write!(f, "unexpected response content type: {content_type}");
             }
             ClientError::Decode(message) => {
-                return write!(f, "failed to decode response body: {message}");
+                return write!(f, "failed to decode response: {message}");
             }
         }
     }
@@ -73,94 +164,6 @@ const PATH_PARAM_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NO
     .remove(b'.')
     .remove(b'_')
     .remove(b'~');
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct ListWidgetsQuery {
-    /// Free-text search term.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub q: Option<String>,
-    /// Only return widgets carrying every given tag.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tags: Option<Vec<String>>,
-    pub limit: i32,
-    pub region: String,
-}
-
-/// List widgets, filtered by query parameters.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ListWidgetsResponse {
-    /// The matching widgets.
-    Ok(Vec<Widget>),
-}
-
-pub struct CreateWidgetHeaders {
-    /// Unique key so a retried create is not duplicated.
-    pub idempotency_key: String,
-    pub x_trace_id: Option<String>,
-}
-
-/// Create a widget.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateWidgetResponse {
-    /// The widget was created.
-    Created {
-        body: Widget,
-        /// URL of the created widget.
-        location: Option<String>,
-    },
-    /// The request was malformed.
-    BadRequest(ErrorResponse),
-    /// An unexpected error.
-    Default(reqwest::StatusCode, ErrorResponse),
-}
-
-/// Fetch a single widget by id.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetWidgetResponse {
-    /// The requested widget.
-    Ok(Widget),
-    /// No widget matched the id.
-    NotFound,
-    /// A server-side error.
-    Status5xx(reqwest::StatusCode, ErrorResponse),
-}
-
-/// Replace a widget from a form submission.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ReplaceWidgetResponse {
-    /// The updated widget.
-    Ok(Widget),
-}
-
-pub struct DeleteWidgetCookies {
-    /// Opaque session token.
-    pub session: String,
-}
-
-/// Delete a widget, authenticated by a session cookie.
-#[derive(Debug, Clone, PartialEq)]
-pub enum DeleteWidgetResponse {
-    /// The widget was deleted.
-    NoContent,
-}
-
-/// Attach a plain-text note to a widget.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AddNoteResponse {
-    /// The note was stored; its rendering is returned as text.
-    Created {
-        body: String,
-        /// Identifier assigned to the stored note.
-        x_note_id: Option<String>,
-    },
-}
-
-/// Fetch a widget snapshot by its numeric revision.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetWidgetRevisionResponse {
-    /// The widget at that revision.
-    Ok(Widget),
-}
 
 /// A blocking HTTP client for the API.
 ///
@@ -333,11 +336,17 @@ impl Client {
         let response = request.send()?;
         let status = response.status();
         if status.as_u16() == 201 {
-            let x_note_id: Option<String> = response
+            let x_note_id: String = response
                 .headers()
                 .get("X-Note-Id")
                 .and_then(|value| return value.to_str().ok())
-                .and_then(|value| return value.parse().ok());
+                .and_then(|value| return value.parse().ok())
+                .ok_or_else(|| {
+                    return ClientError::Decode(
+                        "missing or invalid required response header `X-Note-Id`"
+                            .to_owned(),
+                    );
+                })?;
             let body = response.text()?;
             return Ok(AddNoteResponse::Created {
                 body,

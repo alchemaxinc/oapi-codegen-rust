@@ -11,19 +11,19 @@ pub struct Child {
     pub label: String,
 }
 
+/// List things.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListThingsResponse {
+    /// The things.
+    Ok(Thing),
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// List things.
     fn list_things(
         &self,
     ) -> impl std::future::Future<Output = ListThingsResponse> + Send;
-}
-
-/// List things.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ListThingsResponse {
-    /// The things.
-    Ok(Thing),
 }
 
 impl axum::response::IntoResponse for ListThingsResponse {

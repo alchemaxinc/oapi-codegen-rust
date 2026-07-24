@@ -6,6 +6,7 @@
 
 mod axum;
 mod models;
+mod operation;
 mod reqwest;
 mod servers;
 
@@ -55,56 +56,79 @@ pub fn emit_module(module: &Module, server_urls: Option<&ServerUrls>) -> Result<
     return render(&items);
 }
 
-/// Render a module's models followed by the axum server interface.
-pub fn emit_with_service(module: &Module, service: &Service, server_urls: Option<&ServerUrls>) -> Result<String> {
-    let mut items = module_items(module)?;
-    items.extend(server_url_items(server_urls)?);
-    items.extend(axum::AxumServer.emit(service)?);
-    return render(&items);
-}
-
-/// Render a module's models followed by the blocking `reqwest` client.
-pub fn emit_with_client(module: &Module, service: &Service, server_urls: Option<&ServerUrls>) -> Result<String> {
-    let mut items = module_items(module)?;
-    items.extend(server_url_items(server_urls)?);
-    items.extend(reqwest::ReqwestClient.emit(service)?);
-    return render(&items);
-}
-
-/// Render a module's shared models at the crate root, then the axum server and
-/// blocking `reqwest` client in separate `server` and `client` submodules.
+/// Which generator interfaces to emit alongside the shared per-operation types.
 ///
-/// The two generators emit same-named, different-shaped per-operation items
-/// (response enums, parameter structs, multipart/negotiated bodies): the server
-/// versions carry axum impls, the client versions are plain. Namespacing them
-/// keeps each output idiomatic and lets client-only consumers avoid axum. Each
-/// submodule brings the root models into scope with `use super::*;` when it
-/// references any.
-pub fn emit_with_service_and_client(
+/// At least one field is set whenever [`emit_flat`] is called.
+#[derive(Debug, Clone, Copy)]
+pub struct Targets {
+    /// Emit the axum server interface.
+    pub server: bool,
+    /// Emit the blocking `reqwest` client.
+    pub client: bool,
+}
+
+/// A fixed type name the generator emits at the crate root for a given target,
+/// which a component-schema model must not collide with.
+#[derive(Debug, Clone, Copy)]
+pub struct ReservedTypeName {
+    /// The reserved Rust identifier (e.g. `Api`).
+    pub name: &'static str,
+    /// Human-readable description of what emits it (e.g. `server interface
+    /// trait`), used in the collision error.
+    pub description: &'static str,
+}
+
+/// The crate-root type names the requested `targets` emit. A component schema
+/// whose generated name matches one of these would produce a duplicate item, so
+/// [`crate::lower::check_type_name_collisions`] rejects it up front.
+pub fn reserved_type_names(targets: Targets) -> Vec<ReservedTypeName> {
+    let mut names = Vec::new();
+    if targets.server {
+        names.push(ReservedTypeName {
+            name: axum::API_TRAIT_NAME,
+            description: "server interface trait",
+        });
+    }
+    if targets.client {
+        names.push(ReservedTypeName {
+            name: reqwest::CLIENT_STRUCT_NAME,
+            description: "client struct",
+        });
+        names.push(ReservedTypeName {
+            name: reqwest::CLIENT_ERROR_NAME,
+            description: "client error enum",
+        });
+    }
+    return names;
+}
+
+/// Render a module as a flat file: the shared component models and per-operation
+/// types at the crate root, followed by the requested generator interfaces.
+///
+/// The query/header/cookie inputs, request and response bodies, and response
+/// enum an operation contributes are the same types whichever generator uses
+/// them, so [`operation::emit_operation_types`] emits them once. The axum server
+/// then adds its extractor and `IntoResponse` impls, and the `reqwest` client
+/// its request-building methods, both naming those root types directly. Server
+/// and client can therefore share a single file without a name clash.
+pub fn emit_flat(
     module: &Module,
     service: &Service,
     server_urls: Option<&ServerUrls>,
+    targets: Targets,
 ) -> Result<String> {
-    let mut root = module_items(module)?;
-    root.extend(server_url_items(server_urls)?);
-    let server = reexported_submodule("server", &axum::AxumServer.emit(service)?)?;
-    let client = reexported_submodule("client", &reqwest::ReqwestClient.emit(service)?)?;
-
-    let mut out = String::from(HEADER);
-    let mut sections = Vec::new();
-    let root_body = render_body(&root)?;
-    if !root_body.is_empty() {
-        sections.push(root_body);
+    let mut items = module_items(module)?;
+    items.extend(server_url_items(server_urls)?);
+    for operation in &service.operations {
+        items.extend(operation::emit_operation_types(operation)?);
     }
-    sections.push(server);
-    sections.push(client);
-    for (index, section) in sections.iter().enumerate() {
-        if index > 0 {
-            out.push('\n');
-        }
-        out.push_str(section);
+    if targets.server {
+        items.extend(axum::AxumServer.emit(service)?);
     }
-    return Ok(out);
+    if targets.client {
+        items.extend(reqwest::ReqwestClient.emit(service)?);
+    }
+    return render(&items);
 }
 
 /// Emit the server-URL items, or nothing when the feature is disabled or the
@@ -123,31 +147,6 @@ fn module_items(module: &Module) -> Result<Vec<TokenStream>> {
         items.push(models::emit_item(item)?);
     }
     return Ok(items);
-}
-
-/// Wrap a generator's items in `pub mod #name { … }`, rendering each item one
-/// blank line apart (as at the top level) and indenting the body one level. The
-/// submodule references crate-root models through `super::`-qualified paths (see
-/// [`crate::lower::qualify_service_models`]), so no `use super::*;` glob is
-/// needed.
-fn reexported_submodule(name: &str, items: &[TokenStream]) -> Result<String> {
-    let body = render_body(items)?;
-    let indented = indent(&body);
-    return Ok(format!("pub mod {name} {{\n{indented}}}\n"));
-}
-
-/// Indent every non-empty line of `text` by one four-space level.
-fn indent(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for line in text.split_inclusive('\n') {
-        if line == "\n" {
-            out.push('\n');
-        } else {
-            out.push_str("    ");
-            out.push_str(line);
-        }
-    }
-    return out;
 }
 
 /// Pretty-print a sequence of top-level items, one blank line apart, prefixed

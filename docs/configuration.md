@@ -40,19 +40,26 @@ as-is. Only the subset below is interpreted.
 | `server-urls`     | Emit constants/builders for the spec's `servers` URLs. |
 | `embedded-spec`   | _Not implemented_ — rejected if set.                   |
 
-Setting both `std-http-server` and `client` emits them into `server` / `client`
-submodules with shared models at the root.
+Setting both `std-http-server` and `client` emits models, per-operation types,
+and both interfaces flat at the crate root, so the server and client share one
+file and the same response types.
+
+Generated code may reference `http::StatusCode` directly (for example, for
+`default` and range responses), so add [`http`](https://crates.io/crates/http)
+as a direct dependency of the generated crate. `axum` and `reqwest` re-export
+the type, but the `http::` path names the crate itself.
 
 ### `output-options`
 
-| Key                     | Purpose                                                       |
-| ----------------------- | ------------------------------------------------------------- |
-| `skip-prune`            | Keep schemas not referenced by any retained operation/schema. |
-| `include-tags`          | Only generate operations with one of these tags.              |
-| `exclude-tags`          | Skip operations with any of these tags.                       |
-| `include-operation-ids` | Only generate these `operationId`s.                           |
-| `exclude-operation-ids` | Skip these `operationId`s.                                    |
-| `exclude-schemas`       | Drop these component schemas before lowering.                 |
+| Key                     | Purpose                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| `skip-prune`            | Keep schemas not referenced by any retained operation/schema.                                       |
+| `include-tags`          | Only generate operations with one of these tags.                                                    |
+| `exclude-tags`          | Skip operations with any of these tags.                                                             |
+| `include-operation-ids` | Only generate these `operationId`s.                                                                 |
+| `exclude-operation-ids` | Skip these `operationId`s.                                                                          |
+| `exclude-schemas`       | Drop these component schemas before lowering.                                                       |
+| `response-type-suffix`  | Suffix for response enums (default `Response`); set it to resolve a clash with a same-named schema. |
 
 ## Example
 

@@ -919,7 +919,7 @@ fn generated_client_drives_requests_and_decodes_responses() {
     {
         AddNoteResponse::Created { body, x_note_id } => {
             assert_eq!(body, "stored");
-            assert_eq!(x_note_id.as_deref(), Some("note-7"));
+            assert_eq!(x_note_id, "note-7");
         }
     }
 

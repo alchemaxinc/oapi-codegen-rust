@@ -11,6 +11,17 @@ pub struct GetWidgetHeaders {
     pub x_request_id: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct GetWidgetCookies {
+    pub session: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetWidgetResponse {
+    /// The widget.
+    Ok,
+}
+
 impl<S> axum::extract::FromRequestParts<S> for GetWidgetHeaders
 where
     S: Send + Sync,
@@ -44,11 +55,6 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct GetWidgetCookies {
-    pub session: Option<String>,
-}
-
 impl<S> axum::extract::FromRequestParts<S> for GetWidgetCookies
 where
     S: Send + Sync,
@@ -73,12 +79,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         headers: GetWidgetHeaders,
         cookies: GetWidgetCookies,
     ) -> impl std::future::Future<Output = GetWidgetResponse> + Send;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetWidgetResponse {
-    /// The widget.
-    Ok,
 }
 
 impl axum::response::IntoResponse for GetWidgetResponse {

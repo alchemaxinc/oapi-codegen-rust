@@ -14,6 +14,13 @@ pub enum CreateWidgetRequestBody {
     Text(String),
 }
 
+/// Create a widget from JSON, form, or plain-text input.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateWidgetResponse {
+    /// The widget was created.
+    Created,
+}
+
 impl<S> axum::extract::FromRequest<S> for CreateWidgetRequestBody
 where
     S: Send + Sync,
@@ -86,13 +93,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         body: CreateWidgetRequestBody,
     ) -> impl std::future::Future<Output = CreateWidgetResponse> + Send;
-}
-
-/// Create a widget from JSON, form, or plain-text input.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateWidgetResponse {
-    /// The widget was created.
-    Created,
 }
 
 impl axum::response::IntoResponse for CreateWidgetResponse {

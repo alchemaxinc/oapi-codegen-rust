@@ -12,6 +12,13 @@ pub struct GetWidgetsHeaders {
     pub x_locale: Option<String>,
 }
 
+/// List widgets using typed request headers.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetWidgetsResponse {
+    /// The matching widgets.
+    Ok,
+}
+
 impl<S> axum::extract::FromRequestParts<S> for GetWidgetsHeaders
 where
     S: Send + Sync,
@@ -143,13 +150,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         headers: GetWidgetsHeaders,
     ) -> impl std::future::Future<Output = GetWidgetsResponse> + Send;
-}
-
-/// List widgets using typed request headers.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetWidgetsResponse {
-    /// The matching widgets.
-    Ok,
 }
 
 impl axum::response::IntoResponse for GetWidgetsResponse {

@@ -5,18 +5,18 @@ pub struct NewWidget {
     pub name: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateWidgetResponse {
+    /// Created.
+    Created,
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     fn create_widget(
         &self,
         body: NewWidget,
     ) -> impl std::future::Future<Output = CreateWidgetResponse> + Send;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateWidgetResponse {
-    /// Created.
-    Created,
 }
 
 impl axum::response::IntoResponse for CreateWidgetResponse {

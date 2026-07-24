@@ -144,6 +144,9 @@ fn hints_for(err: &Error) -> Vec<String> {
                     .to_owned(),
             ];
         }
+        Error::TypeNameCollision { hint, .. } => {
+            return vec![hint.clone()];
+        }
         Error::InvalidGeneratedCode { .. } => {
             return vec!["This is an internal bug in oapi-codegen; please report it along with your spec.".to_owned()];
         }

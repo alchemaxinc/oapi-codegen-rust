@@ -141,9 +141,18 @@ fn is_valid_header_name(name: &str) -> bool {
 }
 
 /// Lower every operation in `spec` into the server IR, resolving cross-file
-/// schema references through `import_mapping`.
-pub fn generate_service(spec: &Spec, import_mapping: &BTreeMap<String, String>) -> Result<Service> {
-    let lowerer = Lowerer { spec, import_mapping };
+/// schema references through `import_mapping`. `response_type_suffix` is
+/// appended to each operation's response-enum name.
+pub fn generate_service(
+    spec: &Spec,
+    import_mapping: &BTreeMap<String, String>,
+    response_type_suffix: &str,
+) -> Result<Service> {
+    let lowerer = Lowerer {
+        spec,
+        import_mapping,
+        response_type_suffix,
+    };
     return lowerer.lower();
 }
 
@@ -151,6 +160,7 @@ pub fn generate_service(spec: &Spec, import_mapping: &BTreeMap<String, String>) 
 struct Lowerer<'a> {
     spec: &'a Spec,
     import_mapping: &'a BTreeMap<String, String>,
+    response_type_suffix: &'a str,
 }
 
 impl Lowerer<'_> {
@@ -216,7 +226,7 @@ impl Lowerer<'_> {
         shared_params: &[ReferenceOr<Parameter>],
     ) -> Result<Operation> {
         let name = operation_name(path, method, operation);
-        let response_enum = operations::response_enum_name(&name);
+        let response_enum = operations::response_enum_name(&name, self.response_type_suffix);
 
         let params = self.resolve_parameters(operation, shared_params)?;
         let path_params = self.lower_path_params(path, method, &params)?;

@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: Reserved Name API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      summary: Return the component schema that collides with the server trait.
+      responses:
+        "200":
+          description: A ping payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Api"
+components:
+  schemas:
+    Api:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string

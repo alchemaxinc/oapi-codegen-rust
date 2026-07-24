@@ -28,9 +28,9 @@ use crate::loader::Spec;
 /// Models are emitted when `generate.models` is set, or implicitly when the
 /// server or client is generated (so referenced types are in scope). The axum
 /// server interface is appended when `generate.std-http-server` is set; the
-/// blocking `reqwest` client is appended when `generate.client` is set. When
-/// both are set, the shared models stay at the crate root and the two
-/// generators are emitted into separate `server` and `client` submodules.
+/// blocking `reqwest` client is appended when `generate.client` is set. Models,
+/// per-operation types, and both generators are emitted flat at the crate root,
+/// so server and client can share one file.
 pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     if config.generate.embedded_spec {
         return Err(Error::Unimplemented("embedded-spec".to_owned()));
@@ -50,19 +50,23 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         Module::default()
     };
     if want_server || want_client {
-        let mut service = lower::generate_service(&spec, &config.import_mapping)?;
+        let response_type_suffix = config
+            .output_options
+            .response_type_suffix
+            .as_deref()
+            .filter(|suffix| return !suffix.is_empty())
+            .unwrap_or(crate::config::DEFAULT_RESPONSE_SUFFIX);
+        let mut service = lower::generate_service(&spec, &config.import_mapping, response_type_suffix)?;
         lower::rewrite_service(&mut service, &lower::type_renames(&spec));
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
-        if want_server && want_client {
-            lower::qualify_service_models(&mut service);
-            return emit::emit_with_service_and_client(&module, &service, server_urls.as_ref());
-        }
-        if want_server {
-            return emit::emit_with_service(&module, &service, server_urls.as_ref());
-        }
-        return emit::emit_with_client(&module, &service, server_urls.as_ref());
+        let targets = emit::Targets {
+            server: want_server,
+            client: want_client,
+        };
+        lower::check_type_name_collisions(&service, &module, &emit::reserved_type_names(targets))?;
+        return emit::emit_flat(&module, &service, server_urls.as_ref(), targets);
     }
     return emit::emit_module(&module, server_urls.as_ref());
 }

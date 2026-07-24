@@ -11,6 +11,22 @@ pub struct ErrorBody {
     pub message: String,
 }
 
+/// Create a widget.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateWidgetResponse {
+    /// The widget was created.
+    Created(Widget),
+    /// Authentication failed.
+    Unauthorized(ErrorBody),
+}
+
+/// Fetch a widget as free-form JSON.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetWidgetRawResponse {
+    /// An opaque widget document.
+    Ok(serde_json::Value),
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     /// Create a widget.
@@ -23,15 +39,6 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         id: String,
     ) -> impl std::future::Future<Output = GetWidgetRawResponse> + Send;
-}
-
-/// Create a widget.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreateWidgetResponse {
-    /// The widget was created.
-    Created(Widget),
-    /// Authentication failed.
-    Unauthorized(ErrorBody),
 }
 
 impl axum::response::IntoResponse for CreateWidgetResponse {
@@ -57,13 +64,6 @@ impl axum::response::IntoResponse for CreateWidgetResponse {
             }
         }
     }
-}
-
-/// Fetch a widget as free-form JSON.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GetWidgetRawResponse {
-    /// An opaque widget document.
-    Ok(serde_json::Value),
 }
 
 impl axum::response::IntoResponse for GetWidgetRawResponse {
