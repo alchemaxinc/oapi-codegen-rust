@@ -148,13 +148,30 @@ fn collect_named(ty: &RustType, out: &mut Vec<String>) {
     }
 }
 
-/// Model names seeded as request-reachable: request payloads plus the fields of
-/// each operation's query-input struct.
+/// Model names seeded as request-reachable: path/query/header/cookie parameters
+/// plus the request payload. A path parameter is deserialized by the server's
+/// `Path` extractor, so a schema-typed parameter (e.g. a component enum) imposes
+/// a real `Deserialize` bound; header/cookie parameters are seeded too so a
+/// model used only there is narrowed to the request direction rather than
+/// falling back to both traits.
 fn request_seeds(service: &Service) -> Vec<String> {
     let mut names = Vec::new();
     for operation in &service.operations {
+        for param in &operation.path_params {
+            collect_named(&param.ty, &mut names);
+        }
         if let Some(query) = &operation.query {
             struct_field_names(query, &mut names);
+        }
+        if let Some(headers) = &operation.headers {
+            for param in &headers.params {
+                collect_named(&param.ty, &mut names);
+            }
+        }
+        if let Some(cookies) = &operation.cookies {
+            for param in &cookies.params {
+                collect_named(&param.ty, &mut names);
+            }
         }
         if let Some(request) = &operation.request {
             match request {
@@ -171,11 +188,15 @@ fn request_seeds(service: &Service) -> Vec<String> {
     return names;
 }
 
-/// Model names seeded as response-reachable: every response variant's body.
+/// Model names seeded as response-reachable: every response variant's body and
+/// its declared response headers.
 fn response_seeds(service: &Service) -> Vec<String> {
     let mut names = Vec::new();
     for operation in &service.operations {
         for case in &operation.responses {
+            for header in &case.headers {
+                collect_named(&header.ty, &mut names);
+            }
             match &case.body {
                 Some(ResponseBody::Single(body)) => collect_named(&body.ty, &mut names),
                 Some(ResponseBody::Negotiated(body)) => negotiated_names(body, &mut names),
@@ -207,7 +228,9 @@ mod tests {
     use crate::ir::Body;
     use crate::ir::Field;
     use crate::ir::Operation;
+    use crate::ir::Param;
     use crate::ir::ResponseCase;
+    use crate::ir::ResponseHeader;
     use crate::ir::ResponseStatus;
     use crate::naming::RustIdent;
 
@@ -373,5 +396,78 @@ mod tests {
             !serde.deserialize,
             "a response-only model must skip Deserialize even when its schema name is not PascalCase"
         );
+    }
+
+    #[test]
+    fn path_param_model_is_request_reachable() {
+        let module = Module {
+            items: vec![strukt("Status", vec![])],
+        };
+        let mut operation = response_operation("Ignored");
+        operation.responses = vec![ResponseCase {
+            variant: tname("NoContent"),
+            status: ResponseStatus::Fixed(204),
+            body: None,
+            headers: Vec::new(),
+            doc: None,
+        }];
+        operation.path_params = vec![Param {
+            name: fname("status"),
+            ty: RustType::Named("Status".to_owned()),
+        }];
+        let service = Service {
+            operations: vec![operation],
+            security_schemes: Vec::new(),
+        };
+        let targets = Targets {
+            server: true,
+            client: false,
+        };
+        let derives = model_derives(&module, &service, targets);
+        let serde = derives.get("Status").copied().expect("path-param model reached");
+        assert!(
+            serde.deserialize,
+            "the server's Path extractor deserializes a path-param model"
+        );
+        assert!(
+            !serde.serialize,
+            "a request-only model is never serialized on the server"
+        );
+    }
+
+    #[test]
+    fn response_header_model_is_response_reachable() {
+        let module = Module {
+            items: vec![strukt("Kind", vec![])],
+        };
+        let mut operation = response_operation("Ignored");
+        operation.responses = vec![ResponseCase {
+            variant: tname("Ok"),
+            status: ResponseStatus::Fixed(200),
+            body: None,
+            headers: vec![ResponseHeader {
+                name: fname("x_kind"),
+                header_name: "X-Kind".to_owned(),
+                ty: RustType::Named("Kind".to_owned()),
+                required: true,
+                doc: None,
+            }],
+            doc: None,
+        }];
+        let service = Service {
+            operations: vec![operation],
+            security_schemes: Vec::new(),
+        };
+        let targets = Targets {
+            server: true,
+            client: false,
+        };
+        let derives = model_derives(&module, &service, targets);
+        let serde = derives.get("Kind").copied().expect("response-header model reached");
+        assert!(
+            serde.serialize,
+            "a response-header model is reachable in the response direction"
+        );
+        assert!(!serde.deserialize);
     }
 }

@@ -33,7 +33,7 @@ pub enum GetReportsResponse {
     Ok(Message),
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SearchQuery {
     pub q: String,
 }

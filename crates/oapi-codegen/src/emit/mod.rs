@@ -125,7 +125,7 @@ pub fn emit_flat(
     let mut items = module_items(module, &derives)?;
     items.extend(server_url_items(server_urls)?);
     for operation in &service.operations {
-        items.extend(operation::emit_operation_types(operation)?);
+        items.extend(operation::emit_operation_types(operation, targets)?);
     }
     if targets.server {
         items.extend(axum::AxumServer.emit(service)?);

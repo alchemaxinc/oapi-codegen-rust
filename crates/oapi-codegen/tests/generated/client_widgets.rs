@@ -21,13 +21,11 @@ pub struct ErrorResponse {
     pub message: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ListWidgetsQuery {
     /// Free-text search term.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub q: Option<String>,
     /// Only return widgets carrying every given tag.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     pub limit: i32,
     pub region: String,

@@ -6,7 +6,7 @@ pub struct Book {
     pub title: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ListBooksQuery {
     /// Region filter; the operation-level definition wins.
     pub region: String,

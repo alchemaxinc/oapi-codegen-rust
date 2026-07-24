@@ -89,17 +89,25 @@ pub(crate) fn emit_struct(strukt: &Struct, serde: SerdeDerives) -> Result<TokenS
     let doc = doc_attr(&strukt.doc);
     let deprecated = deprecated_attr(&strukt.deprecated);
     let derives = derives(serde);
+    let has_serde = serde.serialize || serde.deserialize;
 
     let mut fields = Vec::with_capacity(strukt.fields.len());
     for field in &strukt.fields {
-        fields.push(emit_field(field)?);
+        fields.push(emit_field(field, has_serde)?);
     }
 
     let additional = match &strukt.additional_properties {
         Some(element) => {
             let ty = emit_type(element)?;
+            // The `flatten` attribute is only meaningful when the struct derives
+            // a serde trait; without one it would be an orphaned `#[serde(..)]`.
+            let flatten = if has_serde {
+                quote! { #[serde(flatten)] }
+            } else {
+                quote! {}
+            };
             quote! {
-                #[serde(flatten)]
+                #flatten
                 pub additional_properties: std::collections::HashMap<String, #ty>,
             }
         }
@@ -117,8 +125,10 @@ pub(crate) fn emit_struct(strukt: &Struct, serde: SerdeDerives) -> Result<TokenS
     });
 }
 
-/// Render a single struct field.
-fn emit_field(field: &Field) -> Result<TokenStream> {
+/// Render a single struct field. When the struct derives no serde trait,
+/// `#[serde(..)]` attributes are suppressed — without a serde derive macro in
+/// scope they are orphaned and fail to compile.
+fn emit_field(field: &Field, has_serde: bool) -> Result<TokenStream> {
     let name = field.name.to_token();
     let ty = emit_type(&field.ty)?;
     let doc = doc_attr(&field.doc);
@@ -136,7 +146,7 @@ fn emit_field(field: &Field) -> Result<TokenStream> {
             metas.push(quote! { skip_serializing_if = "Option::is_none" });
         }
     }
-    let serde_attr = if metas.is_empty() {
+    let serde_attr = if !has_serde || metas.is_empty() {
         quote! {}
     } else {
         quote! { #[serde(#(#metas),*)] }
