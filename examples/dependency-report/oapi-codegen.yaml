@@ -1,0 +1,5 @@
+package: api
+output: generated/api.rs
+generate:
+  models: true
+  std-http-server: true

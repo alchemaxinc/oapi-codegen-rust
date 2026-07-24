@@ -47,11 +47,16 @@ file and the same response types.
 ## Dependencies
 
 Cargo does not infer crate dependencies from a generated file's `use` paths (the
-way Go's `go mod tidy` does), so after each run the CLI prints the exact crates —
-with versions and features — that the generated code references, as both a
-`Cargo.toml` snippet and `cargo add` commands. Pass `--install-deps` to run those
-`cargo add` commands automatically without prompting; otherwise, on an interactive
-terminal you are prompted first. They target the current directory's package.
+way Go's `go mod tidy` does), so after each run the CLI reports the crates — with
+versions and features — that the generated code references but the target
+package's `Cargo.toml` does not yet declare, as both a `Cargo.toml` snippet and
+`cargo add` commands. The target package is the one whose `Cargo.toml` is nearest
+the output file. Pass `--install-deps` to run those `cargo add` commands
+automatically without prompting; otherwise, on an interactive terminal you are
+prompted first.
+
+The recommended versions are taken from `oapi-codegen`'s own manifest, so they
+match the versions the generated code is built and tested against.
 
 The set is per generated file. For example, a models-only file typically needs
 only `serde`; an axum server also needs `axum`, `http`, and (with query or cookie

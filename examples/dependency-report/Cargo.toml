@@ -1,0 +1,12 @@
+[package]
+name = "dependency-report-example"
+description = "Demonstrates the dependency report oapi-codegen prints after generating code"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]

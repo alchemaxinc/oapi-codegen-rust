@@ -115,12 +115,42 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
     oapi_codegen::write_output(&output, &code)?;
     console::report_wrote(&output);
 
-    let deps = oapi_codegen::deps::required_dependencies(&code);
+    let manifest = nearest_manifest(&output);
+    let deps = installable_dependencies(&code, manifest.as_deref());
     console::report_dependencies(&deps);
     if !deps.is_empty() && should_install_deps(cli.install_deps) {
-        install_dependencies(&deps);
+        install_dependencies(&deps, manifest.as_deref());
     }
     return Ok(());
+}
+
+/// The crates the generated code needs that are not already declared in the
+/// consumer's manifest. When no manifest is found, every referenced crate is
+/// reported.
+fn installable_dependencies(code: &str, manifest: Option<&Path>) -> Vec<oapi_codegen::deps::Dependency> {
+    let deps = oapi_codegen::deps::required_dependencies(code);
+    let Some(manifest) = manifest else {
+        return deps;
+    };
+    let Ok(text) = std::fs::read_to_string(manifest) else {
+        return deps;
+    };
+    return oapi_codegen::deps::retain_missing(deps, &oapi_codegen::deps::manifest_dependency_names(&text));
+}
+
+/// The nearest `Cargo.toml` at or above the output file's directory — the
+/// package the generated code belongs to.
+fn nearest_manifest(output: &Path) -> Option<PathBuf> {
+    let canonical = std::fs::canonicalize(output).unwrap_or_else(|_| return output.to_path_buf());
+    let mut directory = canonical.parent();
+    while let Some(current) = directory {
+        let candidate = current.join("Cargo.toml");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        directory = current.parent();
+    }
+    return None;
 }
 
 /// Decide whether to run `cargo add`: unconditionally when `--install-deps` is
@@ -136,13 +166,19 @@ fn should_install_deps(flag: bool) -> bool {
     return false;
 }
 
-/// Run `cargo add` for each dependency in the current directory's package. A
-/// failure is reported as a warning rather than aborting: the output file is
-/// already written, so dependency installation is a best-effort convenience.
-fn install_dependencies(deps: &[oapi_codegen::deps::Dependency]) {
+/// Run `cargo add` for each dependency, targeting `manifest`'s package (or the
+/// current directory's when none was found). A failure is reported as a warning
+/// rather than aborting: the output file is already written, so dependency
+/// installation is a best-effort convenience.
+fn install_dependencies(deps: &[oapi_codegen::deps::Dependency], manifest: Option<&Path>) {
     for dep in deps {
         console::report_installing(dep);
-        match Command::new("cargo").args(dep.cargo_add_args()).status() {
+        let mut command = Command::new("cargo");
+        command.args(dep.cargo_add_args());
+        if let Some(path) = manifest {
+            command.arg("--manifest-path").arg(path);
+        }
+        match command.status() {
             Ok(status) if status.success() => {}
             Ok(status) => console::report_install_failed(dep, &format!("cargo exited with {status}")),
             Err(error) => console::report_install_failed(dep, &error.to_string()),

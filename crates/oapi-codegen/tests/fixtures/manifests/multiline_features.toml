@@ -1,0 +1,11 @@
+[package]
+name = "consumer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8", features = [
+    "multipart",
+    "macros",
+] }
+serde = "1"

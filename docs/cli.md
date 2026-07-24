@@ -34,7 +34,7 @@ path must be given via --output-file or the config's `output:` key:
 
 * `-c`, `--config-file <CONFIG_FILE>` — Path to an `oapi-codegen` YAML config file (required)
 * `-o`, `--output-file <OUTPUT_FILE>` — Output file path (overrides the config `output:`). Required unless the config sets `output:`
-* `--install-deps` — After writing, run `cargo add` for each crate the generated code needs, without prompting. On an interactive terminal without this flag you are asked first; a non-interactive run only prints the dependency list. `cargo add` targets the current directory's package
+* `--install-deps` — After writing, run `cargo add` for each crate the generated code needs, without prompting. On an interactive terminal without this flag you are asked first; a non-interactive run only prints the dependency list. Only crates missing from the target package's manifest are reported, and `cargo add` targets the package whose `Cargo.toml` is nearest the output
 
 
 

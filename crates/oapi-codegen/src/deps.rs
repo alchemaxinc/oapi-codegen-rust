@@ -13,6 +13,8 @@
 //! with the emitters: if they stop or start referencing a crate, the report
 //! follows without a parallel rule set to maintain.
 
+use std::collections::BTreeSet;
+
 /// This crate's own manifest, embedded at compile time so the versions the
 /// report recommends always match the versions the generated code is compiled
 /// and tested against here (see [`manifest_version`]).
@@ -211,6 +213,76 @@ fn with_features(name: &'static str, default_features: bool, features: Vec<&'sta
     };
 }
 
+/// The dependency names already declared in a consumer's `Cargo.toml`, across
+/// every `*dependencies` table (`[dependencies]`, `[dev-dependencies]`,
+/// `[build-dependencies]`, and target-specific variants).
+///
+/// Used to drop crates the consumer already has from the report, so it lists
+/// only what is missing. Parsing is line-based but brace-aware, so multi-line
+/// dependency entries do not have their inner lines mistaken for new keys.
+pub fn manifest_dependency_names(manifest: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let mut in_dependencies = false;
+    let mut depth: i32 = 0;
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+        let at_top_level = depth == 0_i32;
+        let is_header = at_top_level && trimmed.starts_with('[') && trimmed.ends_with(']') && !trimmed.contains('=');
+        if is_header {
+            in_dependencies = trimmed.trim_matches(['[', ']']).ends_with("dependencies");
+        } else if at_top_level
+            && in_dependencies
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && let Some(key) = dependency_key(trimmed)
+        {
+            names.insert(key);
+        } else {
+            // A blank/comment line, or a line inside a multi-line dependency value.
+        }
+        depth = (depth + brace_delta(line)).max(0_i32);
+    }
+    return names;
+}
+
+/// Drop the dependencies whose crate is already declared in `present`, leaving
+/// only the ones a consumer still needs to add.
+pub fn retain_missing(deps: Vec<Dependency>, present: &BTreeSet<String>) -> Vec<Dependency> {
+    return deps
+        .into_iter()
+        .filter(|dep| return !present.contains(dep.name))
+        .collect();
+}
+
+/// Extract the crate name from a `[dependencies]` entry line, handling the
+/// `name = ...`, `name = { .. }`, and `name.workspace = true` forms.
+fn dependency_key(line: &str) -> Option<String> {
+    let before_eq = line.split('=').next()?.trim();
+    let key = before_eq.split('.').next()?.trim();
+    if !key.is_empty()
+        && key
+            .chars()
+            .all(|c| return c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Some(key.to_owned());
+    }
+    return None;
+}
+
+/// The net change in `{`/`[` nesting depth contributed by a line, used to skip
+/// the inner lines of a multi-line dependency value.
+fn brace_delta(line: &str) -> i32 {
+    let mut delta: i32 = 0;
+    for character in line.chars() {
+        match character {
+            '{' | '[' => delta += 1_i32,
+            '}' | ']' => delta -= 1_i32,
+            _ => {}
+        }
+    }
+    return delta;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +469,20 @@ mod tests {
     #[test]
     fn no_dependencies_for_dependency_free_output() {
         assert!(required_dependencies("pub const SERVER_URL: &str = \"https://x\";").is_empty());
+    }
+
+    #[test]
+    fn retain_missing_drops_already_present_crates() {
+        // `manifest_dependency_names` itself is exercised against `Cargo.toml`
+        // fixture files in `tests/dependencies.rs`.
+        let deps = required_dependencies("axum::Json http::StatusCode serde::Serialize");
+        let mut present = BTreeSet::new();
+        present.insert("axum".to_owned());
+        present.insert("serde".to_owned());
+        let missing: Vec<&str> = retain_missing(deps, &present)
+            .iter()
+            .map(|dep| return dep.name)
+            .collect();
+        assert_eq!(missing, vec!["http"], "only the crate absent from the manifest remains");
     }
 }

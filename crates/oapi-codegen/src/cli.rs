@@ -44,8 +44,9 @@ pub struct Cli {
 
     /// After writing, run `cargo add` for each crate the generated code needs,
     /// without prompting. On an interactive terminal without this flag you are
-    /// asked first; a non-interactive run only prints the dependency list.
-    /// `cargo add` targets the current directory's package.
+    /// asked first; a non-interactive run only prints the dependency list. Only
+    /// crates missing from the target package's manifest are reported, and
+    /// `cargo add` targets the package whose `Cargo.toml` is nearest the output.
     #[arg(long)]
     pub install_deps: bool,
 }
