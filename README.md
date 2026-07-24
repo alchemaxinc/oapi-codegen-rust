@@ -53,10 +53,18 @@ decisions to support.
 | Version | Status    | Notes                                                                                          |
 | ------- | --------- | ---------------------------------------------------------------------------------------------- |
 | v3.0.0  | Supported | Supported in [`v1.0.0`](https://github.com/alchemaxinc/oapi-codegen-rust/releases/tag/v1.0.0). |
-| v3.1.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/33).                   |
-| v3.2.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/48).                   |
+
+This table and the tracking issues are maintained automatically by the
+[OpenAPI version check workflow](.github/workflows/check-openapi-versions.yml),
+which probes the [upstream spec releases](https://github.com/OAI/OpenAPI-Specification/releases)
+against [`.github/openapi-versions.json`](.github/openapi-versions.json).
 
 ## Documentation
+
+> [!NOTE]  
+> These documents are primarily written by LLMs and are not intended for human reading. This project aims to be self-explanatory
+> through a sharp focus on TUI UX and guided error messaging. The documentation exists to help guide LLM context where needed.
+> They have been checked and verified by humans, and can be read if interested.
 
 - [Installation](docs/installation.md)
 - [Configuration](docs/configuration.md)
