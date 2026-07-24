@@ -10,10 +10,12 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
+use crate::emit::Targets;
 use crate::emit::doc_attr;
 use crate::emit::emit_multipart_struct;
 use crate::emit::emit_negotiated_body_enum;
 use crate::emit::emit_type;
+use crate::emit::models::SerdeDerives;
 use crate::emit::models::emit_struct;
 use crate::error::Result;
 use crate::ir::Cookies;
@@ -27,10 +29,17 @@ use crate::ir::ResponseStatus;
 /// Emit every type an operation contributes to the crate root: its query,
 /// header, and cookie input structs, any multipart or negotiated request body,
 /// the negotiated response bodies, and the response enum.
-pub fn emit_operation_types(operation: &Operation) -> Result<Vec<TokenStream>> {
+pub fn emit_operation_types(operation: &Operation, targets: Targets) -> Result<Vec<TokenStream>> {
     let mut items = Vec::new();
     if let Some(query) = &operation.query {
-        items.push(emit_struct(query)?);
+        // The query struct is deserialized by the server's `Query` extractor;
+        // the client builds the query string field-by-field via `to_string`
+        // rather than serializing the struct, so it never needs `Serialize`.
+        let serde = SerdeDerives {
+            serialize: false,
+            deserialize: targets.server,
+        };
+        items.push(emit_struct(query, serde)?);
     }
     if let Some(headers) = &operation.headers {
         items.push(emit_headers_struct(headers)?);

@@ -38,7 +38,7 @@ pub fn server_url_regional(region: ServerUrlRegionalRegion) -> Result<String, St
     return Ok(url);
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ListBooksQuery {
     /// Restrict the listing to a single author.
     #[serde(skip_serializing_if = "Option::is_none")]
