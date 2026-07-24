@@ -46,6 +46,10 @@ jobs:
           # (the floor below which upstream releases are intentionally ignored).
           # sort -V keeps double-digit minors (e.g. 3.10) ordered correctly.
           supported=$(jq -r '.supported[]' .github/openapi-versions.json | sort -V -u)
+          if [ -z "$supported" ]; then
+            echo "::error::.github/openapi-versions.json must list at least one supported minor version under .supported"
+            exit 1
+          fi
           floor=$(printf '%s\n' "$supported" | head -n1)
 
           # Minor versions upstream has released (stable only).
@@ -105,7 +109,7 @@ jobs:
             fi
 
             # Append an unformatted row; the next step runs Prettier to align it.
-            if ! grep -q "^| v${minor}.0 " README.md; then
+            if ! grep -Fq "| v${minor}.0 " README.md; then
               row="| v${minor}.0 | Planned | Tracking [here]($url). |"
               awk -v row="$row" \
                 '/^\| v[0-9]+\./ { last = NR } { lines[NR] = $0 }
