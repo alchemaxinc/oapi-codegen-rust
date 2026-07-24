@@ -1133,6 +1133,20 @@ fn reserved_interface_name_is_target_scoped() {
         .expect("a schema named `Api` must not collide when only the client is generated");
 }
 
+/// Whether `generated` declares `name` as a `trait`, `struct`, or `enum` item.
+/// The match requires an item keyword before the name and a non-identifier
+/// character after it, so a longer identifier that merely shares the prefix
+/// (e.g. `ClientError` when looking for `Client`) does not count.
+fn declares_type(generated: &str, name: &str) -> bool {
+    return ["trait", "struct", "enum"].iter().any(|keyword| {
+        let needle = format!("{keyword} {name}");
+        return generated.match_indices(&needle).any(|(index, matched)| {
+            let after = generated[index + matched.len()..].chars().next();
+            return after.is_none_or(|next| return !next.is_alphanumeric() && next != '_');
+        });
+    });
+}
+
 /// Every reserved interface name must actually be declared in the combined
 /// output, so renaming an emitted interface without updating its reserved-name
 /// constant (which would let a real collision slip through) breaks this test.
@@ -1147,9 +1161,8 @@ fn reserved_names_are_declared_in_combined_output() {
         client: true,
     };
     for reserved in oapi_codegen::emit::reserved_type_names(targets) {
-        let declaration = format!(" {}", reserved.name);
         assert!(
-            generated.contains(&declaration),
+            declares_type(&generated, reserved.name),
             "reserved name `{}` ({}) is not declared in the combined output",
             reserved.name,
             reserved.description,
