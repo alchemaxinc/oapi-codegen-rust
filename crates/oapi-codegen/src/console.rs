@@ -9,9 +9,11 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
+use anstream::eprint;
 use anstream::eprintln;
 use oapi_codegen::Error;
 use oapi_codegen::config::Generate;
+use oapi_codegen::deps::Dependency;
 use owo_colors::OwoColorize;
 
 /// Example `generate:` block shown when a config enables no artifacts. Each
@@ -103,6 +105,57 @@ pub fn report_empty_output(spec: &Path, stats: &SpecStats, generate: &Generate) 
 /// Report a successful write to `path`.
 pub fn report_wrote(path: &Path) {
     eprintln!("{} wrote {}", "✓".green().bold(), path.display());
+}
+
+/// After a successful write, list the external crates the generated code
+/// references so the consumer can add them to `Cargo.toml` — Cargo does not
+/// infer them from `use` paths the way `go mod tidy` does. Prints nothing when
+/// the output references no external crates (e.g. `server-urls` only).
+pub fn report_dependencies(deps: &[Dependency]) {
+    if deps.is_empty() {
+        return;
+    }
+    eprintln!(
+        "  {} add the crates the generated code references to Cargo.toml:",
+        "note:".cyan().bold()
+    );
+    for dep in deps {
+        eprintln!("      {}", dep.toml().dimmed());
+    }
+    eprintln!("      {}", "# or:".dimmed());
+    for dep in deps {
+        eprintln!("      {}", dep.cargo_add().dimmed());
+    }
+}
+
+/// Ask whether to run the `cargo add` commands now. Returns `false` on EOF or a
+/// non-affirmative answer. Only meaningful on an interactive terminal.
+pub fn prompt_install_dependencies() -> bool {
+    use std::io::Write;
+    eprint!("  {} run these `cargo add` commands now? [y/N] ", "?".cyan().bold());
+    let _ = std::io::stderr().flush();
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    let answer = answer.trim().to_ascii_lowercase();
+    return answer == "y" || answer == "yes";
+}
+
+/// Report that a dependency is being added via `cargo add`.
+pub fn report_installing(dep: &Dependency) {
+    eprintln!("  {} {}", "+".green().bold(), dep.cargo_add().dimmed());
+}
+
+/// Report that a `cargo add` invocation failed, without aborting — the output
+/// file is already written, so a failed convenience step is a warning, not a
+/// fatal error.
+pub fn report_install_failed(dep: &Dependency, detail: &str) {
+    eprintln!(
+        "  {} `{}` failed: {detail}",
+        "warning:".yellow().bold(),
+        dep.cargo_add()
+    );
 }
 
 /// Build the context-specific hints shown after an error message.

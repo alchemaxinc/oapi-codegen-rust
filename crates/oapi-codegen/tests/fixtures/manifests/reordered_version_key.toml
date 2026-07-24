@@ -1,0 +1,9 @@
+[package]
+name = "consumer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# The `conversion` feature contains the substring "version"; it must not be
+# mistaken for the `version` key, which appears after it here.
+axum = { features = ["conversion"], version = "0.8.9" }

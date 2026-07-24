@@ -44,10 +44,28 @@ Setting both `std-http-server` and `client` emits models, per-operation types,
 and both interfaces flat at the crate root, so the server and client share one
 file and the same response types.
 
-Generated code may reference `http::StatusCode` directly (for example, for
-`default` and range responses), so add [`http`](https://crates.io/crates/http)
-as a direct dependency of the generated crate. `axum` and `reqwest` re-export
-the type, but the `http::` path names the crate itself.
+## Dependencies
+
+Cargo does not infer crate dependencies from a generated file's `use` paths (the
+way Go's `go mod tidy` does), so after each run the CLI reports the crates — with
+versions and features — that the generated code references, as both a
+`Cargo.toml` snippet and `cargo add` commands. Pass `--install-deps` to run those
+`cargo add` commands automatically without prompting; otherwise, on an
+interactive terminal you are prompted first. `cargo add` targets the package
+whose `Cargo.toml` is nearest the output and merges with any existing
+declaration, so a crate you already depend on is updated in place rather than
+duplicated. The report lists every referenced crate rather than reading your
+manifest to prune ones you already have — interpreting a manifest (workspace
+inheritance, dev/target scopes, feature sufficiency) is Cargo's job.
+
+The recommended versions are taken from `oapi-codegen`'s own manifest, so they
+match the versions the generated code is built and tested against.
+
+The set is per generated file. For example, a models-only file typically needs
+only `serde`; an axum server also needs `axum`, `http`, and (with query or cookie
+parameters) `axum-extra`; a `reqwest` client needs `reqwest`, `percent-encoding`,
+and, for form responses, `serde_urlencoded`. `chrono`, `uuid`, and `serde_json`
+are added when the schemas use dates, UUIDs, or free-form values.
 
 ### `output-options`
 
