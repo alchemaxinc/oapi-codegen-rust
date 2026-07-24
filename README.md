@@ -53,6 +53,8 @@ decisions to support.
 | Version | Status    | Notes                                                                                          |
 | ------- | --------- | ---------------------------------------------------------------------------------------------- |
 | v3.0.0  | Supported | Supported in [`v1.0.0`](https://github.com/alchemaxinc/oapi-codegen-rust/releases/tag/v1.0.0). |
+| v3.1.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/58).                   |
+| v3.2.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/59).                   |
 
 This table and the tracking issues are maintained automatically by the
 [OpenAPI version check workflow](.github/workflows/check-openapi-versions.yml),
