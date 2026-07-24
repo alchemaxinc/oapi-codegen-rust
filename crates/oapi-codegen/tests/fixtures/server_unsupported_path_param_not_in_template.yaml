@@ -6,7 +6,7 @@ paths:
   /dashboard:
     get:
       operationId: getDashboard
-      summary: "A parameter declared in:path with no matching template placeholder."
+      summary: "A parameter declared in: path with no matching template placeholder."
       parameters:
         - name: tz
           in: path
