@@ -170,6 +170,15 @@ jobs:
         # both invocations target the same `target/` directory.
         run: cargo nextest run --workspace --all-targets --locked --no-fail-fast
 
+      # Debug and release builds can behave differently (debug_assert!-gated
+      # invariants only run in debug; the optimizer can also expose UB or
+      # overflow that debug builds mask). Runs against a separate `target/`
+      # profile dir, but the Swatinem/rust-cache above already keys and
+      # persists both, so it's cheap on repeat runs.
+      - name: Run release-mode tests
+        if: ${{ !startsWith(github.event.pull_request.title, 'chore:') && !startsWith(github.event.pull_request.title, 'chore(') && !startsWith(github.event.pull_request.title, 'docs:') && !startsWith(github.event.pull_request.title, 'docs(') }}
+        run: cargo nextest run --workspace --all-targets --locked --no-fail-fast --release
+
       # Regenerate the committed example + fixtures and fail on any diff, so a
       # change to the generator or a spec cannot land without its regenerated
       # output. Runs unconditionally (no chore: skip) since drift is cheap to
