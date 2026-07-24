@@ -8,10 +8,7 @@ edition = "2024"
 repository = "https://github.com/alchemaxinc/oapi-codegen-rust"
 license = "MIT"
 
-# Untrusted OpenAPI specs drive arithmetic (e.g. schema/$ref counting and
-# indexing during lowering). Keeping overflow checks on in release builds
-# turns silent wraparound into a clean panic instead of corrupt generated
-# code, at a small, acceptable perf cost for a CLI generator.
+# Deliberately enabled in release too, to catch overflow on untrusted spec input.
 [profile.release]
 overflow-checks = true
 

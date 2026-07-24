@@ -170,11 +170,6 @@ jobs:
         # both invocations target the same `target/` directory.
         run: cargo nextest run --workspace --all-targets --locked --no-fail-fast
 
-      # Debug and release builds can behave differently (debug_assert!-gated
-      # invariants only run in debug; the optimizer can also expose UB or
-      # overflow that debug builds mask). Runs against a separate `target/`
-      # profile dir, but the Swatinem/rust-cache above already keys and
-      # persists both, so it's cheap on repeat runs.
       - name: Run release-mode tests
         if: ${{ !startsWith(github.event.pull_request.title, 'chore:') && !startsWith(github.event.pull_request.title, 'chore(') && !startsWith(github.event.pull_request.title, 'docs:') && !startsWith(github.event.pull_request.title, 'docs(') }}
         run: cargo nextest run --workspace --all-targets --locked --no-fail-fast --release
@@ -202,18 +197,11 @@ jobs:
     steps:
       - *checkout-code
 
-      # cargo-deny shells out to `cargo metadata` to build the dependency
-      # graph, so it needs a toolchain even though the tool itself is a
-      # standalone binary.
+      # cargo-deny shells out to `cargo metadata`, so it needs a toolchain
+      # even though the tool itself is a standalone binary.
       - name: Setup Rust toolchain
         uses: ./.github/actions/setup-rust
 
-      # cargo-deny ships prebuilt static binaries per release, same pattern as
-      # the mold/cargo-nextest installs above: download once, cache by
-      # version, so we don't depend on a third-party Action for a security
-      # gate. Checks advisories (RUSTSEC vulnerabilities + unmaintained
-      # crates), license compatibility, banned/duplicate deps, and dependency
-      # sources — see deny.toml for the actual policy.
       - name: Cache cargo-deny
         id: cache-cargo-deny
         uses: actions/cache@v6

@@ -3,16 +3,7 @@ name: Scheduled Dependency Audit
 on:
   workflow_dispatch:
   schedule:
-    # Daily — new RUSTSEC advisories can be published against dependencies
-    # already merged into main, with no code change to trigger the PR-gated
-    # cargo-deny job in ci.yml. This catches those.
     - cron: "0 6 * * *"
-
-# Runs `cargo deny check advisories` against main. On failure, files a
-# tracking issue via alchemaxinc/composite-toolbox's find-or-create-issue
-# action (same idempotent search-or-create pattern as
-# check-openapi-versions.yml), so repeated daily failures for the same
-# advisory reuse one open issue instead of spamming a new one per run.
 
 env:
   CARGO_DENY_VERSION: "0.20.2"
