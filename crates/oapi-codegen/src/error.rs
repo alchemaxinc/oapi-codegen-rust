@@ -104,6 +104,20 @@ pub enum Error {
         name: String,
     },
 
+    /// A `{placeholder}` in the operation's path template has no matching
+    /// parameter declared `in: path`. The generator cannot know the parameter's
+    /// type, so rather than silently assume `String` it requires the parameter
+    /// to be declared (matching the OpenAPI requirement that every path template
+    /// variable have a corresponding path parameter).
+    UndeclaredPathParameter {
+        /// HTTP method of the offending operation.
+        method: String,
+        /// Templated request path of the offending operation.
+        path: String,
+        /// The template placeholder name with no declared parameter.
+        name: String,
+    },
+
     /// A generated per-operation type name collided with a component-model name
     /// emitted in the same file.
     TypeNameCollision {
@@ -167,6 +181,12 @@ impl std::fmt::Display for Error {
                     "path parameter `{name}` on `{method} {path}` is declared `in: path` but the path template has no `{{{name}}}` placeholder"
                 );
             }
+            Error::UndeclaredPathParameter { method, path, name } => {
+                return write!(
+                    f,
+                    "operation `{method} {path}` has a `{{{name}}}` placeholder in its path but no parameter named `{name}` is declared `in: path`"
+                );
+            }
             Error::TypeNameCollision { name, artifact, hint } => {
                 return write!(
                     f,
@@ -197,6 +217,7 @@ impl std::error::Error for Error {
             | Error::UnsupportedSchema { .. }
             | Error::TypeNameCollision { .. }
             | Error::InvalidPathParameter { .. }
+            | Error::UndeclaredPathParameter { .. }
             | Error::UnsupportedOperation { .. } => return None,
         }
     }

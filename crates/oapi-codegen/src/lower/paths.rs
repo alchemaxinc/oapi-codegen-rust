@@ -285,7 +285,13 @@ impl Lowerer<'_> {
             let declared = path_param_schema(name, params);
             let ty = match declared {
                 Some((format, origin)) => self.param_type(path, method, name, origin, format)?,
-                None => RustType::String,
+                None => {
+                    return Err(Error::UndeclaredPathParameter {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        name: name.clone(),
+                    });
+                }
             };
             path_params.push(Param {
                 name: to_ident(name, Case::Snake),

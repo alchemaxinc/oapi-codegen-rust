@@ -397,6 +397,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_xfile_response_ref",
     "server_unsupported_object_path_param",
     "server_unsupported_path_param_not_in_template",
+    "server_unsupported_undeclared_path_param",
     "server_unsupported_object_query_param",
     "server_unsupported_explode_false_query_param",
     "server_unsupported_array_header_param",
@@ -1095,6 +1096,28 @@ fn path_param_not_in_template_is_rejected() {
     assert!(
         message.contains("`tz`") && message.contains("{tz}"),
         "error should name the parameter and the missing placeholder, got: {message}",
+    );
+}
+
+/// A `{placeholder}` in the path template with no declared `in: path` parameter
+/// must fail generation with a guided error rather than silently assume the
+/// parameter is a `String`, matching Go `oapi-codegen`'s bidirectional strictness.
+#[test]
+fn undeclared_path_placeholder_is_rejected() {
+    let dir = tests_dir();
+    let fixture = dir
+        .join("fixtures")
+        .join("server_unsupported_undeclared_path_param.yaml");
+    let err = oapi_codegen::generate(&fixture, &server_config())
+        .expect_err("a path placeholder with no declared parameter must be rejected");
+    assert!(
+        matches!(&err, oapi_codegen::Error::UndeclaredPathParameter { name, .. } if name == "id"),
+        "expected UndeclaredPathParameter for `id`, got: {err:?}",
+    );
+    let message = err.to_string();
+    assert!(
+        message.contains("{id}") && message.contains("in: path"),
+        "error should name the placeholder and the missing declaration, got: {message}",
     );
 }
 

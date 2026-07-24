@@ -1,0 +1,12 @@
+openapi: 3.0.3
+info:
+  title: Undeclared path placeholder server
+  version: 1.0.0
+paths:
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      summary: "A path template placeholder with no declared path parameter."
+      responses:
+        "200":
+          description: The widget.
