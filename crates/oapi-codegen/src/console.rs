@@ -144,6 +144,16 @@ fn hints_for(err: &Error) -> Vec<String> {
                     .to_owned(),
             ];
         }
+        Error::InvalidPathParameter { name, .. } => {
+            return vec![format!(
+                "Add `{{{name}}}` to the path template, or change the parameter's `in:` to `query`, `header`, or `cookie`."
+            )];
+        }
+        Error::UndeclaredPathParameter { name, .. } => {
+            return vec![format!(
+                "Declare a parameter with `name: {name}`, `in: path`, `required: true`, or remove `{{{name}}}` from the path."
+            )];
+        }
         Error::TypeNameCollision { hint, .. } => {
             return vec![hint.clone()];
         }
@@ -320,6 +330,36 @@ mod tests {
             hints
                 .iter()
                 .any(|h| return h.contains("does not look like an OpenAPI 3 document"))
+        );
+    }
+
+    #[test]
+    fn invalid_path_parameter_hint_guides_the_fix() {
+        let err = Error::InvalidPathParameter {
+            method: "get".to_owned(),
+            path: "/dashboard".to_owned(),
+            name: "tz".to_owned(),
+        };
+        let hints = hints_for(&err);
+        assert!(
+            hints.iter().any(|h| return h.contains("{tz}") && h.contains("query")),
+            "hint should suggest adding the placeholder or changing `in:`, got: {hints:?}",
+        );
+    }
+
+    #[test]
+    fn undeclared_path_parameter_hint_guides_the_fix() {
+        let err = Error::UndeclaredPathParameter {
+            method: "get".to_owned(),
+            path: "/widgets/{id}".to_owned(),
+            name: "id".to_owned(),
+        };
+        let hints = hints_for(&err);
+        assert!(
+            hints
+                .iter()
+                .any(|h| return h.contains("in: path") && h.contains("{id}")),
+            "hint should suggest declaring the parameter or removing the placeholder, got: {hints:?}",
         );
     }
 }

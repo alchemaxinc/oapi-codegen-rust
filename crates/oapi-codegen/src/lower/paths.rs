@@ -279,17 +279,43 @@ impl Lowerer<'_> {
     /// Resolve the typed path parameters in their path-template order, which is
     /// the order axum extracts a `Path<(..)>` tuple in.
     fn lower_path_params(&self, path: &str, method: &str, params: &[Resolved<Parameter>]) -> Result<Vec<Param>> {
+        let placeholders = path_param_names(path);
         let mut path_params = Vec::new();
-        for name in path_param_names(path) {
-            let declared = path_param_schema(&name, params);
+        for name in &placeholders {
+            let declared = path_param_schema(name, params);
             let ty = match declared {
-                Some((format, origin)) => self.param_type(path, method, &name, origin, format)?,
-                None => RustType::String,
+                Some((format, origin)) => self.param_type(path, method, name, origin, format)?,
+                None => {
+                    return Err(Error::UndeclaredPathParameter {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        name: name.clone(),
+                    });
+                }
             };
             path_params.push(Param {
-                name: to_ident(&name, Case::Snake),
+                name: to_ident(name, Case::Snake),
                 ty,
             });
+        }
+        // A parameter declared `in: path` must have a matching `{placeholder}` in
+        // the template. Driving the loop above from the template alone would
+        // otherwise silently drop such a parameter from the generated signature,
+        // producing a handler that omits a required input.
+        for parameter in params {
+            let Parameter::Path { parameter_data, .. } = &parameter.value else {
+                continue;
+            };
+            if !placeholders
+                .iter()
+                .any(|placeholder| return placeholder == &parameter_data.name)
+            {
+                return Err(Error::InvalidPathParameter {
+                    method: method.to_owned(),
+                    path: path.to_owned(),
+                    name: parameter_data.name.clone(),
+                });
+            }
         }
         return Ok(path_params);
     }

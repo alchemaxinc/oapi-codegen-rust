@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: Path param missing from template server
+  version: 1.0.0
+paths:
+  /dashboard:
+    get:
+      operationId: getDashboard
+      summary: "A parameter declared in: path with no matching template placeholder."
+      parameters:
+        - name: tz
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dashboard data.
