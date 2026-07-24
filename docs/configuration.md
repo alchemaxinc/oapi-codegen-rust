@@ -50,8 +50,8 @@ Cargo does not infer crate dependencies from a generated file's `use` paths (the
 way Go's `go mod tidy` does), so after each run the CLI prints the exact crates —
 with versions and features — that the generated code references, as both a
 `Cargo.toml` snippet and `cargo add` commands. Pass `--install-deps` to run those
-`cargo add` commands automatically (on an interactive terminal you are prompted
-first); they target the current directory's package.
+`cargo add` commands automatically without prompting; otherwise, on an interactive
+terminal you are prompted first. They target the current directory's package.
 
 The set is per generated file. For example, a models-only file typically needs
 only `serde`; an axum server also needs `axum`, `http`, and (with query or cookie

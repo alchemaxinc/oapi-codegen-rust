@@ -15,17 +15,17 @@ From this repository's root (e.g., after cloning), try the included bookstore ex
 $ oapi-codegen --config-file examples/bookstore/oapi-codegen-server.yaml examples/bookstore/openapi.yaml
 ✓ wrote generated/restapi.rs
   note: add the crates the generated code references to Cargo.toml:
-      serde = { version = "1", features = ["derive"] }
-      serde_json = "1"
-      http = "1"
-      axum = { version = "0.8", features = ["multipart"] }
-      axum-extra = { version = "0.12", features = ["query"] }
+      serde = { version = "1.0.229", features = ["derive"] }
+      serde_json = "1.0.151"
+      http = "1.4.2"
+      axum = { version = "0.8.9", features = ["multipart"] }
+      axum-extra = { version = "0.12.6", features = ["query"] }
       # or:
-      cargo add serde@1 --features derive
-      cargo add serde_json@1
-      cargo add http@1
-      cargo add axum@0.8 --features multipart
-      cargo add axum-extra@0.12 --features query
+      cargo add serde@1.0.229 --features derive
+      cargo add serde_json@1.0.151
+      cargo add http@1.4.2
+      cargo add axum@0.8.9 --features multipart
+      cargo add axum-extra@0.12.6 --features query
 
 ```
 

@@ -9,6 +9,7 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
+use anstream::eprint;
 use anstream::eprintln;
 use oapi_codegen::Error;
 use oapi_codegen::config::Generate;

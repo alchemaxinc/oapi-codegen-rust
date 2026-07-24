@@ -13,18 +13,54 @@
 //! with the emitters: if they stop or start referencing a crate, the report
 //! follows without a parallel rule set to maintain.
 
-/// Recommended version requirements, pinned to the major series the generated
-/// code is written against (and compiled against in this crate's tests).
-const V_SERDE: &str = "1";
-const V_SERDE_JSON: &str = "1";
-const V_CHRONO: &str = "0.4";
-const V_UUID: &str = "1";
-const V_HTTP: &str = "1";
-const V_AXUM: &str = "0.8";
-const V_AXUM_EXTRA: &str = "0.12";
-const V_REQWEST: &str = "0.13";
-const V_PERCENT_ENCODING: &str = "2";
-const V_SERDE_URLENCODED: &str = "0.7";
+/// This crate's own manifest, embedded at compile time so the versions the
+/// report recommends always match the versions the generated code is compiled
+/// and tested against here (see [`manifest_version`]).
+const MANIFEST: &str = include_str!("../Cargo.toml");
+
+/// The version requirement declared for `crate_name` in this crate's own
+/// `[dependencies]` or `[dev-dependencies]`.
+///
+/// Deriving the recommended version from our manifest (rather than a hardcoded
+/// constant) keeps the report in lockstep with the versions the generated
+/// goldens actually compile against, so a dependency bump here updates the
+/// report automatically. Every crate the report can name is a (dev-)dependency
+/// of this crate — enforced by `reported_crates_have_manifest_versions` — so an
+/// absent entry is a programming error, not runtime input.
+fn manifest_version(crate_name: &str) -> &'static str {
+    for line in MANIFEST.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix(crate_name) else {
+            continue;
+        };
+        // Require a token boundary so `serde` does not match `serde_json`.
+        if !rest.starts_with([' ', '\t', '=']) {
+            continue;
+        }
+        let Some(value) = rest.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        let value = value.trim_start();
+        // `name = "x"` gives the version directly; `name = { version = "x", .. }`
+        // needs the `version` key located first.
+        let scan = match value.strip_prefix('{') {
+            Some(table) => match table.find("version") {
+                Some(index) => &table[index..],
+                None => continue,
+            },
+            None => value,
+        };
+        if let Some(open) = scan.find('"') {
+            let after = &scan[open + 1..];
+            if let Some(close) = after.find('"') {
+                return &after[..close];
+            }
+        }
+    }
+    panic!(
+        "crate `{crate_name}` is not a declared dependency of oapi-codegen; cannot determine its version for the dependency report"
+    );
+}
 
 /// A crate the generated code references, with the version requirement and Cargo
 /// features a consumer should declare in `Cargo.toml`.
@@ -98,46 +134,26 @@ pub fn required_dependencies(code: &str) -> Vec<Dependency> {
     let mut deps = Vec::new();
 
     if has("serde::Serialize") || has("serde::Deserialize") {
-        deps.push(Dependency {
-            name: "serde",
-            version: V_SERDE,
-            default_features: true,
-            features: vec!["derive"],
-        });
+        deps.push(with_features("serde", true, vec!["derive"]));
     }
     if has("serde_json::") {
-        deps.push(plain("serde_json", V_SERDE_JSON));
+        deps.push(plain("serde_json"));
     }
     if has("chrono::") {
-        deps.push(Dependency {
-            name: "chrono",
-            version: V_CHRONO,
-            default_features: true,
-            features: vec!["serde"],
-        });
+        deps.push(with_features("chrono", true, vec!["serde"]));
     }
     if has("uuid::") {
-        deps.push(Dependency {
-            name: "uuid",
-            version: V_UUID,
-            default_features: true,
-            features: vec!["serde"],
-        });
+        deps.push(with_features("uuid", true, vec!["serde"]));
     }
     if has("http::") {
-        deps.push(plain("http", V_HTTP));
+        deps.push(plain("http"));
     }
     if has("axum::") {
         let mut features = Vec::new();
         if has("axum::extract::Multipart") {
             features.push("multipart");
         }
-        deps.push(Dependency {
-            name: "axum",
-            version: V_AXUM,
-            default_features: true,
-            features,
-        });
+        deps.push(with_features("axum", true, features));
     }
     if has("axum_extra::") {
         let mut features = Vec::new();
@@ -147,12 +163,7 @@ pub fn required_dependencies(code: &str) -> Vec<Dependency> {
         if has("axum_extra::extract::CookieJar") {
             features.push("cookie");
         }
-        deps.push(Dependency {
-            name: "axum-extra",
-            version: V_AXUM_EXTRA,
-            default_features: true,
-            features,
-        });
+        deps.push(with_features("axum-extra", true, features));
     }
     if has("reqwest::") {
         let mut features = Vec::new();
@@ -171,30 +182,32 @@ pub fn required_dependencies(code: &str) -> Vec<Dependency> {
         if has(".multipart(") || has("reqwest::blocking::multipart") {
             features.push("multipart");
         }
-        deps.push(Dependency {
-            name: "reqwest",
-            version: V_REQWEST,
-            default_features: false,
-            features,
-        });
+        deps.push(with_features("reqwest", false, features));
     }
     if has("percent_encoding::") {
-        deps.push(plain("percent-encoding", V_PERCENT_ENCODING));
+        deps.push(plain("percent-encoding"));
     }
     if has("serde_urlencoded::") {
-        deps.push(plain("serde_urlencoded", V_SERDE_URLENCODED));
+        deps.push(plain("serde_urlencoded"));
     }
 
     return deps;
 }
 
-/// A dependency needing default features and no extra features.
-fn plain(name: &'static str, version: &'static str) -> Dependency {
+/// A dependency whose version is taken from this crate's manifest, needing
+/// default features and no extra features.
+fn plain(name: &'static str) -> Dependency {
+    return with_features(name, true, Vec::new());
+}
+
+/// A dependency whose version is taken from this crate's manifest, with the
+/// given default-features flag and feature list.
+fn with_features(name: &'static str, default_features: bool, features: Vec<&'static str>) -> Dependency {
     return Dependency {
         name,
-        version,
-        default_features: true,
-        features: Vec::new(),
+        version: manifest_version(name),
+        default_features,
+        features,
     };
 }
 
@@ -204,7 +217,16 @@ mod tests {
 
     #[test]
     fn toml_renders_short_and_table_forms() {
-        assert_eq!(plain("http", "1").toml(), "http = \"1\"");
+        assert_eq!(
+            Dependency {
+                name: "http",
+                version: "1",
+                default_features: true,
+                features: vec![],
+            }
+            .toml(),
+            "http = \"1\""
+        );
         assert_eq!(
             Dependency {
                 name: "serde",
@@ -229,7 +251,16 @@ mod tests {
 
     #[test]
     fn cargo_add_renders_flags() {
-        assert_eq!(plain("http", "1").cargo_add(), "cargo add http@1");
+        assert_eq!(
+            Dependency {
+                name: "http",
+                version: "1",
+                default_features: true,
+                features: vec![],
+            }
+            .cargo_add(),
+            "cargo add http@1"
+        );
         assert_eq!(
             Dependency {
                 name: "reqwest",
@@ -244,7 +275,16 @@ mod tests {
 
     #[test]
     fn cargo_add_args_split_for_process_execution() {
-        assert_eq!(plain("http", "1").cargo_add_args(), vec!["add", "http@1"]);
+        assert_eq!(
+            Dependency {
+                name: "http",
+                version: "1",
+                default_features: true,
+                features: vec![],
+            }
+            .cargo_add_args(),
+            vec!["add", "http@1"]
+        );
         assert_eq!(
             Dependency {
                 name: "reqwest",
@@ -261,6 +301,55 @@ mod tests {
                 "blocking,json"
             ]
         );
+    }
+
+    #[test]
+    fn versions_come_from_the_manifest_not_hardcoded() {
+        // The bare `name = "x"` form and the `{ version = "x", .. }` table form
+        // are both read from this crate's own Cargo.toml.
+        assert_eq!(manifest_version("http"), extract_manifest_version("http"));
+        assert_eq!(manifest_version("axum"), extract_manifest_version("axum"));
+        assert!(!manifest_version("serde_urlencoded").is_empty());
+    }
+
+    #[test]
+    fn serde_prefix_does_not_match_serde_json_or_urlencoded() {
+        // `serde` must resolve to the `serde` line, not `serde_json`/`serde_urlencoded`.
+        assert_eq!(manifest_version("serde"), extract_manifest_version("serde"));
+        assert_ne!(manifest_version("serde"), manifest_version("serde_json"));
+    }
+
+    #[test]
+    fn every_reportable_crate_has_a_manifest_version() {
+        // A code blob that trips every detection branch; if any reported crate
+        // lacked a manifest entry, `manifest_version` would panic here.
+        let code = "\
+            serde::Serialize serde_json::Value chrono::DateTime uuid::Uuid http::StatusCode \
+            axum::extract::Multipart axum_extra::extract::Query axum_extra::extract::CookieJar \
+            reqwest::blocking::multipart .json( .form( .query( percent_encoding::utf8 serde_urlencoded::from_str";
+        for dep in required_dependencies(code) {
+            assert!(!dep.version.is_empty(), "{} has an empty version", dep.name);
+        }
+    }
+
+    /// Independent re-implementation used only to cross-check [`manifest_version`]:
+    /// find `name` in the embedded manifest and return the first quoted string
+    /// after the `version` key (or the bare value).
+    fn extract_manifest_version(name: &str) -> String {
+        for line in MANIFEST.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix(name)
+                && rest.starts_with([' ', '\t', '='])
+            {
+                let quoted: Vec<&str> = line.split('"').collect();
+                // `name = "x"` -> [.., "x", ..]; `{ version = "x", features = [..] }`
+                // -> the version is the first quoted token.
+                if quoted.len() >= 2 {
+                    return quoted[1].to_owned();
+                }
+            }
+        }
+        panic!("`{name}` not found in manifest");
     }
 
     #[test]
