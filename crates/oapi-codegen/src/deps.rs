@@ -30,7 +30,18 @@ const MANIFEST: &str = include_str!("../Cargo.toml");
 /// of this crate — enforced by `reported_crates_have_manifest_versions` — so an
 /// absent entry is a programming error, not runtime input.
 fn manifest_version(crate_name: &str) -> &'static str {
-    for line in MANIFEST.lines() {
+    match parse_manifest_version(MANIFEST, crate_name) {
+        Some(version) => return version,
+        None => panic!(
+            "crate `{crate_name}` is not a declared dependency of oapi-codegen; cannot determine its version for the dependency report"
+        ),
+    }
+}
+
+/// Find the version requirement declared for `crate_name` in `manifest`, or
+/// `None` when it is not declared.
+fn parse_manifest_version<'a>(manifest: &'a str, crate_name: &str) -> Option<&'a str> {
+    for line in manifest.lines() {
         let line = line.trim();
         let Some(rest) = line.strip_prefix(crate_name) else {
             continue;
@@ -44,9 +55,11 @@ fn manifest_version(crate_name: &str) -> &'static str {
         };
         let value = value.trim_start();
         // `name = "x"` gives the version directly; `name = { version = "x", .. }`
-        // needs the `version` key located first.
+        // needs the `version` *key* located — matched as a `version =` token so a
+        // feature like `conversion` (which contains "version") is not mistaken
+        // for it.
         let scan = match value.strip_prefix('{') {
-            Some(table) => match table.find("version") {
+            Some(table) => match table.find("version =").or_else(|| return table.find("version=")) {
                 Some(index) => &table[index..],
                 None => continue,
             },
@@ -55,13 +68,11 @@ fn manifest_version(crate_name: &str) -> &'static str {
         if let Some(open) = scan.find('"') {
             let after = &scan[open + 1..];
             if let Some(close) = after.find('"') {
-                return &after[..close];
+                return Some(&after[..close]);
             }
         }
     }
-    panic!(
-        "crate `{crate_name}` is not a declared dependency of oapi-codegen; cannot determine its version for the dependency report"
-    );
+    return None;
 }
 
 /// A crate the generated code references, with the version requirement and Cargo
@@ -70,7 +81,8 @@ fn manifest_version(crate_name: &str) -> &'static str {
 pub struct Dependency {
     /// The crates.io crate name (e.g. `axum-extra`).
     pub name: &'static str,
-    /// Recommended version requirement (major series).
+    /// Recommended version requirement (taken from this crate's manifest, so it
+    /// matches the version the generated code is built and tested against).
     pub version: &'static str,
     /// Whether the crate's default features are needed.
     pub default_features: bool,
@@ -229,7 +241,11 @@ pub fn manifest_dependency_names(manifest: &str) -> BTreeSet<String> {
         let at_top_level = depth == 0_i32;
         let is_header = at_top_level && trimmed.starts_with('[') && trimmed.ends_with(']') && !trimmed.contains('=');
         if is_header {
-            in_dependencies = trimmed.trim_matches(['[', ']']).ends_with("dependencies");
+            let header = trimmed.trim_matches(['[', ']']);
+            // `[workspace.dependencies]` only *defines* versions; they are not in
+            // scope for a package unless it opts in with `dep.workspace = true`
+            // (captured from its own `[dependencies]`), so exclude them here.
+            in_dependencies = header.ends_with("dependencies") && !header.starts_with("workspace.");
         } else if at_top_level
             && in_dependencies
             && !trimmed.is_empty()
@@ -247,11 +263,24 @@ pub fn manifest_dependency_names(manifest: &str) -> BTreeSet<String> {
 
 /// Drop the dependencies whose crate is already declared in `present`, leaving
 /// only the ones a consumer still needs to add.
+///
+/// Cargo treats `-` and `_` as equivalent in dependency keys (e.g. `axum-extra`
+/// may be declared as `axum_extra`), so both sides are normalized to underscores
+/// before comparing, to avoid re-reporting a crate the manifest already has.
 pub fn retain_missing(deps: Vec<Dependency>, present: &BTreeSet<String>) -> Vec<Dependency> {
+    let present: BTreeSet<String> = present.iter().map(|name| return name.replace('-', "_")).collect();
     return deps
         .into_iter()
-        .filter(|dep| return !present.contains(dep.name))
+        .filter(|dep| return !present.contains(&dep.name.replace('-', "_")))
         .collect();
+}
+
+/// Whether `manifest` declares a `[package]` — i.e. it is a package manifest a
+/// `cargo add --manifest-path` can target, not a virtual workspace manifest
+/// (which has only `[workspace]`). A manifest that is both a workspace root and
+/// a package still declares `[package]`, so it qualifies.
+pub fn manifest_declares_package(manifest: &str) -> bool {
+    return manifest.lines().any(|line| return line.trim() == "[package]");
 }
 
 /// Extract the crate name from a `[dependencies]` entry line, handling the
@@ -286,6 +315,14 @@ fn brace_delta(line: &str) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_key_matched_as_token_not_substring() {
+        // The fixture declares `axum = { features = ["conversion"], version = "0.8.9" }`;
+        // the `conversion` feature contains "version" but must not be matched.
+        let manifest = include_str!("../tests/fixtures/manifests/reordered_version_key.toml");
+        assert_eq!(parse_manifest_version(manifest, "axum"), Some("0.8.9"));
+    }
 
     #[test]
     fn toml_renders_short_and_table_forms() {
@@ -484,5 +521,24 @@ mod tests {
             .map(|dep| return dep.name)
             .collect();
         assert_eq!(missing, vec!["http"], "only the crate absent from the manifest remains");
+    }
+
+    #[test]
+    fn retain_missing_treats_hyphen_and_underscore_as_equivalent() {
+        // A manifest may declare `axum-extra` under the underscore key
+        // `axum_extra`; Cargo treats them as the same crate, so it must count as
+        // present and not be re-reported.
+        let deps = required_dependencies("axum_extra::extract::Query http::StatusCode");
+        let mut present = BTreeSet::new();
+        present.insert("axum_extra".to_owned());
+        let missing: Vec<&str> = retain_missing(deps, &present)
+            .iter()
+            .map(|dep| return dep.name)
+            .collect();
+        assert_eq!(
+            missing,
+            vec!["http"],
+            "`axum_extra` in the manifest satisfies the `axum-extra` crate"
+        );
     }
 }

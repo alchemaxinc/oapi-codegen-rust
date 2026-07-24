@@ -116,37 +116,49 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
     console::report_wrote(&output);
 
     let manifest = nearest_manifest(&output);
-    let deps = installable_dependencies(&code, manifest.as_deref());
+    let deps = installable_dependencies(&code, manifest.as_ref());
     console::report_dependencies(&deps);
     if !deps.is_empty() && should_install_deps(cli.install_deps) {
-        install_dependencies(&deps, manifest.as_deref());
+        install_dependencies(&deps, manifest.as_ref());
     }
     return Ok(());
 }
 
 /// The crates the generated code needs that are not already declared in the
-/// consumer's manifest. When no manifest is found, every referenced crate is
-/// reported.
-fn installable_dependencies(code: &str, manifest: Option<&Path>) -> Vec<oapi_codegen::deps::Dependency> {
+/// consumer's manifest. When no readable package manifest is found, every
+/// referenced crate is reported.
+fn installable_dependencies(code: &str, manifest: Option<&PackageManifest>) -> Vec<oapi_codegen::deps::Dependency> {
     let deps = oapi_codegen::deps::required_dependencies(code);
     let Some(manifest) = manifest else {
         return deps;
     };
-    let Ok(text) = std::fs::read_to_string(manifest) else {
-        return deps;
-    };
-    return oapi_codegen::deps::retain_missing(deps, &oapi_codegen::deps::manifest_dependency_names(&text));
+    return oapi_codegen::deps::retain_missing(deps, &oapi_codegen::deps::manifest_dependency_names(&manifest.text));
 }
 
-/// The nearest `Cargo.toml` at or above the output file's directory — the
-/// package the generated code belongs to.
-fn nearest_manifest(output: &Path) -> Option<PathBuf> {
+/// A `Cargo.toml` that declares a `[package]`, so it can back both dependency
+/// filtering and a `cargo add --manifest-path` target.
+struct PackageManifest {
+    /// Path to the `Cargo.toml`.
+    path: PathBuf,
+    /// Its contents, read once for both filtering and the `[package]` check.
+    text: String,
+}
+
+/// The nearest `Cargo.toml` at or above the output file's directory that
+/// declares a `[package]` — the package the generated code belongs to.
+///
+/// A virtual workspace manifest (only `[workspace]`, no `[package]`) is skipped:
+/// `cargo add --manifest-path` cannot target it, and it has no package
+/// dependencies to filter against.
+fn nearest_manifest(output: &Path) -> Option<PackageManifest> {
     let canonical = std::fs::canonicalize(output).unwrap_or_else(|_| return output.to_path_buf());
     let mut directory = canonical.parent();
     while let Some(current) = directory {
         let candidate = current.join("Cargo.toml");
-        if candidate.is_file() {
-            return Some(candidate);
+        if let Ok(text) = std::fs::read_to_string(&candidate)
+            && oapi_codegen::deps::manifest_declares_package(&text)
+        {
+            return Some(PackageManifest { path: candidate, text });
         }
         directory = current.parent();
     }
@@ -167,16 +179,16 @@ fn should_install_deps(flag: bool) -> bool {
 }
 
 /// Run `cargo add` for each dependency, targeting `manifest`'s package (or the
-/// current directory's when none was found). A failure is reported as a warning
-/// rather than aborting: the output file is already written, so dependency
-/// installation is a best-effort convenience.
-fn install_dependencies(deps: &[oapi_codegen::deps::Dependency], manifest: Option<&Path>) {
+/// current directory's when no package manifest was found). A failure is
+/// reported as a warning rather than aborting: the output file is already
+/// written, so dependency installation is a best-effort convenience.
+fn install_dependencies(deps: &[oapi_codegen::deps::Dependency], manifest: Option<&PackageManifest>) {
     for dep in deps {
         console::report_installing(dep);
         let mut command = Command::new("cargo");
         command.args(dep.cargo_add_args());
-        if let Some(path) = manifest {
-            command.arg("--manifest-path").arg(path);
+        if let Some(manifest) = manifest {
+            command.arg("--manifest-path").arg(&manifest.path);
         }
         match command.status() {
             Ok(status) if status.success() => {}

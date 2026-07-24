@@ -1,0 +1,8 @@
+# A virtual workspace manifest: only `[workspace]`, no `[package]`. `cargo add
+# --manifest-path` cannot target this, so the dependency report must skip it.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.dependencies]
+axum = "0.8"

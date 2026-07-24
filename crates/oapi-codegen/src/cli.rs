@@ -42,11 +42,12 @@ pub struct Cli {
     #[arg(short = 'o', long)]
     pub output_file: Option<PathBuf>,
 
-    /// After writing, run `cargo add` for each crate the generated code needs,
-    /// without prompting. On an interactive terminal without this flag you are
-    /// asked first; a non-interactive run only prints the dependency list. Only
-    /// crates missing from the target package's manifest are reported, and
-    /// `cargo add` targets the package whose `Cargo.toml` is nearest the output.
+    /// After writing, run `cargo add` for each crate the generated code needs.
+    ///
+    /// If set, this runs without prompting. If not set, and stdin is an
+    /// interactive terminal, you are asked first; otherwise the run only prints
+    /// the dependency list. When the nearest `Cargo.toml` can be read, only
+    /// crates missing from it are reported and `cargo add` targets that manifest.
     #[arg(long)]
     pub install_deps: bool,
 }
