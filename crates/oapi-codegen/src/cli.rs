@@ -46,8 +46,9 @@ pub struct Cli {
     ///
     /// If set, this runs without prompting. If not set, and stdin is an
     /// interactive terminal, you are asked first; otherwise the run only prints
-    /// the dependency list. When the nearest `Cargo.toml` can be read, only
-    /// crates missing from it are reported and `cargo add` targets that manifest.
+    /// the dependency list. `cargo add` targets the package whose `Cargo.toml`
+    /// is nearest the output and merges with any existing declaration, so a
+    /// crate already present is updated in place rather than duplicated.
     #[arg(long)]
     pub install_deps: bool,
 }

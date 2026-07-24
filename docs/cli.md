@@ -36,7 +36,7 @@ path must be given via --output-file or the config's `output:` key:
 * `-o`, `--output-file <OUTPUT_FILE>` — Output file path (overrides the config `output:`). Required unless the config sets `output:`
 * `--install-deps` — After writing, run `cargo add` for each crate the generated code needs.
 
-   If set, this runs without prompting. If not set, and stdin is an interactive terminal, you are asked first; otherwise the run only prints the dependency list. When the nearest `Cargo.toml` can be read, only crates missing from it are reported and `cargo add` targets that manifest.
+   If set, this runs without prompting. If not set, and stdin is an interactive terminal, you are asked first; otherwise the run only prints the dependency list. `cargo add` targets the package whose `Cargo.toml` is nearest the output and merges with any existing declaration, so a crate already present is updated in place rather than duplicated.
 
 
 

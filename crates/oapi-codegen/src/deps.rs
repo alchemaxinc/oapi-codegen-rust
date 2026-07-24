@@ -12,8 +12,12 @@
 //! (rather than re-deriving from the IR) keeps this report automatically in step
 //! with the emitters: if they stop or start referencing a crate, the report
 //! follows without a parallel rule set to maintain.
-
-use std::collections::BTreeSet;
+//!
+//! The report lists every crate the generated file references; it deliberately
+//! does not read the consumer's `Cargo.toml` to prune crates already present.
+//! Interpreting a consumer manifest (workspace inheritance, dev/target scopes,
+//! feature sufficiency) is Cargo's job — so on `--install-deps` the CLI simply
+//! runs `cargo add`, which merges with any existing declaration.
 
 /// This crate's own manifest, embedded at compile time so the versions the
 /// report recommends always match the versions the generated code is compiled
@@ -225,93 +229,6 @@ fn with_features(name: &'static str, default_features: bool, features: Vec<&'sta
     };
 }
 
-/// The dependency names already declared in a consumer's `Cargo.toml`, across
-/// every `*dependencies` table (`[dependencies]`, `[dev-dependencies]`,
-/// `[build-dependencies]`, and target-specific variants).
-///
-/// Used to drop crates the consumer already has from the report, so it lists
-/// only what is missing. Parsing is line-based but brace-aware, so multi-line
-/// dependency entries do not have their inner lines mistaken for new keys.
-pub fn manifest_dependency_names(manifest: &str) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    let mut in_dependencies = false;
-    let mut depth: i32 = 0;
-    for line in manifest.lines() {
-        let trimmed = line.trim();
-        let at_top_level = depth == 0_i32;
-        let is_header = at_top_level && trimmed.starts_with('[') && trimmed.ends_with(']') && !trimmed.contains('=');
-        if is_header {
-            let header = trimmed.trim_matches(['[', ']']);
-            // `[workspace.dependencies]` only *defines* versions; they are not in
-            // scope for a package unless it opts in with `dep.workspace = true`
-            // (captured from its own `[dependencies]`), so exclude them here.
-            in_dependencies = header.ends_with("dependencies") && !header.starts_with("workspace.");
-        } else if at_top_level
-            && in_dependencies
-            && !trimmed.is_empty()
-            && !trimmed.starts_with('#')
-            && let Some(key) = dependency_key(trimmed)
-        {
-            names.insert(key);
-        } else {
-            // A blank/comment line, or a line inside a multi-line dependency value.
-        }
-        depth = (depth + brace_delta(line)).max(0_i32);
-    }
-    return names;
-}
-
-/// Drop the dependencies whose crate is already declared in `present`, leaving
-/// only the ones a consumer still needs to add.
-///
-/// Cargo treats `-` and `_` as equivalent in dependency keys (e.g. `axum-extra`
-/// may be declared as `axum_extra`), so both sides are normalized to underscores
-/// before comparing, to avoid re-reporting a crate the manifest already has.
-pub fn retain_missing(deps: Vec<Dependency>, present: &BTreeSet<String>) -> Vec<Dependency> {
-    let present: BTreeSet<String> = present.iter().map(|name| return name.replace('-', "_")).collect();
-    return deps
-        .into_iter()
-        .filter(|dep| return !present.contains(&dep.name.replace('-', "_")))
-        .collect();
-}
-
-/// Whether `manifest` declares a `[package]` — i.e. it is a package manifest a
-/// `cargo add --manifest-path` can target, not a virtual workspace manifest
-/// (which has only `[workspace]`). A manifest that is both a workspace root and
-/// a package still declares `[package]`, so it qualifies.
-pub fn manifest_declares_package(manifest: &str) -> bool {
-    return manifest.lines().any(|line| return line.trim() == "[package]");
-}
-
-/// Extract the crate name from a `[dependencies]` entry line, handling the
-/// `name = ...`, `name = { .. }`, and `name.workspace = true` forms.
-fn dependency_key(line: &str) -> Option<String> {
-    let before_eq = line.split('=').next()?.trim();
-    let key = before_eq.split('.').next()?.trim();
-    if !key.is_empty()
-        && key
-            .chars()
-            .all(|c| return c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return Some(key.to_owned());
-    }
-    return None;
-}
-
-/// The net change in `{`/`[` nesting depth contributed by a line, used to skip
-/// the inner lines of a multi-line dependency value.
-fn brace_delta(line: &str) -> i32 {
-    let mut delta: i32 = 0;
-    for character in line.chars() {
-        match character {
-            '{' | '[' => delta += 1_i32,
-            '}' | ']' => delta -= 1_i32,
-            _ => {}
-        }
-    }
-    return delta;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,39 +423,5 @@ mod tests {
     #[test]
     fn no_dependencies_for_dependency_free_output() {
         assert!(required_dependencies("pub const SERVER_URL: &str = \"https://x\";").is_empty());
-    }
-
-    #[test]
-    fn retain_missing_drops_already_present_crates() {
-        // `manifest_dependency_names` itself is exercised against `Cargo.toml`
-        // fixture files in `tests/dependencies.rs`.
-        let deps = required_dependencies("axum::Json http::StatusCode serde::Serialize");
-        let mut present = BTreeSet::new();
-        present.insert("axum".to_owned());
-        present.insert("serde".to_owned());
-        let missing: Vec<&str> = retain_missing(deps, &present)
-            .iter()
-            .map(|dep| return dep.name)
-            .collect();
-        assert_eq!(missing, vec!["http"], "only the crate absent from the manifest remains");
-    }
-
-    #[test]
-    fn retain_missing_treats_hyphen_and_underscore_as_equivalent() {
-        // A manifest may declare `axum-extra` under the underscore key
-        // `axum_extra`; Cargo treats them as the same crate, so it must count as
-        // present and not be re-reported.
-        let deps = required_dependencies("axum_extra::extract::Query http::StatusCode");
-        let mut present = BTreeSet::new();
-        present.insert("axum_extra".to_owned());
-        let missing: Vec<&str> = retain_missing(deps, &present)
-            .iter()
-            .map(|dep| return dep.name)
-            .collect();
-        assert_eq!(
-            missing,
-            vec!["http"],
-            "`axum_extra` in the manifest satisfies the `axum-extra` crate"
-        );
     }
 }
