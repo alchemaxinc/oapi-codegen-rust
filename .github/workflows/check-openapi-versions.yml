@@ -37,6 +37,19 @@ jobs:
           token: ${{ steps.app.outputs.token }}
           ref: ${{ env.BASE_BRANCH }}
 
+      # find-or-create-issue is a composite action, which can only be invoked
+      # via `uses:` — that can't be looped inline within a single step. Since
+      # this workflow files one issue per newly detected version in a bash
+      # loop below, check out composite-toolbox into a subdirectory and call
+      # its backing script directly by path instead (see that action's README
+      # for this pattern).
+      - name: Checkout composite-toolbox
+        uses: actions/checkout@v7
+        with:
+          repository: alchemaxinc/composite-toolbox
+          ref: v1
+          path: .composite-toolbox
+
       - name: Detect unsupported OpenAPI versions
         id: detect
         env:
@@ -89,7 +102,7 @@ jobs:
           for minor in $NEW_VERSIONS; do
             title="Support OpenAPI $minor"
 
-            url=$(.github/actions/find-or-create-issue/find-or-create-issue.sh \
+            url=$(.composite-toolbox/find-or-create-issue/find-or-create-issue.sh \
               --state all \
               --label enhancement \
               --type Feature \

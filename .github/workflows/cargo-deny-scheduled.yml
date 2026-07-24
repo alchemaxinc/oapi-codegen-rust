@@ -9,10 +9,10 @@ on:
     - cron: "0 6 * * *"
 
 # Runs `cargo deny check advisories` against main. On failure, files a
-# tracking issue via the shared find-or-create-issue composite action (same
-# idempotent search-or-create pattern as check-openapi-versions.yml), so
-# repeated daily failures for the same advisory reuse one open issue instead
-# of spamming a new one per run.
+# tracking issue via alchemaxinc/composite-toolbox's find-or-create-issue
+# action (same idempotent search-or-create pattern as
+# check-openapi-versions.yml), so repeated daily failures for the same
+# advisory reuse one open issue instead of spamming a new one per run.
 
 env:
   CARGO_DENY_VERSION: "0.20.2"
@@ -90,7 +90,7 @@ jobs:
 
       - name: File or reuse tracking issue
         if: failure() && steps.check.outcome == 'failure'
-        uses: ./.github/actions/find-or-create-issue
+        uses: alchemaxinc/composite-toolbox/find-or-create-issue@v1
         with:
           token: ${{ steps.app.outputs.token }}
           state: open
