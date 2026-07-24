@@ -6,8 +6,10 @@
 
 mod console;
 
+use std::io::IsTerminal;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -112,7 +114,40 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
 
     oapi_codegen::write_output(&output, &code)?;
     console::report_wrote(&output);
+
+    let deps = oapi_codegen::deps::required_dependencies(&code);
+    console::report_dependencies(&deps);
+    if !deps.is_empty() && should_install_deps(cli.install_deps) {
+        install_dependencies(&deps);
+    }
     return Ok(());
+}
+
+/// Decide whether to run `cargo add`: unconditionally when `--install-deps` is
+/// set, otherwise by prompting an interactive terminal. A non-interactive run
+/// without the flag only prints the list.
+fn should_install_deps(flag: bool) -> bool {
+    if flag {
+        return true;
+    }
+    if std::io::stdin().is_terminal() {
+        return console::prompt_install_dependencies();
+    }
+    return false;
+}
+
+/// Run `cargo add` for each dependency in the current directory's package. A
+/// failure is reported as a warning rather than aborting: the output file is
+/// already written, so dependency installation is a best-effort convenience.
+fn install_dependencies(deps: &[oapi_codegen::deps::Dependency]) {
+    for dep in deps {
+        console::report_installing(dep);
+        match Command::new("cargo").args(dep.cargo_add_args()).status() {
+            Ok(status) if status.success() => {}
+            Ok(status) => console::report_install_failed(dep, &format!("cargo exited with {status}")),
+            Err(error) => console::report_install_failed(dep, &error.to_string()),
+        }
+    }
 }
 
 /// Compute a lightweight summary of the spec for empty-output reporting,

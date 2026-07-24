@@ -41,4 +41,11 @@ pub struct Cli {
     /// config sets `output:`.
     #[arg(short = 'o', long)]
     pub output_file: Option<PathBuf>,
+
+    /// After writing, run `cargo add` for each crate the generated code needs,
+    /// without prompting. On an interactive terminal without this flag you are
+    /// asked first; a non-interactive run only prints the dependency list.
+    /// `cargo add` targets the current directory's package.
+    #[arg(long)]
+    pub install_deps: bool,
 }

@@ -44,10 +44,20 @@ Setting both `std-http-server` and `client` emits models, per-operation types,
 and both interfaces flat at the crate root, so the server and client share one
 file and the same response types.
 
-Generated code may reference `http::StatusCode` directly (for example, for
-`default` and range responses), so add [`http`](https://crates.io/crates/http)
-as a direct dependency of the generated crate. `axum` and `reqwest` re-export
-the type, but the `http::` path names the crate itself.
+## Dependencies
+
+Cargo does not infer crate dependencies from a generated file's `use` paths (the
+way Go's `go mod tidy` does), so after each run the CLI prints the exact crates —
+with versions and features — that the generated code references, as both a
+`Cargo.toml` snippet and `cargo add` commands. Pass `--install-deps` to run those
+`cargo add` commands automatically (on an interactive terminal you are prompted
+first); they target the current directory's package.
+
+The set is per generated file. For example, a models-only file typically needs
+only `serde`; an axum server also needs `axum`, `http`, and (with query or cookie
+parameters) `axum-extra`; a `reqwest` client needs `reqwest`, `percent-encoding`,
+and, for form responses, `serde_urlencoded`. `chrono`, `uuid`, and `serde_json`
+are added when the schemas use dates, UUIDs, or free-form values.
 
 ### `output-options`
 
