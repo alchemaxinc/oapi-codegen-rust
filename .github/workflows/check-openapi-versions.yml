@@ -90,9 +90,8 @@ jobs:
 
             if [ -z "$url" ]; then
               url=$(gh issue create --title "$title" --label enhancement --type Feature \
+                --assignee copilot \
                 --body "$(printf '%s\n' \
-                  "@copilot" \
-                  "" \
                   "OpenAPI **$minor** has been released upstream (see the [OpenAPI Specification releases](https://github.com/OAI/OpenAPI-Specification/releases)), but is not yet supported by \`oapi-codegen-rust\`." \
                   "" \
                   "Please do a thorough deep dive into what it would take to support OpenAPI $minor here:" \
@@ -139,6 +138,7 @@ jobs:
           base-branch: ${{ env.BASE_BRANCH }}
 
       - name: Open pull request
+        id: create-pr
         if: steps.changes.outputs.has_changes == 'true' && steps.existing.outputs.exists != 'true'
         uses: alchemaxinc/composite-toolbox/create-pr@v1
         with:
@@ -149,3 +149,11 @@ jobs:
           commit-message: ${{ env.PR_TITLE }}
           pr-title: ${{ env.PR_TITLE }}
           pr-body: "Automated update: new OpenAPI specification versions were detected upstream. This PR adds them to the support matrix; tracking issues have been filed for each."
+
+      - name: Enable auto-merge
+        if: steps.changes.outputs.has_changes == 'true' && steps.existing.outputs.exists != 'true'
+        uses: alchemaxinc/composite-toolbox/merge-pr@v1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          pull-request-number: ${{ steps.create-pr.outputs.pr_number }}
+          merge-method: squash

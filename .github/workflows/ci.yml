@@ -163,7 +163,7 @@ jobs:
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
       - name: Run unit tests
-        if: ${{ !startsWith(github.event.pull_request.title, 'chore:') && !startsWith(github.event.pull_request.title, 'chore(') }}
+        if: ${{ !startsWith(github.event.pull_request.title, 'chore:') && !startsWith(github.event.pull_request.title, 'chore(') && !startsWith(github.event.pull_request.title, 'docs:') && !startsWith(github.event.pull_request.title, 'docs(') }}
         # nextest is faster than `cargo test` (parallel process model, smarter
         # scheduling) and reuses the artifacts clippy just produced because
         # both invocations target the same `target/` directory.
