@@ -41,6 +41,24 @@ places. This lists where `oapi-codegen-rust` deviates from
 - Status codes come from the `http` / `axum` / `reqwest` `StatusCode` types
   rather than a hand-maintained reason/table mirror.
 
+## Direction-aware serde derives
+
+- **Go:** no derives — `encoding/json` reflects over structs, so a type
+  round-trips in both directions with zero annotations.
+- **Rust:** a generated model derives `serde::Serialize` and/or
+  `serde::Deserialize` only for the directions the API actually uses it in. A
+  server serializes response bodies and deserializes request bodies; a client
+  does the reverse. A model reachable only as a response on a server-only
+  generation derives `Serialize` (not `Deserialize`), and vice versa; a model
+  used in both directions — or any model when both a server and a client are
+  generated — derives both, matching the previous unconditional behaviour.
+- **Why:** deriving a serde trait a type never needs would impose an
+  unsatisfiable bound on a reused `x-rust-type` target — e.g. forcing
+  `Deserialize` on a response-only type a project only ever serializes. The
+  usage direction is computed by walking the operations and propagating through
+  inter-model references (`emit/usage.rs`). `Debug`, `Clone`, and `PartialEq`
+  are still derived unconditionally.
+
 ## Vendor extensions
 
 - `x-rust-type`, `x-rust-name`, `x-rust-serde-skip`, plus `oapi-codegen`

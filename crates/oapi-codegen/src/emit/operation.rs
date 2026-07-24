@@ -30,7 +30,7 @@ use crate::ir::ResponseStatus;
 pub fn emit_operation_types(operation: &Operation) -> Result<Vec<TokenStream>> {
     let mut items = Vec::new();
     if let Some(query) = &operation.query {
-        items.push(emit_struct(query)?);
+        items.push(emit_struct(query, crate::emit::models::SerdeDerives::both())?);
     }
     if let Some(headers) = &operation.headers {
         items.push(emit_headers_struct(headers)?);
