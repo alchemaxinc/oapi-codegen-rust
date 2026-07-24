@@ -90,9 +90,11 @@ jobs:
 
             if [ -z "$url" ]; then
               url=$(gh issue create --title "$title" --label enhancement --type Feature \
-                --assignee "@copilot" \
                 --body "$(printf '%s\n' \
                   "OpenAPI **$minor** has been released upstream (see the [OpenAPI Specification releases](https://github.com/OAI/OpenAPI-Specification/releases)), but is not yet supported by \`oapi-codegen-rust\`." \
+                  "" \
+                  "> [!NOTE]" \
+                  "> This issue is not auto-assigned (GitHub App tokens can't assign Copilot as an agent). A maintainer should assign it to @copilot manually once it's ready to be picked up." \
                   "" \
                   "Please do a thorough deep dive into what it would take to support OpenAPI $minor here:" \
                   "" \
