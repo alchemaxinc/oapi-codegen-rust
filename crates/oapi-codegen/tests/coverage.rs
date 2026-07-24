@@ -1138,8 +1138,45 @@ fn empty_response_suffix_falls_back_to_default() {
     );
 }
 
-/// A component schema whose name equals a reserved interface type name emitted
-/// by the requested targets must fail generation rather than produce two items
+/// The dependency report must reflect real generated output: a combined
+/// server+client references at least serde/http/axum/reqwest, and every crate it
+/// names is one the generator can actually emit. This ties `required_dependencies`
+/// to emitted code (not just synthetic strings), so a new crate the emitters
+/// start referencing — which would also force a new dev-dependency to compile the
+/// goldens — is a prompt to extend the report.
+#[test]
+fn dependency_report_reflects_generated_output() {
+    let fixture = tests_dir().join("fixtures").join("combined_server_client.yaml");
+    let code = oapi_codegen::generate(&fixture, &combined_config()).expect("combined generation failed");
+    let names: Vec<&str> = oapi_codegen::deps::required_dependencies(&code)
+        .iter()
+        .map(|dep| return dep.name)
+        .collect();
+
+    for expected in ["serde", "http", "axum", "reqwest"] {
+        assert!(
+            names.contains(&expected),
+            "report is missing `{expected}`; got {names:?}"
+        );
+    }
+
+    const KNOWN: &[&str] = &[
+        "serde",
+        "serde_json",
+        "chrono",
+        "uuid",
+        "http",
+        "axum",
+        "axum-extra",
+        "reqwest",
+        "percent-encoding",
+        "serde_urlencoded",
+    ];
+    for name in &names {
+        assert!(KNOWN.contains(name), "report named an unexpected crate `{name}`");
+    }
+}
+
 /// with the same name at the crate root.
 #[test]
 fn reserved_interface_name_collision_fails() {

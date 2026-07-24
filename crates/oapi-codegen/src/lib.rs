@@ -7,6 +7,7 @@
 
 pub mod cli;
 pub mod config;
+pub mod deps;
 pub mod emit;
 pub mod error;
 pub mod filter;

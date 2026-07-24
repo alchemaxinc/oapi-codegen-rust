@@ -6,8 +6,10 @@
 
 mod console;
 
+use std::io::IsTerminal;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -112,7 +114,67 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
 
     oapi_codegen::write_output(&output, &code)?;
     console::report_wrote(&output);
+
+    let manifest = nearest_manifest(&output);
+    let deps = oapi_codegen::deps::required_dependencies(&code);
+    console::report_dependencies(&deps);
+    if !deps.is_empty() && should_install_deps(cli.install_deps) {
+        install_dependencies(&deps, manifest.as_deref());
+    }
     return Ok(());
+}
+
+/// The nearest `Cargo.toml` at or above the output file's directory — the
+/// package the generated code belongs to, used as the `cargo add` target.
+///
+/// This only locates the file; it does not parse it. `cargo add` interprets it
+/// (and reports a clear error itself if it is a virtual workspace manifest).
+fn nearest_manifest(output: &Path) -> Option<PathBuf> {
+    let canonical = std::fs::canonicalize(output).unwrap_or_else(|_| return output.to_path_buf());
+    let mut directory = canonical.parent();
+    while let Some(current) = directory {
+        let candidate = current.join("Cargo.toml");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        directory = current.parent();
+    }
+    return None;
+}
+
+/// Decide whether to run `cargo add`: unconditionally when `--install-deps` is
+/// set, otherwise by prompting an interactive terminal. A non-interactive run
+/// without the flag only prints the list.
+fn should_install_deps(flag: bool) -> bool {
+    if flag {
+        return true;
+    }
+    if std::io::stdin().is_terminal() {
+        return console::prompt_install_dependencies();
+    }
+    return false;
+}
+
+/// Run `cargo add` for each dependency, targeting the package whose `Cargo.toml`
+/// is nearest the output (or the current directory's when none was found).
+/// `cargo add` merges with any existing declaration, so a crate already present
+/// is updated in place rather than duplicated. A failure is reported as a
+/// warning rather than aborting: the output file is already written, so
+/// dependency installation is a best-effort convenience.
+fn install_dependencies(deps: &[oapi_codegen::deps::Dependency], manifest: Option<&Path>) {
+    for dep in deps {
+        console::report_installing(dep);
+        let mut command = Command::new("cargo");
+        command.args(dep.cargo_add_args());
+        if let Some(path) = manifest {
+            command.arg("--manifest-path").arg(path);
+        }
+        match command.status() {
+            Ok(status) if status.success() => {}
+            Ok(status) => console::report_install_failed(dep, &format!("cargo exited with {status}")),
+            Err(error) => console::report_install_failed(dep, &error.to_string()),
+        }
+    }
 }
 
 /// Compute a lightweight summary of the spec for empty-output reporting,
