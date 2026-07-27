@@ -163,6 +163,12 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
+      # Fail on broken or private intra-doc links so doc comments can't rot.
+      - name: Check rustdoc links
+        env:
+          RUSTDOCFLAGS: "-D warnings -D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links"
+        run: cargo doc --no-deps --workspace --locked
+
       - name: Run unit tests
         if: ${{ !startsWith(github.event.pull_request.title, 'chore:') && !startsWith(github.event.pull_request.title, 'chore(') && !startsWith(github.event.pull_request.title, 'docs:') && !startsWith(github.event.pull_request.title, 'docs(') }}
         # nextest is faster than `cargo test` (parallel process model, smarter

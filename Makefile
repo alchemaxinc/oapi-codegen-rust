@@ -17,7 +17,11 @@ run: ## Run the CLI
 lint: ## Run linter
 	cargo clippy \
 		--all-targets \
+		--workspace \
+		--locked \
 		-- -D warnings
+	RUSTDOCFLAGS="-D warnings -D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links" \
+		cargo doc --no-deps --workspace --locked
 	cargo +nightly fmt \
 		-- --check
 	npx prettier --check .
