@@ -248,10 +248,10 @@ pub fn check_type_name_collisions(service: &Service, module: &Module, reserved: 
     return Ok(());
 }
 
-/// Return a [`Error::TypeNameCollision`] when `name` is already taken by an
-/// emitted component model. `is_response` selects the remedy hint: for a
-/// response-enum clash it leads with the surgical, per-schema `x-rust-name` fix
-/// and offers the broad `response-type-suffix` as an alternative, since that
+/// Return a [`crate::error::Error::TypeNameCollision`] when `name` is already
+/// taken by an emitted component model. `is_response` selects the remedy hint:
+/// for a response-enum clash it leads with the surgical, per-schema `x-rust-name`
+/// fix and offers the broad `response-type-suffix` as an alternative, since that
 /// suffix renames *every* response enum, not just the colliding one.
 fn ensure_free(
     name: &crate::naming::RustIdent,
