@@ -1064,16 +1064,24 @@ macro_rules! combined_generated_tests {
 combined_generated_tests!(combined_server_client, combined_response_name_collision);
 
 /// Without `response-type-suffix`, a schema named like an operation's response
-/// enum must fail generation rather than silently rename either item.
+/// enum must fail generation rather than silently rename either item. The hint
+/// leads with the surgical `x-rust-name` remedy before the broad suffix option.
 #[test]
 fn response_name_collision_without_suffix_fails() {
     let dir = tests_dir();
     let fixture = dir.join("fixtures").join("combined_response_name_collision.yaml");
     let err = oapi_codegen::generate(&fixture, &combined_config())
         .expect_err("expected a type-name collision without response-type-suffix");
+    let oapi_codegen::Error::TypeNameCollision { hint, .. } = &err else {
+        panic!("expected TypeNameCollision, got: {err:?}");
+    };
+    let x_rust_name = hint.find("x-rust-name").expect("hint should mention x-rust-name");
+    let suffix = hint
+        .find("response-type-suffix")
+        .expect("hint should mention response-type-suffix");
     assert!(
-        matches!(err, oapi_codegen::Error::TypeNameCollision { .. }),
-        "expected TypeNameCollision, got: {err:?}",
+        x_rust_name < suffix,
+        "hint should lead with the surgical `x-rust-name` remedy before `response-type-suffix`, got: {hint}",
     );
 }
 

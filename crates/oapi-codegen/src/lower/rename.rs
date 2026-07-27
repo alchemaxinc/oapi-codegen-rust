@@ -248,9 +248,11 @@ pub fn check_type_name_collisions(service: &Service, module: &Module, reserved: 
     return Ok(());
 }
 
-/// Return a [`Error::TypeNameCollision`] when `name` is already taken by an
-/// emitted component model. `is_response` selects the remedy hint, since only
-/// the response enum can be renamed through `response-type-suffix`.
+/// Return a [`crate::error::Error::TypeNameCollision`] when `name` is already
+/// taken by an emitted component model. `is_response` selects the remedy hint:
+/// for a response-enum clash it leads with the surgical, per-schema `x-rust-name`
+/// fix and offers the broad `response-type-suffix` as an alternative, since that
+/// suffix renames *every* response enum, not just the colliding one.
 fn ensure_free(
     name: &crate::naming::RustIdent,
     artifact: &str,
@@ -263,9 +265,11 @@ fn ensure_free(
     let hint = if is_response {
         let default_suffix = to_ident(DEFAULT_RESPONSE_SUFFIX, Case::Pascal);
         format!(
-            "set `{OUTPUT_OPTIONS_KEY}.{RESPONSE_TYPE_SUFFIX_KEY}` in your configuration file to a \
-             suffix other than the default `{}` (for example `{RESPONSE_TYPE_SUFFIX_KEY}: Resp`, \
-             which renames the enum to `<Op>Resp`), or rename the schema with `{X_RUST_NAME}`",
+            "give the colliding schema a different Rust name with `{X_RUST_NAME}` — a surgical, \
+             per-schema fix that leaves the other response enums untouched — or, to rename every \
+             response enum, set `{OUTPUT_OPTIONS_KEY}.{RESPONSE_TYPE_SUFFIX_KEY}` to a suffix other \
+             than the default `{}` (for example `{RESPONSE_TYPE_SUFFIX_KEY}: Resp`, which renames \
+             the enum to `<Op>Resp`)",
             default_suffix.logical(),
         )
     } else {
