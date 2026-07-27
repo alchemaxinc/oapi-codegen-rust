@@ -197,6 +197,12 @@ fn hints_for(err: &Error) -> Vec<String> {
                     .to_owned(),
             ];
         }
+        Error::SchemaDepthExceeded { .. } => {
+            return vec![
+                "A schema nests too deeply; flatten it or split the nested shape into a named component referenced by `$ref`."
+                    .to_owned(),
+            ];
+        }
         Error::InvalidPathParameter { name, .. } => {
             return vec![format!(
                 "Add `{{{name}}}` to the path template, or change the parameter's `in:` to `query`, `header`, or `cookie`."

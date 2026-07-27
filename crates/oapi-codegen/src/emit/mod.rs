@@ -111,7 +111,7 @@ pub fn reserved_type_names(targets: Targets) -> Vec<ReservedTypeName> {
 ///
 /// The query/header/cookie inputs, request and response bodies, and response
 /// enum an operation contributes are the same types whichever generator uses
-/// them, so [`operation::emit_operation_types`] emits them once. The axum server
+/// them, so `operation::emit_operation_types` emits them once. The axum server
 /// then adds its extractor and `IntoResponse` impls, and the `reqwest` client
 /// its request-building methods, both naming those root types directly. Server
 /// and client can therefore share a single file without a name clash.

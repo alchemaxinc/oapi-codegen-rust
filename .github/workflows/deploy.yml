@@ -17,6 +17,7 @@ permissions:
   issues: write
   contents: write
   id-token: write
+  attestations: write
   pull-requests: write
 
 env:
@@ -66,6 +67,10 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
             runner: macos-latest
@@ -125,6 +130,12 @@ jobs:
         run: cargo set-version --workspace "${TAG#v}"
 
       - name: Build binary
+        # Link the musl targets with the toolchain's bundled rust-lld so a fully
+        # static binary builds without installing a musl C toolchain. Each var is
+        # scoped to its triple, so the gnu/darwin builds keep their default linker.
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
         run: cargo build --release --locked -p oapi-codegen --bin oapi-codegen --target ${{ matrix.target }}
 
       - name: Rename binary and generate checksum
@@ -137,6 +148,13 @@ jobs:
           else
             shasum -a 256 oapi-codegen-${{ matrix.target }} > oapi-codegen-${{ matrix.target }}.sha256
           fi
+
+      # Signed SLSA provenance so downloaders can verify a binary was built by
+      # this workflow from this source: `gh attestation verify <file> --repo …`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}"
 
       - *create-app-token
 

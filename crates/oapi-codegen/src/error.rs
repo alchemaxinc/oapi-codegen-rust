@@ -81,6 +81,15 @@ pub enum Error {
         reason: String,
     },
 
+    /// Inline schema nesting exceeded the depth the generator will lower,
+    /// guarding against stack exhaustion on hostile or pathological specs.
+    SchemaDepthExceeded {
+        /// Schema name / lowering hint identifying the offending inline schema.
+        path: String,
+        /// The maximum supported inline nesting depth.
+        limit: usize,
+    },
+
     /// An operation used a feature the server generator does not support yet.
     UnsupportedOperation {
         /// HTTP method of the offending operation.
@@ -172,6 +181,9 @@ impl std::fmt::Display for Error {
             Error::UnsupportedSchema { path, reason } => {
                 return write!(f, "unsupported schema at `{path}`: {reason}");
             }
+            Error::SchemaDepthExceeded { path, limit } => {
+                return write!(f, "schema at `{path}` nests deeper than the supported limit of {limit}");
+            }
             Error::UnsupportedOperation { method, path, reason } => {
                 return write!(f, "unsupported operation `{method} {path}`: {reason}");
             }
@@ -215,6 +227,7 @@ impl std::error::Error for Error {
             | Error::UnresolvedRef(_)
             | Error::UnsupportedRef { .. }
             | Error::UnsupportedSchema { .. }
+            | Error::SchemaDepthExceeded { .. }
             | Error::TypeNameCollision { .. }
             | Error::InvalidPathParameter { .. }
             | Error::UndeclaredPathParameter { .. }
