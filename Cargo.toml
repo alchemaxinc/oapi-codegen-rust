@@ -8,6 +8,10 @@ edition = "2024"
 repository = "https://github.com/alchemaxinc/oapi-codegen-rust"
 license = "MIT"
 
+# Trap silent integer wraparound on spec-derived arithmetic in release builds.
+[profile.release]
+overflow-checks = true
+
 [workspace.lints.clippy]
 allow_attributes_without_reason = "deny"
 as_conversions = "deny"
