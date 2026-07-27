@@ -227,7 +227,7 @@ jobs:
           "$HOME/.local/cargo-deny/cargo-deny" --version
 
       - name: Check advisories, bans, licenses and sources
-        run: "$HOME/.local/cargo-deny/cargo-deny check --hide-inclusion-graph"
+        run: "$HOME/.local/cargo-deny/cargo-deny --locked check --hide-inclusion-graph"
 
   ci-passed:
     name: CI Passed
