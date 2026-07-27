@@ -149,12 +149,11 @@ jobs:
             shasum -a 256 oapi-codegen-${{ matrix.target }} > oapi-codegen-${{ matrix.target }}.sha256
           fi
 
-      # Signed SLSA provenance so downloaders can verify a binary was built by
-      # this workflow from this source: `gh attestation verify <file> --repo …`.
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}"
+      # FIXME: Enable when we open-source the repo
+      #- name: Attest build provenance
+      #  uses: actions/attest-build-provenance@v4
+      #  with:
+      #    subject-path: "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}"
 
       - *create-app-token
 
