@@ -46,6 +46,12 @@ const X_ENUM_VARNAMES: &str = "x-enum-varnames";
 /// The `x-enumNames` extension: alias of [`X_ENUM_VARNAMES`].
 const X_ENUM_NAMES: &str = "x-enumNames";
 
+/// Cap on inline schema nesting the lowering pass will descend before erroring.
+/// Guards against stack exhaustion on pathological/hostile specs; well above any
+/// realistic hand-written or generated spec, and independent of whatever
+/// recursion limit the YAML/JSON parser happens to enforce.
+const MAX_SCHEMA_DEPTH: usize = 100;
+
 /// Lower every component schema in `spec` into a module of Rust items.
 pub fn generate_models(spec: &Spec) -> Result<Module> {
     let renames = crate::lower::rename::type_renames(spec);
@@ -53,6 +59,7 @@ pub fn generate_models(spec: &Spec) -> Result<Module> {
         spec,
         renames: &renames,
         extra: Vec::new(),
+        depth: 0,
     };
     let mut items = Vec::new();
     for (name, entry) in spec.schemas() {
@@ -89,6 +96,8 @@ struct Mapper<'a> {
     /// `x-rust-name` overrides keyed by original schema name.
     renames: &'a std::collections::HashMap<String, String>,
     extra: Vec<Item>,
+    /// Current inline-nesting depth, bounded by [`MAX_SCHEMA_DEPTH`].
+    depth: usize,
 }
 
 impl Mapper<'_> {
@@ -318,8 +327,28 @@ impl Mapper<'_> {
     }
 
     /// Recursively fold `allOf` members (objects, refs to objects, or nested
-    /// `allOf`) into a single merged object.
+    /// `allOf`) into a single merged object. Shares the [`MAX_SCHEMA_DEPTH`]
+    /// counter with [`Self::type_from_schema`] so nested `allOf` cannot exhaust
+    /// the stack independently of inline-type nesting.
     fn absorb_members(&mut self, name: &str, members: &[ReferenceOr<Schema>], merged: &mut MergedObject) -> Result<()> {
+        if self.depth >= MAX_SCHEMA_DEPTH {
+            return Err(Error::SchemaDepthExceeded {
+                path: name.to_owned(),
+                limit: MAX_SCHEMA_DEPTH,
+            });
+        }
+        self.depth += 1;
+        let result = self.absorb_members_inner(name, members, merged);
+        self.depth -= 1;
+        return result;
+    }
+
+    fn absorb_members_inner(
+        &mut self,
+        name: &str,
+        members: &[ReferenceOr<Schema>],
+        merged: &mut MergedObject,
+    ) -> Result<()> {
         for member in members {
             let schema = match member {
                 ReferenceOr::Item(schema) => schema,
@@ -481,8 +510,22 @@ impl Mapper<'_> {
     }
 
     /// Map an inline schema to a Rust type, hoisting composite inline schemas
-    /// into named items.
+    /// into named items. Bounds inline nesting via [`MAX_SCHEMA_DEPTH`] so a
+    /// pathological spec errors cleanly instead of exhausting the stack.
     fn type_from_schema(&mut self, hint: &str, schema: &Schema) -> Result<RustType> {
+        if self.depth >= MAX_SCHEMA_DEPTH {
+            return Err(Error::SchemaDepthExceeded {
+                path: hint.to_owned(),
+                limit: MAX_SCHEMA_DEPTH,
+            });
+        }
+        self.depth += 1;
+        let result = self.type_from_schema_inner(hint, schema);
+        self.depth -= 1;
+        return result;
+    }
+
+    fn type_from_schema_inner(&mut self, hint: &str, schema: &Schema) -> Result<RustType> {
         let data = &schema.schema_data;
         if let Some(verbatim) = extension_str(data, X_RUST_TYPE) {
             return Ok(RustType::Verbatim(verbatim.to_owned()));
@@ -681,6 +724,58 @@ mod tests {
     }
 
     const PREAMBLE: &str = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n";
+
+    /// A schema of `depth` nested inline arrays terminating in a string, built
+    /// programmatically so the depth guard — not the YAML parser's own recursion
+    /// limit or a parse-time stack overflow — is what the test exercises.
+    fn nested_array_schema(depth: usize) -> Schema {
+        let mut kind = SchemaKind::Type(Type::String(Default::default()));
+        for _ in 0..depth {
+            let items = ReferenceOr::Item(Box::new(Schema {
+                schema_data: SchemaData::default(),
+                schema_kind: kind,
+            }));
+            kind = SchemaKind::Type(Type::Array(openapiv3::ArrayType {
+                items: Some(items),
+                min_items: None,
+                max_items: None,
+                unique_items: false,
+            }));
+        }
+        return Schema {
+            schema_data: SchemaData::default(),
+            schema_kind: kind,
+        };
+    }
+
+    fn spec_with_schema(name: &str, schema: Schema) -> Spec {
+        let empty_doc = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\n";
+        let mut doc: openapiv3::OpenAPI = serde_yaml::from_str(empty_doc).expect("parse preamble");
+        doc.components
+            .get_or_insert_with(Default::default)
+            .schemas
+            .insert(name.to_owned(), ReferenceOr::Item(schema));
+        return Spec::from_parts(doc, PathBuf::from("inline.yaml"));
+    }
+    // The two tests below bracket the guard boundary exactly: the deepest
+    // schema that lowers is `MAX_SCHEMA_DEPTH - 1` levels, and reaching
+    // `MAX_SCHEMA_DEPTH` errors. Any off-by-one in the guard breaks one of them.
+
+    #[test]
+    fn schema_at_the_depth_limit_errors_instead_of_overflowing() {
+        let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH));
+        let err = generate_models(&spec).expect_err("reaching the limit should hit the depth guard");
+        assert!(
+            matches!(err, Error::SchemaDepthExceeded { limit, .. } if limit == MAX_SCHEMA_DEPTH),
+            "expected SchemaDepthExceeded, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn schema_just_under_the_depth_limit_still_lowers() {
+        let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH - 1));
+        generate_models(&spec).expect("just under the limit should lower cleanly");
+    }
 
     #[test]
     fn maps_string_and_integer_formats() {
