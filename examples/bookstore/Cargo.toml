@@ -4,6 +4,7 @@ description = "Composed example: oapi-codegen-rust generating models + an axum s
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
+license.workspace = true
 publish = false
 
 [lints]

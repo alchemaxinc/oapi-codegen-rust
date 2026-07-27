@@ -20,6 +20,7 @@ env:
   # Swatinem cache stay valid (RUSTFLAGS is part of the cache key).
   MOLD_VERSION: "2.41.0"
   NEXTEST_VERSION: "0.9.133"
+  CARGO_DENY_VERSION: "0.20.2"
 
   # Force ANSI colour in cargo/rustc output so GitHub Actions renders the
   # terminal output in colour rather than as a wall of plain text.
@@ -186,17 +187,54 @@ jobs:
       - name: Run Prettier
         run: npx prettier --check .
 
+  cargo-deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout-code
+
+      # Needed because cargo-deny shells out to `cargo metadata`.
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      # Self-install + cache the pinned binary, same pattern as mold/nextest.
+      # Policy lives in deny.toml. Key hardcodes musl since this job is x86_64
+      # ubuntu-latest; revisit the key and URL together if that changes.
+      - name: Cache cargo-deny
+        id: cache-cargo-deny
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/cargo-deny
+          key: v1-cargo-deny-${{ env.CARGO_DENY_VERSION }}-x86_64-linux-musl
+
+      - name: Install cargo-deny
+        if: steps.cache-cargo-deny.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/cargo-deny"
+          curl -fsSL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C "$HOME/.local/cargo-deny" --strip-components=1
+
+      - name: Verify cargo-deny
+        run: |
+          echo "$HOME/.local/cargo-deny" >> "$GITHUB_PATH"
+          "$HOME/.local/cargo-deny/cargo-deny" --version
+
+      - name: Check advisories, bans, licenses and sources
+        run: "$HOME/.local/cargo-deny/cargo-deny check --hide-inclusion-graph"
+
   ci-passed:
     name: CI Passed
     runs-on: ubuntu-latest
     if: always()
-    needs: [rust-checks, lint-prettier]
+    needs: [rust-checks, lint-prettier, cargo-deny]
     steps:
       - name: Verify all jobs passed or were skipped
         run: |
           results=(
             "${{ needs.rust-checks.result }}"
             "${{ needs.lint-prettier.result }}"
+            "${{ needs.cargo-deny.result }}"
           )
           for result in "${results[@]}"; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
