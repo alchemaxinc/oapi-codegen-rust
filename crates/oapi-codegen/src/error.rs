@@ -84,7 +84,7 @@ pub enum Error {
     /// Inline schema nesting exceeded the depth the generator will lower,
     /// guarding against stack exhaustion on hostile or pathological specs.
     SchemaDepthExceeded {
-        /// Dotted path to the schema for diagnostics.
+        /// Schema name / lowering hint identifying the offending inline schema.
         path: String,
         /// The maximum supported inline nesting depth.
         limit: usize,

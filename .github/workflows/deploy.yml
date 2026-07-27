@@ -129,6 +129,12 @@ jobs:
         run: cargo set-version --workspace "${TAG#v}"
 
       - name: Build binary
+        # Link the musl targets with the toolchain's bundled rust-lld so a fully
+        # static binary builds without installing a musl C toolchain. Each var is
+        # scoped to its triple, so the gnu/darwin builds keep their default linker.
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
         run: cargo build --release --locked -p oapi-codegen --bin oapi-codegen --target ${{ matrix.target }}
 
       - name: Rename binary and generate checksum
