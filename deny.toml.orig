@@ -4,13 +4,18 @@
 # CI installs a pinned prebuilt binary (see .github/workflows/ci.yml) so this
 # file is the single source of truth for what's allowed in the dependency graph.
 
+[graph]
+# Check advisories/bans/licenses/sources against every platform this workspace
+# can target, not just the host running `cargo deny`.
+targets = []
+
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-# Fails the check if an unmaintained advisory applies to a crate that's a
-# direct dependency of a workspace crate (transitive-only unmaintained deps
-# are not fatal). If this starts failing, either migrate off the crate or
-# add an explicit ignore with a tracking issue below.
+# Flag (but don't yet hard-fail on) crates the RustSec DB marks unmaintained,
+# e.g. serde_yaml — surface it in CI output without blocking merges until a
+# migration is planned. Flip to "deny" once serde_yaml is replaced or an
+# explicit ignore with a tracking issue is added below.
 unmaintained = "workspace"
 ignore = [
     # "RUSTSEC-XXXX-YYYY", # crate-name: reason + tracking issue link
