@@ -63,7 +63,7 @@ fn operation_slots(item: &mut PathItem) -> [&mut Option<Operation>; 8] {
     ];
 }
 
-/// Whether `operation` should be dropped given the configured filters.
+/// Whether `operation` must be dropped given the configured filters.
 ///
 /// An operation is kept only when it carries none of the excluded tags, carries
 /// one of the included tags (when `include-tags` is set), is not an excluded

@@ -2,7 +2,7 @@
 //!
 //! A generated type only needs a serde trait in the direction its API position
 //! exercises: a server serializes response bodies and deserializes request
-//! bodies; a client does the reverse. Deriving a trait a type never needs would
+//! bodies; a client does the reverse. Deriving a trait a type never needs will
 //! impose an unsatisfiable bound on a reused `x-rust-type` target — e.g. forcing
 //! `Deserialize` on a response-only type a project only ever serializes.
 //!
@@ -39,7 +39,7 @@ struct Usage {
 
 /// Compute the serde derive set for every generated model, keyed by its logical
 /// name. Names absent from the returned map are unreferenced by any operation
-/// (for example under `skip-prune`) and should derive both traits.
+/// (for example under `skip-prune`) and must derive both traits.
 pub(crate) fn model_derives(module: &Module, service: &Service, targets: Targets) -> HashMap<String, SerdeDerives> {
     let adjacency = adjacency(module);
     let mut usage: HashMap<String, Usage> = HashMap::new();
@@ -137,7 +137,7 @@ fn item_references(item: &Item) -> Vec<String> {
 /// emitter and item names use. A bare `Named` still holds the original schema
 /// name (the rename pass only rewrites `x-rust-name`/collision cases), so the
 /// name is run through [`to_ident`] to match `Item::name` — otherwise a
-/// non-PascalCase schema name would fail the usage lookup and fall back to
+/// non-PascalCase schema name will fail the usage lookup and fall back to
 /// deriving both serde traits. External and verbatim types name no generated
 /// model, so they contribute nothing.
 fn collect_named(ty: &RustType, out: &mut Vec<String>) {
@@ -370,7 +370,7 @@ mod tests {
         // The referencing field carries the raw schema name (`floor_heating`),
         // which a bare `RustType::Named` preserves, while the item's name is
         // canonicalized to `FloorHeating`. The usage walk must canonicalize the
-        // reference the same way or it would miss the model and wrongly fall
+        // reference the same way or it will miss the model and wrongly fall
         // back to deriving both serde traits.
         let module = Module {
             items: vec![

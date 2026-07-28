@@ -26,7 +26,7 @@ pub struct RustIdent {
 }
 
 impl RustIdent {
-    /// The logical name as serde would serialize it (no `r#`).
+    /// The logical name as serde will serialize it (no `r#`).
     pub fn logical(&self) -> &str {
         return &self.text;
     }
@@ -64,7 +64,7 @@ pub fn to_ident(name: &str, case: Case) -> RustIdent {
 
     let cased = if cased.is_empty() { "Unnamed".to_owned() } else { cased };
 
-    // An identifier may not start with a digit.
+    // An identifier can not start with a digit.
     let starts_with_digit = cased.chars().next().map(char::is_numeric).unwrap_or(false);
     let cased = if starts_with_digit { format!("_{cased}") } else { cased };
 

@@ -17,8 +17,8 @@ oapi-codegen [VERSION]
 ## Prebuilt binaries
 
 Each release publishes standalone binaries on the
-[GitHub releases page](https://github.com/alchemaxinc/oapi-codegen-rust/releases),
-one per target, each with a `.sha256` checksum:
+[GitHub releases page](https://github.com/alchemaxinc/oapi-codegen-rust/releases).
+Each target has one binary and one `.sha256` checksum file.
 
 | Platform     | glibc (dynamic)                          | musl (static)                             |
 | ------------ | ---------------------------------------- | ----------------------------------------- |
@@ -27,11 +27,10 @@ one per target, each with a `.sha256` checksum:
 | macOS x86-64 | `oapi-codegen-x86_64-apple-darwin`       | —                                         |
 | macOS arm64  | `oapi-codegen-aarch64-apple-darwin`      | —                                         |
 
-The `musl` builds are statically linked with no glibc version floor, so they run
-on any Linux — including minimal images such as Alpine or distroless. Prefer them
-when a `gnu` binary reports a glibc-version error.
+`musl` builds are static. They run on systems without matching glibc versions,
+including Alpine and distroless images.
 
-Download, verify, and install (example: Linux x86-64, static musl):
+Download, verify, and install (Linux x86-64 static musl example):
 
 ```sh
 base=https://github.com/alchemaxinc/oapi-codegen-rust/releases/latest/download
@@ -49,7 +48,7 @@ cd oapi-codegen-rust
 cargo install --path crates/oapi-codegen
 ```
 
-Or run it in-tree without installing:
+Or run in-tree without installation:
 
 ```sh
 cargo run -p oapi-codegen -- --help

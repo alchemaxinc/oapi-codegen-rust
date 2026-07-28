@@ -386,7 +386,7 @@ impl Spec {
 ///
 /// Cross-file references (e.g. `schemas/x.yaml#/components/schemas/Foo`) yield
 /// `None`: the models pipeline and the same-document `$ref` resolver only handle
-/// in-document schemas, so accepting a cross-file name here would risk emitting a
+/// in-document schemas, so accepting a cross-file name here will risk emitting a
 /// local `Named` type for what is actually external. The server generator reads
 /// cross-file names via [`ref_component_name`] paired with [`ref_file_part`].
 pub fn ref_target_name(reference: &str) -> Option<&str> {

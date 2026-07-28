@@ -193,7 +193,7 @@ fn deconflict(seed: String, used: &mut HashMap<String, usize>) -> String {
 
 /// Extract the `{placeholder}` names from a URL, in order and de-duplicated.
 ///
-/// A placeholder may not contain `/`, `{`, or `}` (matching the reference
+/// A placeholder can not contain `/`, `{`, or `}` (matching the reference
 /// implementation's `\{([^/{}]+)\}`); an interrupting `/` or nested `{` discards
 /// the partial name.
 fn placeholders(url: &str) -> Vec<String> {

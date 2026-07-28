@@ -477,7 +477,7 @@ fn emit_response_with_headers(
 
 /// Emit the insertion of one response header into `header_map`. A required
 /// header whose value cannot encode as a `HeaderValue` aborts the arm with a
-/// `500`, since dropping it would violate the declared contract; an optional
+/// `500`, since dropping it will violate the declared contract; an optional
 /// header is inserted only when present, and is silently skipped if its value
 /// cannot encode.
 fn emit_response_header_insert(header: &ResponseHeader) -> TokenStream {
@@ -542,7 +542,7 @@ fn emit_headers_extractor(headers: &Headers) -> Result<TokenStream> {
 ///
 /// String headers are taken verbatim; other scalars are `trim()`-ed before
 /// parsing, since HTTP permits optional surrounding whitespace (OWS) that
-/// `FromStr` would otherwise reject.
+/// `FromStr` will otherwise reject.
 fn emit_header_binding(param: &HeaderParam) -> Result<TokenStream> {
     let ident = param.name.to_token();
     let header_name = &param.header_name;

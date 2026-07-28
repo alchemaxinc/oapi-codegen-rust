@@ -259,7 +259,7 @@ pub struct MultipartField {
 
 /// An operation's request payload, when it declares one.
 ///
-/// The three cases are mutually exclusive by construction, replacing what would
+/// The three cases are mutually exclusive by construction, replacing what will
 /// otherwise be several mutually-exclusive `Option` fields on [`Operation`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum RequestPayload {

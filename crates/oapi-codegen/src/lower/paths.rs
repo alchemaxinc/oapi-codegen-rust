@@ -114,7 +114,7 @@ enum LoweredResponseBody {
 /// Rust field names the response emitter injects into a header-bearing struct
 /// variant (`status` for dynamic responses, `body` when a body is present). A
 /// declared response header whose `snake_case` identifier equals one of these
-/// would collide, so such headers are rejected during lowering.
+/// will collide, so such headers are rejected during lowering.
 const RESERVED_RESPONSE_FIELDS: [&str; 2] = ["status", "body"];
 
 /// Check whether a header name is valid for use with `HeaderName::from_static`.
@@ -126,7 +126,7 @@ fn is_valid_header_name(name: &str) -> bool {
         return false;
     }
     for byte in name.as_bytes() {
-        // RFC 7230 tchar. `-`..`9` (0x2D..0x39) would wrongly include `/`
+        // RFC 7230 tchar. `-`..`9` (0x2D..0x39) will wrongly include `/`
         // (0x2F), which is not a valid header-name char, so digits are their
         // own range and `-`/`.` are listed explicitly.
         let valid = matches!(
@@ -299,7 +299,7 @@ impl Lowerer<'_> {
             });
         }
         // A parameter declared `in: path` must have a matching `{placeholder}` in
-        // the template. Driving the loop above from the template alone would
+        // the template. Driving the loop above from the template alone will
         // otherwise silently drop such a parameter from the generated signature,
         // producing a handler that omits a required input.
         for parameter in params {
@@ -1176,7 +1176,7 @@ impl Lowerer<'_> {
             let ident = to_ident(header_name, Case::Snake);
             // The response emitter injects `status` (dynamic responses) and
             // `body` (responses with a body) fields into the struct variant. A
-            // header whose Rust field name collides with one of those would emit
+            // header whose Rust field name collides with one of those will emit
             // duplicate fields. Reject rather than mis-generate.
             if RESERVED_RESPONSE_FIELDS.contains(&ident.logical()) {
                 return Err(Error::UnsupportedOperation {
@@ -1189,7 +1189,7 @@ impl Lowerer<'_> {
                 });
             }
             // Distinct header names can collapse to the same Rust field
-            // identifier (e.g. `X-Foo` and `X_Foo` both → `x_foo`), which would
+            // identifier (e.g. `X-Foo` and `X_Foo` both → `x_foo`), which will
             // emit a struct with duplicate fields. Reject rather than
             // mis-generate.
             if seen_idents.iter().any(|other| return other == ident.logical()) {
@@ -1501,7 +1501,7 @@ mod tests {
         assert!(is_valid_header_name("X-RateLimit-Remaining"));
         assert!(is_valid_header_name("Sec-CH-UA-Platform-Version"));
         assert!(is_valid_header_name("a.b"));
-        // Empty and separator characters (which would panic `from_static`) are
+        // Empty and separator characters (which will panic `from_static`) are
         // rejected — notably `/` (0x2F), which sits between `-` (0x2D) and the
         // digits, and `:`, space, and control-ish punctuation.
         assert!(!is_valid_header_name(""));

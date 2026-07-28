@@ -3,23 +3,23 @@
 /// Errors that can occur while loading a spec or generating code.
 #[derive(Debug)]
 pub enum Error {
-    /// The spec file could not be read from disk.
+    /// The spec file can not be read from disk.
     ReadSpec {
-        /// Path that could not be read.
+        /// Path that can not be read.
         path: String,
         /// Underlying IO error.
         source: std::io::Error,
     },
 
-    /// The spec file could not be parsed as OpenAPI YAML/JSON.
+    /// The spec file can not be parsed as OpenAPI YAML/JSON.
     ParseSpec {
-        /// Path that could not be parsed.
+        /// Path that can not be parsed.
         path: String,
         /// Underlying parse error.
         source: serde_yaml::Error,
     },
 
-    /// A referenced external file could not be read from disk.
+    /// A referenced external file can not be read from disk.
     ReadRefFile {
         /// The referenced file, as written in the `$ref`.
         file: String,
@@ -27,7 +27,7 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    /// A referenced external file could not be parsed as OpenAPI YAML/JSON.
+    /// A referenced external file can not be parsed as OpenAPI YAML/JSON.
     ParseRefFile {
         /// The referenced file, as written in the `$ref`.
         file: String,
@@ -35,17 +35,17 @@ pub enum Error {
         source: serde_yaml::Error,
     },
 
-    /// The config file could not be read from disk.
+    /// The config file can not be read from disk.
     ReadConfig {
-        /// Path that could not be read.
+        /// Path that can not be read.
         path: String,
         /// Underlying IO error.
         source: std::io::Error,
     },
 
-    /// The config file could not be parsed as YAML.
+    /// The config file can not be parsed as YAML.
     ParseConfig {
-        /// Path that could not be parsed.
+        /// Path that can not be parsed.
         path: String,
         /// Underlying parse error.
         source: serde_yaml::Error,
@@ -56,13 +56,13 @@ pub enum Error {
 
     /// Writing the generated output failed.
     WriteOutput {
-        /// Path that could not be written.
+        /// Path that can not be written.
         path: String,
         /// Underlying IO error.
         source: std::io::Error,
     },
 
-    /// A `$ref` pointed at something that could not be resolved.
+    /// A `$ref` pointed at something that can not be resolved.
     UnresolvedRef(String),
 
     /// A `$ref` used a form the generator does not support yet.
@@ -102,7 +102,7 @@ pub enum Error {
 
     /// A parameter declared `in: path` has no matching `{placeholder}` in the
     /// operation's path template. An OpenAPI path parameter must appear in the
-    /// path, and lowering it from the template would otherwise silently drop it
+    /// path, and lowering it from the template will otherwise silently drop it
     /// from the generated signature.
     InvalidPathParameter {
         /// HTTP method of the offending operation.

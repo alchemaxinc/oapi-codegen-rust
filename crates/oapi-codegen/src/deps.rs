@@ -5,7 +5,7 @@
 //! like `http::StatusCode` reveals neither the crate version nor the Cargo
 //! features a consumer must enable. The generator is the only component that
 //! knows exactly what it emitted, so it reports the crates (with versions and
-//! features) a consumer should add to `Cargo.toml`.
+//! features) a consumer must add to `Cargo.toml`.
 //!
 //! The set is derived by scanning the generated source for the crate-root paths
 //! and method calls the emitters produce. Deriving it from the actual output
@@ -80,7 +80,7 @@ fn parse_manifest_version<'a>(manifest: &'a str, crate_name: &str) -> Option<&'a
 }
 
 /// A crate the generated code references, with the version requirement and Cargo
-/// features a consumer should declare in `Cargo.toml`.
+/// features a consumer must declare in `Cargo.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dependency {
     /// The crates.io crate name (e.g. `axum-extra`).
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn every_reportable_crate_has_a_manifest_version() {
         // A code blob that trips every detection branch; if any reported crate
-        // lacked a manifest entry, `manifest_version` would panic here.
+        // lacked a manifest entry, `manifest_version` will panic here.
         let code = "\
             serde::Serialize serde_json::Value chrono::DateTime uuid::Uuid http::StatusCode \
             axum::extract::Multipart axum_extra::extract::Query axum_extra::extract::CookieJar \

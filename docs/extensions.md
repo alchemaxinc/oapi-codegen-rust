@@ -1,20 +1,19 @@
 # OpenAPI extensions
 
-The generator honors the vendor extensions below. Rust-specific behaviour uses
-`x-rust-*` keys; the rest are `oapi-codegen` compatibility keys. Any other
-extension — including the Go type keys `x-go-type`, `x-go-name`,
-`x-go-json-ignore` — is ignored (accepted, but has no effect); use the
-`x-rust-*` equivalents instead.
+The generator supports the vendor extensions below.
+Use `x-rust-*` keys for Rust-specific behavior.
+Other keys are ignored, including `x-go-type`, `x-go-name`, and
+`x-go-json-ignore`.
 
 | Extension                         | Applies to        | Effect                                                          |
 | --------------------------------- | ----------------- | --------------------------------------------------------------- |
-| `x-rust-type`                     | schema            | Emit this verbatim Rust type instead of a generated one.        |
-| `x-rust-name`                     | schema / property | Override the generated type or field identifier.                |
-| `x-rust-serde-skip`               | property          | Drop the field with `#[serde(skip)]`.                           |
-| `x-omitempty`                     | property          | Force `skip_serializing_if` on/off, overriding the default.     |
-| `x-order`                         | property          | Order struct fields explicitly (1-indexed).                     |
-| `x-deprecated-reason`             | schema / property | Note for `#[deprecated]`; honored only when `deprecated: true`. |
-| `x-enum-varnames` / `x-enumNames` | enum schema       | Override generated enum variant identifiers, positionally.      |
+| `x-rust-type`                     | schema            | Emit this Rust type as-is instead of a generated type.          |
+| `x-rust-name`                     | schema / property | Override the generated type name or field name.                 |
+| `x-rust-serde-skip`               | property          | Omit the field with `#[serde(skip)]`.                           |
+| `x-omitempty`                     | property          | Force `skip_serializing_if` on or off.                          |
+| `x-order`                         | property          | Set explicit field order (1-indexed).                           |
+| `x-deprecated-reason`             | schema / property | Note for `#[deprecated]`; used only when `deprecated: true`.    |
+| `x-enum-varnames` / `x-enumNames` | enum schema       | Override generated enum variant names by position.              |
 
 ## Example
 

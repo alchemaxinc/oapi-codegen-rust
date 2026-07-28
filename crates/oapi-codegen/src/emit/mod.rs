@@ -83,7 +83,7 @@ pub struct ReservedTypeName {
 }
 
 /// The crate-root type names the requested `targets` emit. A component schema
-/// whose generated name matches one of these would produce a duplicate item, so
+/// whose generated name matches one of these will produce a duplicate item, so
 /// [`crate::lower::check_type_name_collisions`] rejects it up front.
 pub fn reserved_type_names(targets: Targets) -> Vec<ReservedTypeName> {
     let mut names = Vec::new();

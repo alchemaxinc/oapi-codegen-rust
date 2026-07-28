@@ -11,14 +11,15 @@ Generate client and server boilerplate from OpenAPI 3 specifications
 **Usage:** `oapi-codegen [OPTIONS] --config-file <CONFIG_FILE> <SPEC_FILE>`
 
 Examples:
-  # Write generated code, selecting artifacts in the config file:
+  # Write generated code. Select artifacts in the config file:
   oapi-codegen --config-file oapi-codegen.yaml --output-file src/api.rs api.yaml
 
-  # The output path may instead come from the config's `output:` key:
+  # You can also set output with the config `output:` key:
   oapi-codegen --config-file oapi-codegen.yaml api.yaml
 
-A config file is required, must enable at least one artifact, and an output
-path must be given via --output-file or the config's `output:` key:
+You must provide a config file.
+The config file must enable at least one artifact.
+You must set output with --output-file or config `output:`:
   # oapi-codegen.yaml
   output: src/api.rs
   generate:
@@ -33,10 +34,10 @@ path must be given via --output-file or the config's `output:` key:
 ###### **Options:**
 
 * `-c`, `--config-file <CONFIG_FILE>` — Path to an `oapi-codegen` YAML config file (required)
-* `-o`, `--output-file <OUTPUT_FILE>` — Output file path (overrides the config `output:`). Required unless the config sets `output:`
-* `--install-deps` — After writing, run `cargo add` for each crate the generated code needs.
+* `-o`, `--output-file <OUTPUT_FILE>` — Output file path (overrides config `output:`). Required unless the config sets `output:`
+* `--install-deps` — After write, run `cargo add` for each required crate.
 
-   If set, this runs without prompting. If not set, and stdin is an interactive terminal, you are asked first; otherwise the run only prints the dependency list. `cargo add` targets the package whose `Cargo.toml` is nearest the output and merges with any existing declaration, so a crate already present is updated in place rather than duplicated.
+   If set, this runs with no prompt. If not set and stdin is interactive, you are asked first. If not set and stdin is not interactive, the run prints only the list. `cargo add` targets the package whose `Cargo.toml` is nearest output. It merges with an existing declaration. A crate that already exists is updated in place.
 
 
 

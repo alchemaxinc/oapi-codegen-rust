@@ -4,7 +4,7 @@
 //! generate Rust ([`Status::Supported`]), reject it with a documented error
 //! ([`Status::Unsupported`]), recognise but intentionally drop it
 //! ([`Status::Ignored`]), or defer it to server/client generation
-//! ([`Status::Planned`]). Nothing may be left in the unknown.
+//! ([`Status::Planned`]). Nothing can be left in the unknown.
 //!
 //! Two mechanisms enforce this:
 //!  1. [`TEST_TABLE`] catalogues every feature and links the testable ones to a
@@ -1150,7 +1150,7 @@ fn empty_response_suffix_falls_back_to_default() {
 /// server+client references at least serde/http/axum/reqwest, and every crate it
 /// names is one the generator can actually emit. This ties `required_dependencies`
 /// to emitted code (not just synthetic strings), so a new crate the emitters
-/// start referencing — which would also force a new dev-dependency to compile the
+/// start referencing — which will also force a new dev-dependency to compile the
 /// goldens — is a prompt to extend the report.
 #[test]
 fn dependency_report_reflects_generated_output() {
@@ -1240,7 +1240,7 @@ fn declares_type(generated: &str, name: &str) -> bool {
 
 /// Every reserved interface name must actually be declared in the combined
 /// output, so renaming an emitted interface without updating its reserved-name
-/// constant (which would let a real collision slip through) breaks this test.
+/// constant (which will let a real collision slip through) breaks this test.
 #[test]
 fn reserved_names_are_declared_in_combined_output() {
     let dir = tests_dir();

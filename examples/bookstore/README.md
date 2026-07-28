@@ -1,7 +1,7 @@
 # Bookstore Example
 
-Regenerate this example from its multi-file OpenAPI spec by running the CLI once
-per config, from this directory:
+Regenerate this example from the multi-file OpenAPI spec.
+Run each command from this directory.
 
 ```console
 $ oapi-codegen --config-file oapi-codegen-common.yaml schemas/common.yaml
@@ -48,5 +48,5 @@ $ oapi-codegen --config-file oapi-codegen-client.yaml openapi.yaml
 
 ```
 
-Each config sets its own `output:`, so no `--output-file` is needed. From the
-repository root, `make generate-example` runs the same commands.
+Each config file sets its own `output:` value, so `--output-file` is not needed.
+From the repository root, `make generate-example` runs the same commands.

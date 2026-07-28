@@ -194,7 +194,7 @@ fn rewrite_type(ty: &mut RustType, renames: &HashMap<String, String>) {
         _ => {}
     }
 }
-/// Fail generation if a per-operation type name would collide with a
+/// Fail generation if a per-operation type name will collide with a
 /// component-model name emitted in the same file.
 ///
 /// In the flat layout, component models, per-operation types (response enums,
@@ -202,7 +202,7 @@ fn rewrite_type(ty: &mut RustType, renames: &HashMap<String, String>) {
 /// interfaces (`reserved`, e.g. the `Api` trait or `Client` struct) all share
 /// the crate root. A model whose name matches one of those — most commonly a
 /// schema named `<Op>Response`, or a schema literally named `Api`/`Client` —
-/// would produce two items with the same name. Rather than silently rename,
+/// will produce two items with the same name. Rather than silently rename,
 /// generation fails so the author resolves the clash deliberately: rename the
 /// schema with `x-rust-name`, or, for a response-enum clash, set
 /// `output-options.response-type-suffix`. Only locally emitted models are

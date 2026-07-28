@@ -21,7 +21,7 @@ use crate::ir::UnionVariant;
 ///
 /// A type is only ever serialized in the direction its API position uses: a
 /// server serializes response bodies and deserializes request bodies, a client
-/// does the reverse. Deriving a serde trait the type never needs would impose an
+/// does the reverse. Deriving a serde trait the type never needs will impose an
 /// unsatisfiable bound on a reused `x-rust-type` target (e.g. forcing
 /// `Deserialize` on a response-only type that a project only serializes), so the
 /// derive set is narrowed to the directions the type is actually used in. When a
@@ -100,7 +100,7 @@ pub(crate) fn emit_struct(strukt: &Struct, serde: SerdeDerives) -> Result<TokenS
         Some(element) => {
             let ty = emit_type(element)?;
             // The `flatten` attribute is only meaningful when the struct derives
-            // a serde trait; without one it would be an orphaned `#[serde(..)]`.
+            // a serde trait; without one it will be an orphaned `#[serde(..)]`.
             let flatten = if has_serde {
                 quote! { #[serde(flatten)] }
             } else {
