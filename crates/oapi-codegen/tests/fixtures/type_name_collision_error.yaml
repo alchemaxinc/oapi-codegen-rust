@@ -1,0 +1,37 @@
+openapi: 3.0.3
+info:
+  title: Type name collision without a remedy
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # Three distinct schema names that collapse onto one Rust identifier
+    # (`OrderItem`), and no remedy anywhere. Generation must stop and name every
+    # collision in one run.
+    order-item:
+      type: object
+      properties:
+        sku:
+          type: string
+    orderItem:
+      type: object
+      properties:
+        quantity:
+          type: integer
+    Order_Item:
+      type: object
+      properties:
+        price:
+          type: number
+    # A second, independent collision. One run must report this collision and the
+    # one above together, and not stop at the first one.
+    price-tag:
+      type: object
+      properties:
+        currency:
+          type: string
+    priceTag:
+      type: object
+      properties:
+        amount:
+          type: number

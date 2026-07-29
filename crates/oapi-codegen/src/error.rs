@@ -132,9 +132,26 @@ pub enum Error {
     TypeNameCollision {
         /// The clashing Rust identifier.
         name: String,
-        /// The generated artifact that clashed (e.g. `response enum`).
+        /// The generated artifact that clashed (for example `response enum`).
         artifact: String,
-        /// How to resolve the clash.
+        /// How to resolve the clash. Rendered by the console as a hint, and not
+        /// by `Display`, so the console does not print it twice.
+        hint: String,
+    },
+
+    /// Two component schema names collapsed onto one Rust identifier.
+    ///
+    /// The generator will not choose which schema keeps the plain name, because
+    /// that choice belongs to the spec author.
+    SchemaNameCollision {
+        /// The Rust identifier that both schemas produce.
+        ident: String,
+        /// The schema that claimed the identifier first, in document order.
+        first: String,
+        /// The schema that collided with `first`.
+        second: String,
+        /// How to resolve the clash. Rendered by the console as a hint, and not
+        /// by `Display`, so the console does not print it twice.
         hint: String,
     },
 
@@ -142,6 +159,17 @@ pub enum Error {
     InvalidGeneratedCode {
         /// Underlying syn parse error.
         source: syn::Error,
+    },
+
+    /// One pass found several independent semantic problems.
+    ///
+    /// This variant holds two or more problems. One problem returns as itself, so
+    /// a caller can match that variant. See
+    /// [`crate::lower::validate::Diagnostics::into_result`]. This variant never
+    /// nests, because the collector holds leaf errors only.
+    Validation {
+        /// The problems, in discovery order.
+        problems: Vec<Error>,
     },
 }
 
@@ -199,14 +227,31 @@ impl std::fmt::Display for Error {
                     "operation `{method} {path}` has a `{{{name}}}` placeholder in its path but no parameter named `{name}` is declared `in: path`"
                 );
             }
-            Error::TypeNameCollision { name, artifact, hint } => {
+            // The remedy is a hint, which the console prints under the message.
+            // `Display` therefore states the problem only.
+            Error::TypeNameCollision { name, artifact, .. } => {
                 return write!(
                     f,
-                    "generated {artifact} `{name}` collides with a component schema of the same name; {hint}"
+                    "generated {artifact} `{name}` collides with a component schema of the same name"
+                );
+            }
+            Error::SchemaNameCollision {
+                ident, first, second, ..
+            } => {
+                return write!(
+                    f,
+                    "component schemas `{first}` and `{second}` both produce the Rust type name `{ident}`"
                 );
             }
             Error::InvalidGeneratedCode { source } => {
                 return write!(f, "generated code was not valid Rust: {source}");
+            }
+            Error::Validation { problems } => {
+                write!(f, "found {} problems in the spec:", problems.len())?;
+                for problem in problems {
+                    write!(f, "\n  - {problem}")?;
+                }
+                return Ok(());
             }
         }
     }
@@ -223,12 +268,16 @@ impl std::error::Error for Error {
             Error::ParseConfig { source, .. } => return Some(source),
             Error::WriteOutput { source, .. } => return Some(source),
             Error::InvalidGeneratedCode { source } => return Some(source),
-            Error::Unimplemented(_)
+            // `Validation` holds problems at the same level and wraps no cause.
+            // It has no single `source`. `Display` shows the problems instead.
+            Error::Validation { .. }
+            | Error::Unimplemented(_)
             | Error::UnresolvedRef(_)
             | Error::UnsupportedRef { .. }
             | Error::UnsupportedSchema { .. }
             | Error::SchemaDepthExceeded { .. }
             | Error::TypeNameCollision { .. }
+            | Error::SchemaNameCollision { .. }
             | Error::InvalidPathParameter { .. }
             | Error::UndeclaredPathParameter { .. }
             | Error::UnsupportedOperation { .. } => return None,

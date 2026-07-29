@@ -47,7 +47,27 @@ pub fn is_effectively_empty(code: &str) -> bool {
 }
 
 /// Print a guided, styled error report for a generator `err` to stderr.
+///
+/// An [`Error::Validation`] holds several independent problems. Each one gets its
+/// own numbered heading and its own hints, because one message with every hint
+/// after it does not show which hint corrects which problem.
 pub fn report_error(err: &Error) {
+    if let Error::Validation { problems } = err {
+        eprintln!(
+            "{} found {} problems in the spec.",
+            "error:".red().bold(),
+            problems.len().bold()
+        );
+        for (index, problem) in problems.iter().enumerate() {
+            // 1-based, to match how the count above reads to a person.
+            let position = index.saturating_add(1);
+            eprintln!("  {} {}", format!("{position}.").red().bold(), problem.bold());
+            for hint in hints_for(problem) {
+                eprintln!("     {} {hint}", "hint:".cyan().bold());
+            }
+        }
+        return;
+    }
     eprintln!("{} {}", "error:".red().bold(), err.bold());
     for hint in hints_for(err) {
         eprintln!("  {} {hint}", "hint:".cyan().bold());
@@ -213,11 +233,16 @@ fn hints_for(err: &Error) -> Vec<String> {
                 "Declare a parameter with `name: {name}`, `in: path`, `required: true`, or remove `{{{name}}}` from the path."
             )];
         }
-        Error::TypeNameCollision { hint, .. } => {
+        Error::TypeNameCollision { hint, .. } | Error::SchemaNameCollision { hint, .. } => {
             return vec![hint.clone()];
         }
         Error::InvalidGeneratedCode { .. } => {
-            return vec!["This is an internal bug in oapi-codegen; please report it along with your spec.".to_owned()];
+            return vec!["This is an internal bug in oapi-codegen. Please report it with your spec.".to_owned()];
+        }
+        // `report_error` renders each collected problem on its own, with that
+        // problem's own hints, so the aggregate itself adds no hint.
+        Error::Validation { .. } => {
+            return Vec::new();
         }
     }
 }

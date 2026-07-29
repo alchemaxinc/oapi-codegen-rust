@@ -1,14 +1,13 @@
-//! Resolving top-level type names across the lowered IR.
+//! Resolution of top-level type names across the lowered IR.
 //!
-//! A generated type name can diverge from the naive `to_ident(schema_name)` for
-//! two reasons: an explicit `x-rust-name` override, or collision de-confliction
-//! when distinct schema names collapse onto the same Rust identifier. Because
-//! every reference to a schema lowers to a [`RustType::Named`] holding the
-//! original schema name, resolving the type also requires rewriting those
-//! references so they point at the final identifier. The item names themselves
-//! are set from the same resolution map during lowering (see
-//! [`crate::lower::schema`]); this pass only rewrites the `Named` references
-//! left pointing at the original name.
+//! A generated type name differs from the plain `to_ident(schema_name)` for two
+//! reasons. The schema carries an `x-rust-name` override, or two schema names
+//! collapse onto one Rust identifier and the config supplies a suffix. Every
+//! reference to a schema lowers to a [`RustType::Named`] that holds the original
+//! schema name. Name resolution therefore must also rewrite those references to
+//! point at the final identifier. Lowering sets the item names from the same
+//! resolution map. See [`crate::lower::schema`]. This pass rewrites the `Named`
+//! references that still point at the original name.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -18,7 +17,9 @@ use openapiv3::ReferenceOr;
 use crate::config::DEFAULT_RESPONSE_SUFFIX;
 use crate::config::OUTPUT_OPTIONS_KEY;
 use crate::config::RESPONSE_TYPE_SUFFIX_KEY;
+use crate::config::TYPE_NAME_SUFFIX_KEY;
 use crate::emit::ReservedTypeName;
+use crate::error::Error;
 use crate::error::Result;
 use crate::ir::EnumKind;
 use crate::ir::Item;
@@ -29,40 +30,102 @@ use crate::ir::RustType;
 use crate::ir::Service;
 use crate::loader::Spec;
 use crate::naming::Case;
+use crate::naming::RustIdent;
 use crate::naming::X_RUST_NAME;
-use crate::naming::deconflict_ident;
 use crate::naming::to_ident;
 
-/// Map of original schema name to the final Rust type identifier that references
-/// to it must resolve to, for every top-level schema whose emitted name differs
-/// from the naive `to_ident(name)`. Two sources contribute an entry:
+/// A map from an original schema name to the final Rust type identifier. Every
+/// reference to that schema must resolve to this identifier. The map holds one
+/// entry for each top-level schema whose emitted name differs from the plain
+/// `to_ident(name)`. Two sources add an entry:
 ///
 /// * an `x-rust-name` override (inline schemas only), and
-/// * collision de-confliction, when distinct schema names collapse onto the same
-///   Rust identifier (e.g. `foo-bar` and `fooBar` both becoming `FooBar`) — the
-///   later schema in document order gains a numeric suffix (`FooBar2`).
+/// * a collision suffix from `output-options.type-name-suffix`, added to the
+///   second of two schema names that collapse onto one Rust identifier.
 ///
-/// Schemas whose emitted name is unchanged are omitted, so the common case
-/// yields an empty map and reference rewriting is skipped entirely.
-pub fn type_renames(spec: &Spec) -> HashMap<String, String> {
+/// The map omits a schema whose emitted name does not change. The common case
+/// therefore gives an empty map, and this pass skips reference rewriting.
+///
+/// # Errors
+///
+/// Two distinct schema names can collapse onto one Rust identifier. For example,
+/// `foo-bar` and `fooBar` both become `FooBar`. Such a collision is an error when
+/// `suffix` is `None`. The generator will not choose a name for one of two
+/// distinct schemas, because that choice belongs to the author. The error names
+/// both schemas and both remedies.
+pub fn type_renames(spec: &Spec, suffix: Option<&str>) -> Result<HashMap<String, String>> {
     let mut resolved = HashMap::new();
-    let mut seen = HashSet::new();
+    // Maps a claimed identifier back to the schema name that claimed it, so a
+    // collision error can name the earlier schema and not the identifier alone.
+    let mut claimed: HashMap<String, String> = HashMap::new();
+    let mut diagnostics = crate::lower::validate::Diagnostics::new();
     for (name, entry) in spec.schemas() {
-        let effective = match entry {
+        let override_name = match entry {
             ReferenceOr::Item(schema) => schema
                 .schema_data
                 .extensions
                 .get(X_RUST_NAME)
-                .and_then(|value| return value.as_str())
-                .unwrap_or(name),
-            ReferenceOr::Reference { .. } => name.as_str(),
+                .and_then(|value| return value.as_str()),
+            ReferenceOr::Reference { .. } => None,
         };
-        let ident = deconflict_ident(to_ident(effective, Case::Pascal), &mut seen);
+        let effective = override_name.unwrap_or(name);
+        let mut ident = to_ident(effective, Case::Pascal);
+        if let Some(first) = claimed.get(ident.logical()) {
+            match suffix {
+                Some(suffix) => {
+                    ident = suffixed_ident(&ident, suffix, &claimed);
+                }
+                None => {
+                    diagnostics.push(Error::SchemaNameCollision {
+                        ident: ident.logical().to_owned(),
+                        first: first.clone(),
+                        second: name.clone(),
+                        hint: collision_hint(ident.logical(), name, override_name.is_some()),
+                    });
+                    continue;
+                }
+            }
+        }
+        claimed.insert(ident.logical().to_owned(), name.clone());
         if ident.logical() != to_ident(name, Case::Pascal).logical() {
             resolved.insert(name.clone(), ident.logical().to_owned());
         }
     }
-    return resolved;
+    diagnostics.into_result()?;
+    return Ok(resolved);
+}
+
+/// Add `suffix` to `ident`, and keep adding it until the result is free.
+///
+/// Repetition matters for a three-way collision. Two schemas already hold
+/// `Widget` and `WidgetAlt`, so a third must not take `WidgetAlt` again.
+fn suffixed_ident(ident: &RustIdent, suffix: &str, claimed: &HashMap<String, String>) -> RustIdent {
+    let mut candidate = to_ident(&format!("{} {suffix}", ident.logical()), Case::Pascal);
+    while claimed.contains_key(candidate.logical()) {
+        candidate = to_ident(&format!("{} {suffix}", candidate.logical()), Case::Pascal);
+    }
+    return candidate;
+}
+
+/// Build the remedy text for a schema-name collision.
+///
+/// `ident` is the Rust identifier that both schemas produce, so the example names
+/// real types and not spec names. `second` is the schema that collided.
+/// `overridden` records whether `second` already carries an `x-rust-name`. That
+/// case needs different advice, because the override itself caused the collision.
+fn collision_hint(ident: &str, second: &str, overridden: bool) -> String {
+    if overridden {
+        return format!(
+            "`{second}` already sets `{X_RUST_NAME}`, and that name also resolves to `{ident}`. \
+             Give `{second}` a name that no other schema uses.",
+        );
+    }
+    return format!(
+        "Give one of the two schemas a different Rust name with `{X_RUST_NAME}`, which records the \
+         type name the author wants. To rename every later collision instead, set \
+         `{OUTPUT_OPTIONS_KEY}.{TYPE_NAME_SUFFIX_KEY}` (for example `{TYPE_NAME_SUFFIX_KEY}: Alt`, \
+         which emits `{ident}` and `{ident}Alt`).",
+    );
 }
 
 /// Rewrite every `Named` reference in `module`'s items to honour `renames`.

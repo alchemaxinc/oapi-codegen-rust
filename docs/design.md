@@ -81,6 +81,32 @@ places. This lists where `oapi-codegen-rust` deviates from
   `output-options.response-type-suffix` to move the enum aside
   (`GetWidgetResponse` → `GetWidgetResp`) while the schema keeps its name.
 
+## Type-name collisions fail fast
+
+- **Go:** `oapi-codegen` adds a numeric suffix when two names collapse onto one
+  Go identifier. The second type becomes `MyWidget2`.
+- **Rust:** two component schemas that produce one Rust type name are an error.
+  For example, `order-item` and `orderItem` both produce `OrderItem`.
+
+A numeric suffix picks a public type name for the author. The name carries no
+meaning, and the mapping from `MyWidget2` back to a schema is not clear to a
+reader of the generated code. Worse, the number depends on document order, so a
+later edit to the spec can move `MyWidget2` onto a different schema and change
+the meaning of code that already compiles.
+
+The generator therefore stops and names both schemas. The error also gives the
+two remedies:
+
+- Put `x-rust-name` on one of the two schemas. This records the name the author
+  wants, and it changes that one schema only.
+- Set `output-options.type-name-suffix`. The generator then adds that suffix to
+  each colliding schema after the first. See
+  [configuration](configuration.md#type-name-suffix).
+
+One pass collects every collision in the document, so the report lists all of
+them at once. Numbered suffixes remain in use inside an enum, where the variant
+names belong to one type and a reader sees them next to their wire values.
+
 ## OpenAPI 3.0
 
 - The generator reads OpenAPI 3.0 documents (via the `openapiv3` crate).

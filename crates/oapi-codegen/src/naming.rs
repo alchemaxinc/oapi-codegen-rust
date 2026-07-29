@@ -96,15 +96,18 @@ pub fn rename_for(wire: &str, ident: &RustIdent) -> Option<String> {
     return Some(wire.to_owned());
 }
 
-/// Ensure `ident` is unique among the identifiers already recorded in `seen`,
-/// appending the lowest free numeric suffix (`Foo`, `Foo2`, `Foo3`, ...) on
-/// collision. The chosen identifier is inserted into `seen`, which is keyed by
-/// logical identifier text (so `foo` and `Foo` are treated as distinct only
-/// when their cased forms differ).
+/// Make `ident` unique among the identifiers in `seen`. A collision gets the
+/// lowest free numeric suffix: `Foo`, `Foo2`, `Foo3`, and so on. The function
+/// adds the chosen identifier to `seen`. The key is the logical identifier text,
+/// so `foo` and `Foo` count as different identifiers.
 ///
-/// Used to keep generated type names and enum variants unique when distinct
-/// OpenAPI names collapse onto the same Rust identifier (e.g. `foo-bar` and
-/// `fooBar` both becoming `FooBar`).
+/// Only enum variants use this function. Two variants inside one enum can
+/// collapse onto one Rust identifier. For example, `foo-bar` and `fooBar` both
+/// become `FooBar`.
+///
+/// Top-level type names do not use this function. A numeric suffix there would
+/// pick a public type name for the author, and the generator fails fast instead.
+/// See [`crate::lower::rename::type_renames`].
 pub fn deconflict_ident(ident: RustIdent, seen: &mut std::collections::HashSet<String>) -> RustIdent {
     if seen.insert(ident.logical().to_owned()) {
         return ident;
@@ -210,17 +213,17 @@ mod tests {
     #[test]
     fn deconflict_ident_suffixes_collisions() {
         let mut seen = std::collections::HashSet::new();
-        // Distinct OpenAPI names that collapse onto the same identifier gain the
-        // lowest free numeric suffix, in the order they are seen.
-        let first = deconflict_ident(to_ident("order-item", Case::Pascal), &mut seen);
-        let second = deconflict_ident(to_ident("orderItem", Case::Pascal), &mut seen);
-        let third = deconflict_ident(to_ident("Order_Item", Case::Pascal), &mut seen);
-        assert_eq!(first.logical(), "OrderItem");
-        assert_eq!(second.logical(), "OrderItem2");
-        assert_eq!(third.logical(), "OrderItem3");
-        // A distinct identifier is left untouched.
-        let other = deconflict_ident(to_ident("cart", Case::Pascal), &mut seen);
-        assert_eq!(other.logical(), "Cart");
+        // Enum member names that collapse onto one identifier get the lowest
+        // free numeric suffix, in the order the lowering sees them.
+        let first = deconflict_ident(to_ident("in-progress", Case::Pascal), &mut seen);
+        let second = deconflict_ident(to_ident("inProgress", Case::Pascal), &mut seen);
+        let third = deconflict_ident(to_ident("In_Progress", Case::Pascal), &mut seen);
+        assert_eq!(first.logical(), "InProgress");
+        assert_eq!(second.logical(), "InProgress2");
+        assert_eq!(third.logical(), "InProgress3");
+        // A different identifier stays as it is.
+        let other = deconflict_ident(to_ident("done", Case::Pascal), &mut seen);
+        assert_eq!(other.logical(), "Done");
     }
 
     #[test]
