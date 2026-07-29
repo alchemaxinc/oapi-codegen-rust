@@ -7,7 +7,7 @@ pub struct OrderItem {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct OrderItem2 {
+pub struct OrderItemQuantity {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantity: Option<i64>,
 }
@@ -15,14 +15,14 @@ pub struct OrderItem2 {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Cart {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub item: Option<OrderItem2>,
+    pub item: Option<OrderItemQuantity>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Reference {
     OrderItem(OrderItem),
-    OrderItem2(OrderItem2),
+    OrderItemQuantity(OrderItemQuantity),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]

@@ -45,8 +45,12 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     } else {
         None
     };
+    // A set but useless suffix is an error, and not silently "unset". The
+    // lowering checks it, so every caller of `type_renames` gets the check.
+    // See `lower::rename::checked_suffix`.
+    let type_name_suffix = config.output_options.type_name_suffix.as_deref();
     let mut module = if config.generate.models || want_server || want_client {
-        lower::generate_models(&spec)?
+        lower::generate_models(&spec, type_name_suffix)?
     } else {
         Module::default()
     };
@@ -58,7 +62,7 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
             .filter(|suffix| return !suffix.is_empty())
             .unwrap_or(crate::config::DEFAULT_RESPONSE_SUFFIX);
         let mut service = lower::generate_service(&spec, &config.import_mapping, response_type_suffix)?;
-        lower::rewrite_service(&mut service, &lower::type_renames(&spec));
+        lower::rewrite_service(&mut service, &lower::type_renames(&spec, type_name_suffix)?);
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
@@ -80,9 +84,13 @@ pub fn generate_to_file(spec_path: &Path, config: &Config, output_path: &Path) -
 }
 
 /// Generate Rust models from a spec file and return the formatted source.
+///
+/// This entry point takes no config, so two schema names that collapse onto one
+/// Rust identifier are an error. Use [`generate`] with
+/// `output-options.type-name-suffix` to resolve such a collision by config.
 pub fn generate_models_string(spec_path: &Path) -> Result<String> {
     let spec = Spec::load(spec_path)?;
-    let module = lower::generate_models(&spec)?;
+    let module = lower::generate_models(&spec, None)?;
     let code = emit::emit_module(&module, None)?;
     return Ok(code);
 }

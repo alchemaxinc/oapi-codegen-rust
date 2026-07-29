@@ -67,6 +67,11 @@ pub(crate) const RESPONSE_TYPE_SUFFIX_KEY: &str = "response-type-suffix";
 /// it into the `Response` that terminates every default `<Op>Response` enum.
 pub(crate) const DEFAULT_RESPONSE_SUFFIX: &str = "response";
 
+/// Config key of [`OutputOptions::type_name_suffix`], as written in a config
+/// file. Must match the `kebab-case` serde name; guarded by a deserialization
+/// test.
+pub(crate) const TYPE_NAME_SUFFIX_KEY: &str = "type-name-suffix";
+
 /// Output tuning options.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -99,6 +104,21 @@ pub struct OutputOptions {
     /// `oapi-codegen`'s `response-type-suffix`.
     #[serde(default)]
     pub response_type_suffix: Option<String>,
+    /// Suffix added to the second of two schema names that collapse onto one
+    /// Rust identifier. For example, `foo-bar` and `fooBar` both become `FooBar`.
+    ///
+    /// The default is unset. An unset suffix makes such a collision an error,
+    /// because the generator will not pick a name for one of two distinct
+    /// schemas. Use `x-rust-name` on the colliding schema first. That extension
+    /// marks one schema and records the name the author wants. This option is
+    /// for specs with many mechanical collisions, where one annotation per
+    /// schema costs too much.
+    ///
+    /// A set suffix must hold at least one letter or digit. Casing removes
+    /// punctuation, so a suffix such as `-` leaves the type name unchanged and
+    /// cannot resolve a collision. See [`crate::lower::type_renames`].
+    #[serde(default)]
+    pub type_name_suffix: Option<String>,
 }
 
 impl Config {
@@ -126,13 +146,27 @@ mod tests {
 
     #[test]
     fn config_keys_match_serde_names() {
-        let yaml = format!("{OUTPUT_OPTIONS_KEY}:\n  {RESPONSE_TYPE_SUFFIX_KEY}: Resp\n",);
+        let yaml =
+            format!("{OUTPUT_OPTIONS_KEY}:\n  {RESPONSE_TYPE_SUFFIX_KEY}: Resp\n  {TYPE_NAME_SUFFIX_KEY}: Alt\n",);
         let config: Config = serde_yaml::from_str(&yaml).expect("config parses");
         assert_eq!(
             config.output_options.response_type_suffix.as_deref(),
             Some("Resp"),
             "OUTPUT_OPTIONS_KEY/RESPONSE_TYPE_SUFFIX_KEY drifted from the serde field names",
         );
+        assert_eq!(
+            config.output_options.type_name_suffix.as_deref(),
+            Some("Alt"),
+            "TYPE_NAME_SUFFIX_KEY drifted from the serde field name",
+        );
+    }
+
+    #[test]
+    fn type_name_suffix_defaults_to_unset() {
+        // An unset suffix must mean "stop on a collision", so the default is
+        // `None` and not a fallback string.
+        let config: Config = serde_yaml::from_str("package: demo\n").expect("config parses");
+        assert_eq!(config.output_options.type_name_suffix, None);
     }
 
     #[test]

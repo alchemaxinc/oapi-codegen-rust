@@ -77,7 +77,28 @@ are added when the schemas use dates, UUIDs, or free-form values.
 | `include-operation-ids` | Only generate these `operationId`s.                                                                 |
 | `exclude-operation-ids` | Skip these `operationId`s.                                                                          |
 | `exclude-schemas`       | Drop these component schemas before lowering.                                                       |
-| `response-type-suffix`  | Suffix for response enums (default `Response`); set it to resolve a clash with a same-named schema. |
+| `response-type-suffix`  | Suffix for response enums (default `Response`). Set it to resolve a clash with a same-named schema. |
+| `type-name-suffix`      | Suffix for a schema name that collapses onto a Rust type name another schema already has.           |
+
+### `type-name-suffix`
+
+Two different schema names can produce one Rust type name. For example, `order-item` and `orderItem` both produce
+`OrderItem`. The default behavior is an error, because the generator does not choose which of the two schemas keeps the
+plain name. That choice belongs to the spec author.
+
+Two remedies exist:
+
+1. Put `x-rust-name` on one of the two schemas. This is the preferred remedy. It records the type name the author wants,
+   and it changes that one schema only. See [vendor extensions](extensions.md).
+2. Set `type-name-suffix`. The generator then adds the suffix to each schema after the first that collides. With
+   `type-name-suffix: Alt`, the two schemas above become `OrderItem` and `OrderItemAlt`. A third collision becomes
+   `OrderItemAltAlt`.
+
+The order is document order. The first schema in the file keeps the plain name.
+
+The suffix must hold at least one letter or digit. Casing removes punctuation and separators, so a suffix such as `-`
+or `_` leaves the type name unchanged and cannot resolve a collision. Such a suffix is an error. A suffix that mixes
+punctuation with letters is fine, because `-v2` reduces to `V2`. To make a collision an error instead, remove the key.
 
 ## Example
 

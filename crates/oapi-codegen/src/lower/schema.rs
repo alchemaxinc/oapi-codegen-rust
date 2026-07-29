@@ -53,8 +53,12 @@ const X_ENUM_NAMES: &str = "x-enumNames";
 const MAX_SCHEMA_DEPTH: usize = 100;
 
 /// Lower every component schema in `spec` into a module of Rust items.
-pub fn generate_models(spec: &Spec) -> Result<Module> {
-    let renames = crate::lower::rename::type_renames(spec);
+///
+/// `type_name_suffix` comes from `output-options.type-name-suffix`. It resolves
+/// two schema names that collapse onto one Rust identifier. `None` makes such a
+/// collision an error. See [`crate::lower::rename::type_renames`].
+pub fn generate_models(spec: &Spec, type_name_suffix: Option<&str>) -> Result<Module> {
+    let renames = crate::lower::rename::type_renames(spec, type_name_suffix)?;
     let mut mapper = Mapper {
         spec,
         renames: &renames,
@@ -420,8 +424,12 @@ impl Mapper<'_> {
                             reason: "union member ref must reference a schema".to_owned(),
                         };
                     })?;
+                    // Name the variant from the *resolved* type name, so an
+                    // `x-rust-name` override or a configured collision suffix
+                    // reaches the variant too. The raw target name would give a
+                    // variant that contradicts its own payload type.
                     UnionVariant {
-                        name: crate::naming::deconflict_ident(to_ident(target, Case::Pascal), &mut seen),
+                        name: crate::naming::deconflict_ident(self.type_name_ident(target), &mut seen),
                         ty: RustType::Named(target.to_owned()),
                     }
                 }
@@ -719,7 +727,7 @@ mod tests {
     fn emit_yaml(yaml: &str) -> String {
         let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse spec");
         let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
-        let module = generate_models(&spec).expect("map schemas");
+        let module = generate_models(&spec, None).expect("map schemas");
         return crate::emit::emit_module(&module, None).expect("emit module");
     }
 
@@ -764,7 +772,7 @@ mod tests {
     #[test]
     fn schema_at_the_depth_limit_errors_instead_of_overflowing() {
         let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH));
-        let err = generate_models(&spec).expect_err("reaching the limit should hit the depth guard");
+        let err = generate_models(&spec, None).expect_err("reaching the limit should hit the depth guard");
         assert!(
             matches!(err, Error::SchemaDepthExceeded { limit, .. } if limit == MAX_SCHEMA_DEPTH),
             "expected SchemaDepthExceeded, got {err:?}"
@@ -774,7 +782,7 @@ mod tests {
     #[test]
     fn schema_just_under_the_depth_limit_still_lowers() {
         let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH - 1));
-        generate_models(&spec).expect("just under the limit should lower cleanly");
+        generate_models(&spec, None).expect("just under the limit should lower cleanly");
     }
 
     #[test]
