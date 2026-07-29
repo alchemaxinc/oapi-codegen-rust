@@ -18,7 +18,7 @@ ignore = [
 
 [bans]
 # Duplicate versions of the same crate bloat builds but aren't a hard failure
-# on their own. surface them without blocking merges.
+# on their own. Surface them without blocking merges.
 multiple-versions = "warn"
 wildcards = "deny"
 deny = []

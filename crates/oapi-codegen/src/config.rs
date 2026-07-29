@@ -12,7 +12,7 @@ use crate::error::Result;
 /// A generator configuration, mirroring the keys used by `oapi-codegen`.
 ///
 /// Unknown keys are ignored so that existing `oapi-codegen` configurations can be used
-/// as-is. only the subset relevant to this tool is interpreted.
+/// as-is. Only the subset relevant to this tool is interpreted.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
@@ -53,18 +53,19 @@ pub struct Generate {
 }
 
 /// Config key of the [`Config::output_options`] section, as written in a configuration
-/// file. Must match the `kebab-case` serde name. guarded by a deserialization
+/// file. Must match the `kebab-case` serde name. Guarded by a deserialization
 /// test.
 pub(crate) const OUTPUT_OPTIONS_KEY: &str = "output-options";
 
 /// Config key of [`OutputOptions::response_type_suffix`], as written in a configuration
-/// file. Must match the `kebab-case` serde name. guarded by a deserialization
+/// file. Must match the `kebab-case` serde name. Guarded by a deserialization
 /// test.
 pub(crate) const RESPONSE_TYPE_SUFFIX_KEY: &str = "response-type-suffix";
 
 /// Seed for a response enum's name suffix when
-/// [`OutputOptions::response_type_suffix`] is unset. `to_ident(_, Pascal)` turns
-/// it into the `Response` that terminates every default `<Op>Response` enum.
+/// [`OutputOptions::response_type_suffix`] is unset.
+/// The `to_ident(_, Pascal)` call turns it into the `Response` that terminates every
+/// default `<Op>Response` enum.
 pub(crate) const DEFAULT_RESPONSE_SUFFIX: &str = "response";
 
 /// Output tuning options.
@@ -88,7 +89,7 @@ pub struct OutputOptions {
     #[serde(default)]
     pub exclude_operation_ids: Vec<String>,
     /// Remove these component schemas from the spec before lowering, so their
-    /// models are not generated. Filtering runs before pruning. if an excluded
+    /// models are not generated. Filtering runs before pruning. If an excluded
     /// schema is still referenced by a retained operation or schema, generation
     /// can fail or emit a reference to a type that is not declared.
     #[serde(default)]

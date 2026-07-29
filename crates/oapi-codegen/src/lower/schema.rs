@@ -47,7 +47,7 @@ const X_ENUM_VARNAMES: &str = "x-enum-varnames";
 const X_ENUM_NAMES: &str = "x-enumNames";
 
 /// Cap on inline schema nesting the lowering pass will descend before erroring.
-/// Guards against stack exhaustion on pathological/hostile specs. well above any
+/// Guards against stack exhaustion on pathological or hostile specs. Well above any
 /// realistic hand-written or generated spec, and independent of whatever
 /// recursion limit the YAML/JSON parser happens to enforce.
 const MAX_SCHEMA_DEPTH: usize = 100;
