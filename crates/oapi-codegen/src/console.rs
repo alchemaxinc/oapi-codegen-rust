@@ -233,7 +233,9 @@ fn hints_for(err: &Error) -> Vec<String> {
                 "Declare a parameter with `name: {name}`, `in: path`, `required: true`, or remove `{{{name}}}` from the path."
             )];
         }
-        Error::TypeNameCollision { hint, .. } | Error::SchemaNameCollision { hint, .. } => {
+        Error::TypeNameCollision { hint, .. }
+        | Error::SchemaNameCollision { hint, .. }
+        | Error::InvalidTypeNameSuffix { hint, .. } => {
             return vec![hint.clone()];
         }
         Error::InvalidGeneratedCode { .. } => {

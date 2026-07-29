@@ -113,6 +113,10 @@ pub struct OutputOptions {
     /// marks one schema and records the name the author wants. This option is
     /// for specs with many mechanical collisions, where one annotation per
     /// schema costs too much.
+    ///
+    /// A set suffix must hold at least one letter or digit. Casing removes
+    /// punctuation, so a suffix such as `-` leaves the type name unchanged and
+    /// cannot resolve a collision. See [`crate::lower::type_renames`].
     #[serde(default)]
     pub type_name_suffix: Option<String>,
 }

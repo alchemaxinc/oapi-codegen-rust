@@ -1184,10 +1184,40 @@ fn type_name_suffix_resolves_collisions() {
     );
 }
 
-/// An empty `type-name-suffix` is treated as unset. An empty suffix would
-/// otherwise "resolve" a collision by emitting the same name twice.
+/// A `type-name-suffix` that adds no characters to a Rust type name is an error.
+///
+/// Casing drops punctuation and separators, so `Foo` plus `-` gives `Foo` again.
+/// Such a suffix cannot resolve a collision. The generator once searched for a
+/// free name that it could never produce, and that search did not end.
+///
+/// The error is explicit, and the generator does not treat the suffix as unset. A
+/// silent fallback would report a collision and tell the author to set
+/// `type-name-suffix`, which the author already did.
 #[test]
-fn empty_type_name_suffix_falls_back_to_error() {
+fn type_name_suffix_without_identifier_characters_fails() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_suffix.yaml");
+    for suffix in ["", " ", "-", "_", "...", "-_-"] {
+        let mut config = oapi_codegen::Config {
+            generate: oapi_codegen::config::Generate {
+                models: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        config.output_options.type_name_suffix = Some(suffix.to_owned());
+        let err =
+            oapi_codegen::generate(&fixture, &config).expect_err("a suffix that adds no characters must be rejected");
+        assert!(
+            matches!(&err, oapi_codegen::Error::InvalidTypeNameSuffix { .. }),
+            "expected an InvalidTypeNameSuffix for `{suffix}`, got: {err:?}",
+        );
+    }
+}
+
+/// A suffix that carries punctuation is fine when it also carries an identifier
+/// character. `-v2` reduces to `V2`, which does lengthen the name.
+#[test]
+fn type_name_suffix_with_punctuation_and_letters_is_accepted() {
     let fixture = tests_dir().join("fixtures").join("type_name_collision_suffix.yaml");
     let mut config = oapi_codegen::Config {
         generate: oapi_codegen::config::Generate {
@@ -1196,14 +1226,13 @@ fn empty_type_name_suffix_falls_back_to_error() {
         },
         ..Default::default()
     };
-    config.output_options.type_name_suffix = Some(String::new());
-    let err = oapi_codegen::generate(&fixture, &config).expect_err("an empty suffix must not resolve a collision");
+    config.output_options.type_name_suffix = Some("-v2".to_owned());
+    let code = oapi_codegen::generate(&fixture, &config).expect("`-v2` resolves the collisions");
+    assert!(code.contains("pub struct OrderItem "), "plain name is kept: {code}");
+    assert!(code.contains("pub struct OrderItemV2 "), "suffix applied once: {code}");
     assert!(
-        matches!(
-            &err,
-            oapi_codegen::Error::SchemaNameCollision { .. } | oapi_codegen::Error::Validation { .. }
-        ),
-        "expected a collision error, got: {err:?}",
+        code.contains("pub struct OrderItemV2v2 "),
+        "suffix repeated for the third collision: {code}",
     );
 }
 

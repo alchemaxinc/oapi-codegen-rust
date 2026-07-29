@@ -45,14 +45,10 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     } else {
         None
     };
-    // An empty suffix means "unset", matching the `response-type-suffix`
-    // handling below. An empty string would otherwise resolve a collision by
-    // emitting the same name twice.
-    let type_name_suffix = config
-        .output_options
-        .type_name_suffix
-        .as_deref()
-        .filter(|suffix| return !suffix.is_empty());
+    // A set but useless suffix is an error, and not silently "unset". The
+    // lowering checks it, so every caller of `type_renames` gets the check.
+    // See `lower::rename::checked_suffix`.
+    let type_name_suffix = config.output_options.type_name_suffix.as_deref();
     let mut module = if config.generate.models || want_server || want_client {
         lower::generate_models(&spec, type_name_suffix)?
     } else {

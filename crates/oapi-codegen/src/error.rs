@@ -155,6 +155,19 @@ pub enum Error {
         hint: String,
     },
 
+    /// `output-options.type-name-suffix` holds no identifier characters.
+    ///
+    /// Casing drops punctuation and separators, so a suffix such as `-` or `_`
+    /// adds nothing to a type name. The generator cannot resolve a collision with
+    /// such a suffix, because the second name stays the same as the first.
+    InvalidTypeNameSuffix {
+        /// The configured suffix, as written in the config.
+        suffix: String,
+        /// How to resolve the problem. Rendered by the console as a hint, and not
+        /// by `Display`, so the console does not print it twice.
+        hint: String,
+    },
+
     /// The generated token stream was not valid Rust (internal bug).
     InvalidGeneratedCode {
         /// Underlying syn parse error.
@@ -243,6 +256,12 @@ impl std::fmt::Display for Error {
                     "component schemas `{first}` and `{second}` both produce the Rust type name `{ident}`"
                 );
             }
+            Error::InvalidTypeNameSuffix { suffix, .. } => {
+                return write!(
+                    f,
+                    "`type-name-suffix` is set to `{suffix}`, which contributes no characters to a Rust type name"
+                );
+            }
             Error::InvalidGeneratedCode { source } => {
                 return write!(f, "generated code was not valid Rust: {source}");
             }
@@ -278,6 +297,7 @@ impl std::error::Error for Error {
             | Error::SchemaDepthExceeded { .. }
             | Error::TypeNameCollision { .. }
             | Error::SchemaNameCollision { .. }
+            | Error::InvalidTypeNameSuffix { .. }
             | Error::InvalidPathParameter { .. }
             | Error::UndeclaredPathParameter { .. }
             | Error::UnsupportedOperation { .. } => return None,

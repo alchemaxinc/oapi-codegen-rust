@@ -53,7 +53,12 @@ use crate::naming::to_ident;
 /// `suffix` is `None`. The generator will not choose a name for one of two
 /// distinct schemas, because that choice belongs to the author. The error names
 /// both schemas and both remedies.
+///
+/// A `suffix` that contributes no characters to an identifier is also an error.
+/// Casing removes punctuation, so a suffix such as `-` leaves the name unchanged
+/// and cannot resolve a collision. A valid suffix holds a letter or a digit.
 pub fn type_renames(spec: &Spec, suffix: Option<&str>) -> Result<HashMap<String, String>> {
+    let suffix = checked_suffix(suffix)?;
     let mut resolved = HashMap::new();
     // Maps a claimed identifier back to the schema name that claimed it, so a
     // collision error can name the earlier schema and not the identifier alone.
@@ -95,14 +100,58 @@ pub fn type_renames(spec: &Spec, suffix: Option<&str>) -> Result<HashMap<String,
     return Ok(resolved);
 }
 
+/// Reject a configured suffix that adds nothing to a Rust type name.
+///
+/// Casing drops punctuation and separators. `to_ident("Foo -")` therefore gives
+/// `Foo` again, and the same holds for an empty suffix. Such a suffix cannot
+/// resolve a collision, because the second name stays the same as the first.
+/// [`suffixed_ident`] would search for a free name that it can never produce.
+///
+/// The check runs one time for the whole document, and not for each schema,
+/// because the suffix comes from the config and does not change per schema.
+///
+/// This returns an error and does not treat the suffix as unset. A silent
+/// fallback would report a collision and tell the author to set
+/// `type-name-suffix`, which the author already did.
+fn checked_suffix(suffix: Option<&str>) -> Result<Option<&str>> {
+    let Some(suffix) = suffix else {
+        return Ok(None);
+    };
+    // Compare against a fixed stem, because the result must hold for every name.
+    // A suffix that adds characters to one name adds them to all names.
+    const STEM: &str = "Placeholder";
+    if to_ident(&format!("{STEM} {suffix}"), Case::Pascal).logical() != STEM {
+        return Ok(Some(suffix));
+    }
+    return Err(Error::InvalidTypeNameSuffix {
+        suffix: suffix.to_owned(),
+        hint: format!(
+            "Casing removes punctuation and separators, so `{suffix}` leaves the type name unchanged. \
+             Use a suffix with at least one letter or digit (for example \
+             `{TYPE_NAME_SUFFIX_KEY}: Alt`). To make a collision an error instead, remove \
+             `{OUTPUT_OPTIONS_KEY}.{TYPE_NAME_SUFFIX_KEY}`.",
+        ),
+    });
+}
+
 /// Add `suffix` to `ident`, and keep adding it until the result is free.
 ///
 /// Repetition matters for a three-way collision. Two schemas already hold
 /// `Widget` and `WidgetAlt`, so a third must not take `WidgetAlt` again.
+///
+/// The loop ends because `suffix` adds at least one character to the identifier,
+/// which [`checked_suffix`] guarantees. Each pass therefore gives a longer name,
+/// and the supply of unclaimed names cannot run out.
 fn suffixed_ident(ident: &RustIdent, suffix: &str, claimed: &HashMap<String, String>) -> RustIdent {
     let mut candidate = to_ident(&format!("{} {suffix}", ident.logical()), Case::Pascal);
     while claimed.contains_key(candidate.logical()) {
-        candidate = to_ident(&format!("{} {suffix}", candidate.logical()), Case::Pascal);
+        let longer = to_ident(&format!("{} {suffix}", candidate.logical()), Case::Pascal);
+        // Defensive: `checked_suffix` rules this out. Growth is the reason the
+        // loop ends, so a non-growing step would spin forever. Stop instead.
+        if longer.logical() == candidate.logical() {
+            return candidate;
+        }
+        candidate = longer;
     }
     return candidate;
 }
@@ -343,4 +392,67 @@ fn ensure_free(
         artifact: artifact.to_owned(),
         hint,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suffix_with_identifier_characters_is_accepted() {
+        for suffix in ["Alt", "2", "a", "-v2", "_alt"] {
+            let outcome = checked_suffix(Some(suffix));
+            assert!(
+                matches!(outcome, Ok(Some(kept)) if kept == suffix),
+                "`{suffix}` adds characters to a type name and must be accepted",
+            );
+        }
+    }
+
+    #[test]
+    fn absent_suffix_stays_absent() {
+        assert!(matches!(checked_suffix(None), Ok(None)));
+    }
+
+    #[test]
+    fn suffix_without_identifier_characters_is_rejected() {
+        // Casing drops each of these, so the suffix cannot resolve a collision.
+        // An unbounded search for a free name would otherwise never end.
+        for suffix in ["", " ", "-", "_", "...", "-_-"] {
+            let outcome = checked_suffix(Some(suffix));
+            assert!(
+                matches!(outcome, Err(Error::InvalidTypeNameSuffix { .. })),
+                "`{suffix}` adds nothing to a type name and must be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_suffix_names_both_remedies() {
+        let Err(err) = checked_suffix(Some("-")) else {
+            panic!("`-` must be rejected");
+        };
+        let Error::InvalidTypeNameSuffix { hint, .. } = &err else {
+            panic!("expected an InvalidTypeNameSuffix, got {err:?}");
+        };
+        // The hint must show how to make the suffix work, and how to go back to
+        // an error for a collision.
+        assert!(hint.contains(TYPE_NAME_SUFFIX_KEY), "hint names the key: {hint}");
+        assert!(hint.contains("Alt"), "hint gives a working example: {hint}");
+        assert!(hint.contains("remove"), "hint offers the error mode: {hint}");
+        // The message states the problem. The console prints the hint under it,
+        // so `Display` must not repeat the hint.
+        assert!(!err.to_string().contains(hint.as_str()));
+    }
+
+    #[test]
+    fn suffixed_ident_grows_until_the_name_is_free() {
+        let mut claimed: HashMap<String, String> = HashMap::new();
+        claimed.insert("OrderItem".to_owned(), "order-item".to_owned());
+        claimed.insert("OrderItemAlt".to_owned(), "orderItem".to_owned());
+        // `OrderItem` and `OrderItemAlt` are taken, so a third collision must
+        // repeat the suffix instead of reusing `OrderItemAlt`.
+        let ident = suffixed_ident(&to_ident("order-item", Case::Pascal), "Alt", &claimed);
+        assert_eq!(ident.logical(), "OrderItemAltAlt");
+    }
 }
