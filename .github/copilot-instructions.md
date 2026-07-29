@@ -14,16 +14,16 @@
 ## CLI usage examples
 
 - In every `oapi-codegen` command example (README, docs, `--help` text, the
- Makefile, example folders), always put options first and the positional
- `<SPEC_FILE>` last, matching the generated `--help` usage line
- (for example `oapi-codegen --config-file cfg.yaml --output-file out.rs spec.yaml`).
+  Makefile, example folders), always put options first and the positional
+  `<SPEC_FILE>` last, matching the generated `--help` usage line
+  (for example `oapi-codegen --config-file cfg.yaml --output-file out.rs spec.yaml`).
 
 ## CLI definition is the single source of truth
 
 - The clap CLI lives in `crates/oapi-codegen/src/cli.rs`. After changing any
- flag, argument, help text, or the `EXAMPLES` block, run `make update-docs` to
- regenerate `docs/cli.md` (it is generated — never edit it by hand). CI's
- `make verify-generated` fails on drift.
+  flag, argument, help text, or the `EXAMPLES` block, run `make update-docs` to
+  regenerate `docs/cli.md` (it is generated — never edit it by hand). CI's
+  `make verify-generated` fails on drift.
 
 # Rust Coding Conventions and Best Practices
 
@@ -43,9 +43,9 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 - Handle errors gracefully using `Result<T, E>` and provide meaningful error messages.
 - For external dependencies, mention their usage and purpose in documentation.
 - Try to use as few external dependencies as possible, unless they provide significant value or are widely adopted in
- the Rust ecosystem.
+  the Rust ecosystem.
 - Use consistent naming conventions
- following [RFC 430](https://github.com/rust-lang/rfcs/blob/master/text/0430-finalizing-naming-conventions.md).
+  following [RFC 430](https://github.com/rust-lang/rfcs/blob/master/text/0430-finalizing-naming-conventions.md).
 - Write idiomatic, safe, and efficient Rust code that follows the borrow checker's rules.
 - Ensure code compiles without warnings.
 
@@ -65,8 +65,8 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 - Prefer borrowing and zero-copy operations to avoid unnecessary allocations.
 - Always be biased towards blocking code for simplicity unless async is necessary for performance or responsiveness.
 - **Return values:** Functions returning 3+ values must use a named struct. 2-tuples are acceptable only when the
- meaning is obvious from context (for example `(key, value)`). When in doubt, use a struct — named fields are always clearer
- than positional ones.
+  meaning is obvious from context (for example `(key, value)`). When in doubt, use a struct — named fields are always clearer
+  than positional ones.
 
 ### Ownership, Borrowing, and Lifetimes
 
@@ -75,7 +75,7 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 - Explicitly annotate lifetimes when the compiler cannot infer them.
 - Use `Rc<T>` for single-threaded reference counting and `Arc<T>` for thread-safe reference counting.
 - Use `RefCell<T>` for interior mutability in single-threaded contexts and `Mutex<T>` or `RwLock<T>` for multi-threaded
- contexts.
+  contexts.
 
 ## Patterns to Avoid
 
@@ -91,19 +91,19 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 
 - Follow the Rust Style Guide and use `rustfmt` for automatic formatting.
 - Always separate item definitions (functions, structs, enums, impls, modules) with a single blank line. never place two `fn`
- definitions on adjacent lines without a blank line between them.
+  definitions on adjacent lines without a blank line between them.
 - Place function and struct documentation immediately before the item using `///`.
 - Use `cargo clippy` to catch common mistakes and enforce best practices.
 - Only use comments for functions that are not overtly self-explanatory or for complex logic. Otherwise, prefer clear
- and descriptive code.
+  and descriptive code.
 - Do not ever use comments to separate sections of code. Instead, use functions, modules, or other organizational
- structures to create clear boundaries. In particular, never write banner or divider comments such as
- `// ---- Schema kinds ----` or `// === Helpers ===`.
+  structures to create clear boundaries. In particular, never write banner or divider comments such as
+  `// ---- Schema kinds ----` or `// === Helpers ===`.
 - Place global constants and statics (module-level `const` / `static` items) at the top of the file, immediately after
- the imports and before any other item definitions.
+  the imports and before any other item definitions.
 - Avoid side-effect / impure functions in favor of pure functions that take inputs and return outputs without modifying
- external state. Unless it will severely impact performance or usability, in which case side effects must be clearly
- documented.
+  external state. Unless it will severely impact performance or usability, in which case side effects must be clearly
+  documented.
 - Avoid "magic numbers" and "magic strings"—use constants or enums instead.
 
 ## Error Handling
@@ -111,16 +111,16 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 - Use `Result<T, E>` for recoverable errors and `panic!` only for unrecoverable errors.
 - Prefer `?` operator over `unwrap()` or `expect()` for error propagation.
 - **Never use `unwrap()` or `expect()` in request-handling code** (routes, client fetches, parsing). These run
- per-request and a panic will return a connection reset instead of a proper error response. Return `Result`, degrade
- gracefully, or log a warning and use a fallback.
+  per-request and a panic will return a connection reset instead of a proper error response. Return `Result`, degrade
+  gracefully, or log a warning and use a fallback.
 - **`expect()` is acceptable only in:**
- - Startup/config validation (fail fast with a clear message before serving traffic).
- - Client/resource construction (for example `reqwest::Client::builder().build().expect(...)`) that runs once at init.
- - Test code (where panicking is the failure mechanism).
+- Startup/config validation (fail fast with a clear message before serving traffic).
+- Client/resource construction (for example `reqwest::Client::builder().build().expect(...)`) that runs once at init.
+- Test code (where panicking is the failure mechanism).
 - **Never use bare `unwrap()`** anywhere — if a panic is truly justified, use `expect("reason")` so the message
- explains the invariant.
+  explains the invariant.
 - For values that are compile-time known (for example static timezone strings), prefer compile-time constants over runtime
- parsing with `expect()`.
+  parsing with `expect()`.
 - Create custom error types using `thiserror` or implement `std::error::Error`.
 - Use `Option<T>` for values that can or can not exist.
 - Provide meaningful error messages and context.
@@ -137,7 +137,7 @@ Eagerly implement common traits where appropriate:
 - Use standard conversion traits: `From`, `AsRef`, `AsMut`
 - Collections must implement `FromIterator` and `Extend`
 - Note: `Send` and `Sync` are auto-implemented by the compiler when safe. avoid manual implementation unless using
- `unsafe` code
+  `unsafe` code
 
 ### Type Safety and Predictability
 
@@ -163,7 +163,7 @@ Eagerly implement common traits where appropriate:
 - Write clear and concise comments for each function, struct, enum, and complex logic.
 - Ensure functions have descriptive names and include comprehensive documentation.
 - Document all public APIs with rustdoc (`///` comments) following
- the [API Guidelines](https://rust-lang.github.io/api-guidelines/).
+  the [API Guidelines](https://rust-lang.github.io/api-guidelines/).
 - Use `#[doc(hidden)]` to hide implementation details from public documentation.
 - Document error conditions, panic scenarios, and safety considerations.
 - Examples must use `?` operator, not `unwrap()` or deprecated `try!` macro.

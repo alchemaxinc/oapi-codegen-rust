@@ -277,11 +277,14 @@ fn empty_output_hints(stats: &SpecStats, generate: &Generate) -> Vec<String> {
     }
     if hints.is_empty() {
         hints.push(
-            "The filters removed every requested item. Make sure that `output-options` includes the required items.".to_owned(),
+            "The filters removed every requested item. Make sure that `output-options` includes the required items."
+                .to_owned(),
         );
     } else {
-        hints
-            .push("Add the missing definitions to the specification, or enable another artifact in your configuration.".to_owned());
+        hints.push(
+            "Add the missing definitions to the specification, or enable another artifact in your configuration."
+                .to_owned(),
+        );
     }
     return hints;
 }

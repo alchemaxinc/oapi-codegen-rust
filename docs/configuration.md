@@ -29,13 +29,13 @@ Unknown keys are ignored. Only the keys below are used.
 
 ### `generate`
 
-| Key               | Purpose                                                |
-| ----------------- | ------------------------------------------------------ |
-| `models`          | Generate structs and enums from component schemas.     |
+| Key               | Purpose                                                   |
+| ----------------- | --------------------------------------------------------- |
+| `models`          | Generate structs and enums from component schemas.        |
 | `std-http-server` | Generate an axum server interface (`trait Api` + router). |
-| `client`          | Generate a blocking `reqwest` client.                  |
-| `server-urls`     | Generate constants/builders for `servers` URLs.        |
-| `embedded-spec`   | _Not implemented_. The tool rejects this key.          |
+| `client`          | Generate a blocking `reqwest` client.                     |
+| `server-urls`     | Generate constants/builders for `servers` URLs.           |
+| `embedded-spec`   | _Not implemented_. The tool rejects this key.             |
 
 If you set both `std-http-server` and `client`, the tool generates one shared
 file at the crate root. The file contains shared types for each operation.
@@ -64,14 +64,14 @@ A `reqwest` client needs `reqwest`, `percent-encoding`, and sometimes
 
 ### `output-options`
 
-| Key                     | Purpose                                                                                             |
-| ----------------------- | --------------------------------------------------------------------------------------------------- |
-| `skip-prune`            | Keep schemas that no kept operation/schema references.                                               |
-| `include-tags`          | Generate only operations with one of these tags.                                                    |
-| `exclude-tags`          | Skip operations with any of these tags.                                                             |
-| `include-operation-ids` | Generate only these `operationId` values.                                                           |
-| `exclude-operation-ids` | Skip these `operationId` values.                                                                    |
-| `exclude-schemas`       | Remove these component schemas before lowering.                                                     |
+| Key                     | Purpose                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `skip-prune`            | Keep schemas that no kept operation/schema references.                                             |
+| `include-tags`          | Generate only operations with one of these tags.                                                   |
+| `exclude-tags`          | Skip operations with any of these tags.                                                            |
+| `include-operation-ids` | Generate only these `operationId` values.                                                          |
+| `exclude-operation-ids` | Skip these `operationId` values.                                                                   |
+| `exclude-schemas`       | Remove these component schemas before lowering.                                                    |
 | `response-type-suffix`  | Suffix for response enums (default `Response`). Use it to resolve a name clash with a schema name. |
 
 ## Example
