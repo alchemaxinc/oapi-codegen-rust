@@ -64,7 +64,7 @@ pub fn to_ident(name: &str, case: Case) -> RustIdent {
 
     let cased = if cased.is_empty() { "Unnamed".to_owned() } else { cased };
 
-    // An identifier can not start with a digit.
+    // An identifier cannot start with a digit.
     let starts_with_digit = cased.chars().next().map(char::is_numeric).unwrap_or(false);
     let cased = if starts_with_digit { format!("_{cased}") } else { cased };
 
@@ -103,7 +103,7 @@ pub fn rename_for(wire: &str, ident: &RustIdent) -> Option<String> {
 /// when their cased forms differ).
 ///
 /// Used to keep generated type names and enum variants unique when distinct
-/// OpenAPI names collapse onto the same Rust identifier (e.g. `foo-bar` and
+/// OpenAPI names collapse onto the same Rust identifier (for example `foo-bar` and
 /// `fooBar` both becoming `FooBar`).
 pub fn deconflict_ident(ident: RustIdent, seen: &mut std::collections::HashSet<String>) -> RustIdent {
     if seen.insert(ident.logical().to_owned()) {

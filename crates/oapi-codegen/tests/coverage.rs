@@ -391,7 +391,7 @@ const SERVER_FIXTURES: &[&str] = &[
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
-/// the slice's deliberate limitations (e.g. an unrecognised HTTP status code).
+/// the slice's deliberate limitations (for example an unrecognized HTTP status code).
 const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_unknown_status",
     "server_unsupported_xfile_response_ref",

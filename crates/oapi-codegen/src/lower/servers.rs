@@ -193,8 +193,8 @@ fn deconflict(seed: String, used: &mut HashMap<String, usize>) -> String {
 
 /// Extract the `{placeholder}` names from a URL, in order and de-duplicated.
 ///
-/// A placeholder can not contain `/`, `{`, or `}` (matching the reference
-/// implementation's `\{([^/{}]+)\}`); an interrupting `/` or nested `{` discards
+/// A placeholder cannot contain `/`, `{`, or `}` (matching the reference
+/// implementation's `\{([^/{}]+)\}`). An interrupting `/` or nested `{` discards
 /// the partial name.
 fn placeholders(url: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -221,7 +221,7 @@ fn placeholders(url: &str) -> Vec<String> {
     return out;
 }
 
-/// Read a string-valued extension (e.g. `x-rust-name`) from a server object.
+/// Read a string-valued extension (for example `x-rust-name`) from a server object.
 fn extension_str<'a>(server: &'a Server, key: &str) -> Option<&'a str> {
     return server.extensions.get(key)?.as_str();
 }

@@ -123,7 +123,7 @@ mod tests {
 
     /// `operation_slots` must reference every operation verb openapiv3
     /// recognises: nulling all slots must leave the path item with no
-    /// operations. This cross-checks our hand-listed slots against openapiv3's
+    /// operations. This cross-makes sure that our hand-listed slots against openapiv3's
     /// authoritative `PathItem::iter`, catching drift if a verb is ever added.
     #[test]
     fn operation_slots_cover_every_verb() {

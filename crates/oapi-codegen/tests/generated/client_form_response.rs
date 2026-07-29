@@ -22,8 +22,8 @@ pub enum ClientError {
     /// The response `Content-Type` matched none of the representations the
     /// operation declares for its status.
     UnexpectedContentType(String),
-    /// The response can not be decoded: a body that failed to
-    /// deserialize (e.g. malformed form-urlencoded content), or a
+    /// The response cannot be decoded: a body that failed to
+    /// deserialize (for example malformed form-urlencoded content), or a
     /// required response header that was missing or unparsable.
     Decode(String),
 }
@@ -62,7 +62,7 @@ impl From<reqwest::Error> for ClientError {
 /// A blocking HTTP client for the API.
 ///
 /// `base_url` is used as a prefix for every request path and must not
-/// carry a trailing slash (e.g. `https://api.example.com`).
+/// carry a trailing slash (for example `https://api.example.com`).
 #[derive(Debug, Clone)]
 pub struct Client {
     base_url: String,
@@ -80,7 +80,7 @@ impl Client {
         });
     }
     /// Build a client targeting `base_url` with a caller-provided
-    /// `reqwest::blocking::Client` (e.g. preconfigured with timeouts).
+    /// `reqwest::blocking::Client` (for example preconfigured with timeouts).
     pub fn with_client(
         base_url: impl Into<String>,
         http: reqwest::blocking::Client,

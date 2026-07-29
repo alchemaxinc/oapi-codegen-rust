@@ -1,4 +1,4 @@
-# Design decisions vs. Go
+# Design decisions compared with Go
 
 Rust and Go differ. This project keeps behavior similar to
 [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen), but some design
@@ -8,7 +8,7 @@ choices are different.
 
 - **Go:** Many framework targets from one plain interface.
 - **Rust:** One `trait Api` with native async fn in traits, for axum 0.8.
-- **Why:** Stable Rust supports async traits directly. One framework keeps
+- **Reason:** Stable Rust supports async traits directly. One framework keeps
   output clear and avoids extra macro dependencies.
 
 There is one structured server mode. There is no unstructured handler mode.

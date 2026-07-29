@@ -32,7 +32,7 @@ use crate::ir::ResponseStatus;
 pub fn emit_operation_types(operation: &Operation, targets: Targets) -> Result<Vec<TokenStream>> {
     let mut items = Vec::new();
     if let Some(query) = &operation.query {
-        // The query struct is deserialized by the server's `Query` extractor;
+        // The query struct is deserialized by the server's `Query` extractor.
         // the client builds the query string field-by-field via `to_string`
         // rather than serializing the struct, so it never needs `Serialize`.
         let serde = SerdeDerives {
@@ -110,7 +110,7 @@ fn emit_cookies_struct(cookies: &Cookies) -> Result<TokenStream> {
 ///
 /// A `default`/range response carries the concrete [`http::StatusCode`] the
 /// server chose. A declared response header is carried as `T` when the spec
-/// marks it required and `Option<T>` when optional; the client decoder treats a
+/// marks it required and `Option<T>` when optional. The client decoder treats a
 /// required header as mandatory, erroring when it is missing or unparsable.
 fn emit_response_enum(operation: &Operation) -> Result<TokenStream> {
     let name = operation.response_enum.to_token();

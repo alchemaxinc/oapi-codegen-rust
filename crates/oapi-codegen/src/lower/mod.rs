@@ -1,6 +1,6 @@
 //! Lowering OpenAPI documents into the intermediate representation (IR).
 //!
-//! [`schema`] lowers component schemas into an [`crate::ir::Module`]; [`paths`]
+//! [`schema`] lowers component schemas into an [`crate::ir::Module`]. [`paths`]
 //! lowers operations into an [`crate::ir::Service`]. Both feed the emit pass.
 
 pub mod paths;

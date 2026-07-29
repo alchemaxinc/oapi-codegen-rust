@@ -3,23 +3,23 @@
 /// Errors that can occur while loading a spec or generating code.
 #[derive(Debug)]
 pub enum Error {
-    /// The spec file can not be read from disk.
+    /// The spec file cannot be read from disk.
     ReadSpec {
-        /// Path that can not be read.
+        /// Path that cannot be read.
         path: String,
         /// Underlying IO error.
         source: std::io::Error,
     },
 
-    /// The spec file can not be parsed as OpenAPI YAML/JSON.
+    /// The spec file cannot be parsed as OpenAPI YAML/JSON.
     ParseSpec {
-        /// Path that can not be parsed.
+        /// Path that cannot be parsed.
         path: String,
         /// Underlying parse error.
         source: serde_yaml::Error,
     },
 
-    /// A referenced external file can not be read from disk.
+    /// A referenced external file cannot be read from disk.
     ReadRefFile {
         /// The referenced file, as written in the `$ref`.
         file: String,
@@ -27,7 +27,7 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    /// A referenced external file can not be parsed as OpenAPI YAML/JSON.
+    /// A referenced external file cannot be parsed as OpenAPI YAML/JSON.
     ParseRefFile {
         /// The referenced file, as written in the `$ref`.
         file: String,
@@ -35,17 +35,17 @@ pub enum Error {
         source: serde_yaml::Error,
     },
 
-    /// The config file can not be read from disk.
+    /// The configuration file cannot be read from disk.
     ReadConfig {
-        /// Path that can not be read.
+        /// Path that cannot be read.
         path: String,
         /// Underlying IO error.
         source: std::io::Error,
     },
 
-    /// The config file can not be parsed as YAML.
+    /// The configuration file cannot be parsed as YAML.
     ParseConfig {
-        /// Path that can not be parsed.
+        /// Path that cannot be parsed.
         path: String,
         /// Underlying parse error.
         source: serde_yaml::Error,
@@ -56,13 +56,13 @@ pub enum Error {
 
     /// Writing the generated output failed.
     WriteOutput {
-        /// Path that can not be written.
+        /// Path that cannot be written.
         path: String,
         /// Underlying IO error.
         source: std::io::Error,
     },
 
-    /// A `$ref` pointed at something that can not be resolved.
+    /// A `$ref` pointed at something that cannot be resolved.
     UnresolvedRef(String),
 
     /// A `$ref` used a form the generator does not support yet.
@@ -132,7 +132,7 @@ pub enum Error {
     TypeNameCollision {
         /// The clashing Rust identifier.
         name: String,
-        /// The generated artifact that clashed (e.g. `response enum`).
+        /// The generated artifact that clashed (for example `response enum`).
         artifact: String,
         /// How to resolve the clash.
         hint: String,

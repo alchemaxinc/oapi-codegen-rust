@@ -2,8 +2,8 @@
 //!
 //! A generated type only needs a serde trait in the direction its API position
 //! exercises: a server serializes response bodies and deserializes request
-//! bodies; a client does the reverse. Deriving a trait a type never needs will
-//! impose an unsatisfiable bound on a reused `x-rust-type` target — e.g. forcing
+//! bodies. a client does the reverse. Deriving a trait a type never needs will
+//! impose an unsatisfiable bound on a reused `x-rust-type` target — for example forcing
 //! `Deserialize` on a response-only type a project only ever serializes.
 //!
 //! This module walks the [`Service`] to seed each component model as
@@ -150,8 +150,8 @@ fn collect_named(ty: &RustType, out: &mut Vec<String>) {
 
 /// Model names seeded as request-reachable: path/query/header/cookie parameters
 /// plus the request payload. A path parameter is deserialized by the server's
-/// `Path` extractor, so a schema-typed parameter (e.g. a component enum) imposes
-/// a real `Deserialize` bound; header/cookie parameters are seeded too so a
+/// `Path` extractor, so a schema-typed parameter (for example a component enum) imposes
+/// a real `Deserialize` bound. header/cookie parameters are seeded too so a
 /// model used only there is narrowed to the request direction rather than
 /// falling back to both traits.
 fn request_seeds(service: &Service) -> Vec<String> {

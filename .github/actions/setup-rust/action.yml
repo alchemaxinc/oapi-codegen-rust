@@ -6,7 +6,7 @@ description: >-
 
 inputs:
   components:
-    description: Comma-separated list of extra rustup components to install (e.g. "clippy, rustfmt").
+    description: Comma-separated list of extra rustup components to install (for example "clippy, rustfmt").
     required: false
     default: ""
   targets:

@@ -7,14 +7,14 @@ oapi-codegen [OPTIONS] --config-file <CONFIG_FILE> <SPEC_FILE>
 ```
 
 - `<SPEC_FILE>` — Path to the OpenAPI 3 document (YAML or JSON). Required.
-- `--config-file, -c` — Path to a YAML config file. Required.
+- `--config-file, -c` — Path to a YAML configuration file. Required.
 - `--output-file, -o` — Output file path. Required unless the config sets `output:`.
 
-The config file must enable at least one artifact under `generate:`:
+The configuration file must enable at least one artifact under `generate:`:
 `models`, `std-http-server`, `client`, or `server-urls`.
 
 For the full generated reference, read [`cli.md`](./cli.md).
-Run `make update-docs` after CLI changes.
+Run `make update-docs` after you change the CLI.
 
 ## Config file
 
@@ -38,7 +38,7 @@ Unknown keys are ignored. Only the keys below are used.
 | `embedded-spec`   | _Not implemented_. The tool rejects this key.          |
 
 If you set both `std-http-server` and `client`, the tool generates one shared
-file at the crate root with shared per-operation types.
+file at the crate root. The file contains shared types for each operation.
 
 ## Dependencies
 
@@ -47,7 +47,7 @@ After generation, the CLI prints the needed crates, versions, and features.
 It prints a `Cargo.toml` snippet and `cargo add` commands.
 
 Use `--install-deps` to run those `cargo add` commands automatically.
-Without that flag, interactive terminals show a prompt first.
+Interactive terminals show a prompt without that flag.
 Non-interactive runs print only the dependency list.
 
 `cargo add` targets the package whose `Cargo.toml` is nearest the output file.
@@ -56,7 +56,7 @@ If the dependency already exists, Cargo updates it in place.
 Recommended versions come from the `oapi-codegen` manifest.
 They match the versions used for build and test.
 
-Dependencies depend on generated output.
+Dependencies depend on the generated output.
 For example, model-only output usually needs `serde`.
 An axum server also needs `axum`, `http`, and sometimes `axum-extra`.
 A `reqwest` client needs `reqwest`, `percent-encoding`, and sometimes

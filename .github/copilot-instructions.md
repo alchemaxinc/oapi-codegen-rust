@@ -16,14 +16,14 @@
 - In every `oapi-codegen` command example (README, docs, `--help` text, the
  Makefile, example folders), always put options first and the positional
  `<SPEC_FILE>` last, matching the generated `--help` usage line
- (e.g. `oapi-codegen --config-file cfg.yaml --output-file out.rs spec.yaml`).
+ (for example `oapi-codegen --config-file cfg.yaml --output-file out.rs spec.yaml`).
 
 ## CLI definition is the single source of truth
 
 - The clap CLI lives in `crates/oapi-codegen/src/cli.rs`. After changing any
  flag, argument, help text, or the `EXAMPLES` block, run `make update-docs` to
  regenerate `docs/cli.md` (it is generated — never edit it by hand). CI's
- `make verify-generated` fails on drift.
+ `make make sure that-generated` fails on drift.
 
 # Rust Coding Conventions and Best Practices
 
@@ -65,7 +65,7 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 - Prefer borrowing and zero-copy operations to avoid unnecessary allocations.
 - Always be biased towards blocking code for simplicity unless async is necessary for performance or responsiveness.
 - **Return values:** Functions returning 3+ values must use a named struct. 2-tuples are acceptable only when the
- meaning is obvious from context (e.g. `(key, value)`). When in doubt, use a struct — named fields are always clearer
+ meaning is obvious from context (for example `(key, value)`). When in doubt, use a struct — named fields are always clearer
  than positional ones.
 
 ### Ownership, Borrowing, and Lifetimes
@@ -90,7 +90,7 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 ## Code Style and Formatting
 
 - Follow the Rust Style Guide and use `rustfmt` for automatic formatting.
-- Always separate item definitions (functions, structs, enums, impls, modules) with a single blank line; never place two `fn`
+- Always separate item definitions (functions, structs, enums, impls, modules) with a single blank line. never place two `fn`
  definitions on adjacent lines without a blank line between them.
 - Place function and struct documentation immediately before the item using `///`.
 - Use `cargo clippy` to catch common mistakes and enforce best practices.
@@ -115,11 +115,11 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
  gracefully, or log a warning and use a fallback.
 - **`expect()` is acceptable only in:**
  - Startup/config validation (fail fast with a clear message before serving traffic).
- - Client/resource construction (e.g. `reqwest::Client::builder().build().expect(...)`) that runs once at init.
+ - Client/resource construction (for example `reqwest::Client::builder().build().expect(...)`) that runs once at init.
  - Test code (where panicking is the failure mechanism).
 - **Never use bare `unwrap()`** anywhere — if a panic is truly justified, use `expect("reason")` so the message
  explains the invariant.
-- For values that are compile-time known (e.g. static timezone strings), prefer compile-time constants over runtime
+- For values that are compile-time known (for example static timezone strings), prefer compile-time constants over runtime
  parsing with `expect()`.
 - Create custom error types using `thiserror` or implement `std::error::Error`.
 - Use `Option<T>` for values that can or can not exist.
@@ -136,13 +136,13 @@ Eagerly implement common traits where appropriate:
 - `Copy`, `Clone`, `Eq`, `PartialEq`, `Ord`, `PartialOrd`, `Hash`, `Debug`, `Display`, `Default`
 - Use standard conversion traits: `From`, `AsRef`, `AsMut`
 - Collections must implement `FromIterator` and `Extend`
-- Note: `Send` and `Sync` are auto-implemented by the compiler when safe; avoid manual implementation unless using
+- Note: `Send` and `Sync` are auto-implemented by the compiler when safe. avoid manual implementation unless using
  `unsafe` code
 
 ### Type Safety and Predictability
 
 - Use newtypes to provide static distinctions
-- Arguments must convey meaning through types; prefer specific types over generic `bool` parameters
+- Arguments must convey meaning through types. prefer specific types over generic `bool` parameters
 - Use `Option<T>` appropriately for truly optional values
 - Functions with a clear receiver must be methods
 - Only smart pointers must implement `Deref` and `DerefMut`
@@ -179,7 +179,7 @@ Eagerly implement common traits where appropriate:
 
 ## Quality Checklist
 
-Before publishing or reviewing Rust code, ensure:
+Before publishing or reviewing Rust code, make sure that:
 
 ### Core Requirements
 

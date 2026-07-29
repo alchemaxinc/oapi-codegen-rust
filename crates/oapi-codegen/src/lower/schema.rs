@@ -47,7 +47,7 @@ const X_ENUM_VARNAMES: &str = "x-enum-varnames";
 const X_ENUM_NAMES: &str = "x-enumNames";
 
 /// Cap on inline schema nesting the lowering pass will descend before erroring.
-/// Guards against stack exhaustion on pathological/hostile specs; well above any
+/// Guards against stack exhaustion on pathological/hostile specs. well above any
 /// realistic hand-written or generated spec, and independent of whatever
 /// recursion limit the YAML/JSON parser happens to enforce.
 const MAX_SCHEMA_DEPTH: usize = 100;
@@ -442,7 +442,7 @@ impl Mapper<'_> {
     /// Build a string enum from an OpenAPI string `enum`.
     ///
     /// `x-enum-varnames` / `x-enumNames` override variant identifiers positionally
-    /// (in declaration order); the wire value is preserved via `#[serde(rename)]`.
+    /// (in declaration order). The wire value is preserved via `#[serde(rename)]`.
     fn string_enum(&self, name: &str, values: &[Option<String>], data: &SchemaData) -> Enum {
         let varnames =
             extension_str_array(data, X_ENUM_VARNAMES).or_else(|| return extension_str_array(data, X_ENUM_NAMES));
@@ -645,19 +645,19 @@ pub(crate) fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat
     return ty;
 }
 
-/// Extract a string-valued extension (e.g. `x-rust-type`) from schema data.
+/// Extract a string-valued extension (for example `x-rust-type`) from schema data.
 fn extension_str<'a>(data: &'a SchemaData, key: &str) -> Option<&'a str> {
     let value = data.extensions.get(key)?;
     return value.as_str();
 }
 
-/// Extract a boolean-valued extension (e.g. `x-omitempty`) from schema data.
+/// Extract a boolean-valued extension (for example `x-omitempty`) from schema data.
 fn extension_bool(data: &SchemaData, key: &str) -> Option<bool> {
     let value = data.extensions.get(key)?;
     return value.as_bool();
 }
 
-/// Extract an integer-valued extension (e.g. `x-order`) from schema data.
+/// Extract an integer-valued extension (for example `x-order`) from schema data.
 fn extension_i64(data: &SchemaData, key: &str) -> Option<i64> {
     let value = data.extensions.get(key)?;
     return value.as_i64();
@@ -681,7 +681,7 @@ fn sort_by_order(mut fields: Vec<(Option<i64>, Field)>) -> Vec<Field> {
     return fields.into_iter().map(|(_, field)| return field).collect();
 }
 
-/// Extract a string-array extension (e.g. `x-enum-varnames`); `None` if the
+/// Extract a string-array extension (for example `x-enum-varnames`). `None` if the
 /// value is not an array of strings.
 fn extension_str_array<'a>(data: &'a SchemaData, key: &str) -> Option<Vec<&'a str>> {
     let array = data.extensions.get(key)?.as_array()?;

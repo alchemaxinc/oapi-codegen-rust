@@ -1,4 +1,4 @@
-//! Generator configuration, compatible with `oapi-codegen`'s YAML config files.
+//! Generator configuration, compatible with `oapi-codegen`'s YAML configuration files.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -11,8 +11,8 @@ use crate::error::Result;
 
 /// A generator configuration, mirroring the keys used by `oapi-codegen`.
 ///
-/// Unknown keys are ignored so that existing `oapi-codegen` configs can be used
-/// as-is; only the subset relevant to this tool is interpreted.
+/// Unknown keys are ignored so that existing `oapi-codegen` configurations can be used
+/// as-is. only the subset relevant to this tool is interpreted.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
@@ -31,7 +31,7 @@ pub struct Config {
     pub import_mapping: BTreeMap<String, String>,
 }
 
-/// The set of artifacts a config requests.
+/// The set of artifacts a configuration requests.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Generate {
@@ -52,18 +52,18 @@ pub struct Generate {
     pub server_urls: bool,
 }
 
-/// Config key of the [`Config::output_options`] section, as written in a config
-/// file. Must match the `kebab-case` serde name; guarded by a deserialization
+/// Config key of the [`Config::output_options`] section, as written in a configuration
+/// file. Must match the `kebab-case` serde name. guarded by a deserialization
 /// test.
 pub(crate) const OUTPUT_OPTIONS_KEY: &str = "output-options";
 
-/// Config key of [`OutputOptions::response_type_suffix`], as written in a config
-/// file. Must match the `kebab-case` serde name; guarded by a deserialization
+/// Config key of [`OutputOptions::response_type_suffix`], as written in a configuration
+/// file. Must match the `kebab-case` serde name. guarded by a deserialization
 /// test.
 pub(crate) const RESPONSE_TYPE_SUFFIX_KEY: &str = "response-type-suffix";
 
 /// Seed for a response enum's name suffix when
-/// [`OutputOptions::response_type_suffix`] is unset; `to_ident(_, Pascal)` turns
+/// [`OutputOptions::response_type_suffix`] is unset. `to_ident(_, Pascal)` turns
 /// it into the `Response` that terminates every default `<Op>Response` enum.
 pub(crate) const DEFAULT_RESPONSE_SUFFIX: &str = "response";
 
@@ -88,7 +88,7 @@ pub struct OutputOptions {
     #[serde(default)]
     pub exclude_operation_ids: Vec<String>,
     /// Remove these component schemas from the spec before lowering, so their
-    /// models are not generated. Filtering runs before pruning; if an excluded
+    /// models are not generated. Filtering runs before pruning. if an excluded
     /// schema is still referenced by a retained operation or schema, generation
     /// can fail or emit a reference to a type that is not declared.
     #[serde(default)]
@@ -102,7 +102,7 @@ pub struct OutputOptions {
 }
 
 impl Config {
-    /// Load and parse a config file.
+    /// Load and parse a configuration file.
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path).map_err(|source| {
             return Error::ReadConfig {

@@ -3,7 +3,7 @@ name: Semantic Versioning and Release
 on:
   push:
     branches:
-      # main -> full stable releases (+ crates.io); develop -> `-dev.N`
+      # main -> full stable releases (+ crates.io). develop -> `-dev.N`
       # prereleases via the semantic-release prerelease channel in .releaserc.json.
       - main
       - develop
@@ -21,7 +21,7 @@ permissions:
   pull-requests: write
 
 env:
-  # Pin cargo-edit so the version bump is reproducible; bump this to adopt a
+  # Pin cargo-edit so the version bump is reproducible. bump this to adopt a
   # newer release. Used by the build and publish jobs to stamp the tag version
   # into Cargo.toml before building/publishing.
   CARGO_EDIT_VERSION: "0.13.13"
@@ -94,7 +94,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          # semantic-release tags the released commit; check it out so we build
+          # semantic-release tags the released commit. make sure that it out so we build
           # from the released sources, then stamp the tag version into the
           # workspace manifests below (set-version keeps Cargo.lock consistent,
           # so the build still runs --locked).
@@ -123,7 +123,7 @@ jobs:
         run: cargo install cargo-edit --locked --version "${CARGO_EDIT_VERSION}" --bin cargo-set-version
 
       - name: Stamp the released version into Cargo.toml
-        # The tag is authoritative; write its version into the workspace so the
+        # The tag is authoritative. write its version into the workspace so the
         # built binary reports it via CARGO_PKG_VERSION.
         env:
           TAG: ${{ needs.semantic-release.outputs.tag }}
@@ -214,9 +214,9 @@ jobs:
       - name: Stamp the released version into Cargo.toml
         # The tag is authoritative for the version. Stamp it into the manifests
         # and make an ephemeral local commit (never pushed) so `cargo publish`
-        # sees a clean tree and we avoid `--allow-dirty` — which would otherwise
+        # sees a clean tree and we avoid `--allow-dirty` — which will otherwise
         # silently bundle any unrelated dirty file. Committing only these two
-        # paths keeps cargo's own dirty check as a guard against that.
+        # paths keeps cargo's own dirty make sure that as a guard against that.
         env:
           TAG: ${{ needs.semantic-release.outputs.tag }}
         run: |

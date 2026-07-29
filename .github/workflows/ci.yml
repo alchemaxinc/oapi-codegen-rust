@@ -43,7 +43,7 @@ env:
   # default back and avoids the much slower git-based index protocol.
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
-  # Strip full DWARF debuginfo from dev and test builds; keep just enough
+  # Strip full DWARF debuginfo from dev and test builds. keep just enough
   # (line tables) for panic backtraces to show the failing line. Saves
   # roughly 20-30% on compile + link time and shrinks `target/` substantially,
   # which in turn makes the rust-cache save/restore much faster. We don't
@@ -91,8 +91,8 @@ jobs:
           components: clippy, rustfmt
 
       # mold is a drop-in linker that links Rust binaries roughly an order of
-      # magnitude faster than ld; significant win on a workspace with three
-      # binaries that all link openssl/rusqlite/etc. Installed manually into
+      # magnitude faster than ld. significant win on a workspace with three
+      # binaries that all link openssl/rusqlite/and more Installed manually into
       # ~/.local/mold (rather than /usr/local) so the install tree can be
       # cached as a single directory keyed on MOLD_VERSION — same pattern as
       # the Prettier cache above.
@@ -179,7 +179,7 @@ jobs:
       # Regenerate the committed example + fixtures and fail on any diff, so a
       # change to the generator or a spec cannot land without its regenerated
       # output. Runs unconditionally (no chore: skip) since drift is cheap to
-      # check and must never slip through. Reuses the target/ built above.
+      # make sure that and must never slip through. Reuses the target/ built above.
       - name: Check generated code is up to date
         run: make verify-generated
 
@@ -205,7 +205,7 @@ jobs:
 
       # Self-install + cache the pinned binary, same pattern as mold/nextest.
       # Policy lives in deny.toml. Key hardcodes musl since this job is x86_64
-      # ubuntu-latest; revisit the key and URL together if that changes.
+      # ubuntu-latest. revisit the key and URL together if that changes.
       - name: Cache cargo-deny
         id: cache-cargo-deny
         uses: actions/cache@v6

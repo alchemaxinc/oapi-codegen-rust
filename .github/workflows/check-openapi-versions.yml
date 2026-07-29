@@ -44,7 +44,7 @@ jobs:
         run: |
           # Minor versions we already support, and our lowest supported version
           # (the floor below which upstream releases are intentionally ignored).
-          # sort -V keeps double-digit minors (e.g. 3.10) ordered correctly.
+          # sort -V keeps double-digit minors (for example 3.10) ordered correctly.
           supported=$(jq -r '.supported[]' .github/openapi-versions.json | sort -V -u)
           if [ -z "$supported" ]; then
             echo "::error::.github/openapi-versions.json must list at least one supported minor version under .supported"
@@ -109,7 +109,7 @@ jobs:
               echo "::notice::Reusing existing tracking issue for OpenAPI $minor: $url"
             fi
 
-            # Append an unformatted row; the next step runs Prettier to align it.
+            # Append an unformatted row. The next step runs Prettier to align it.
             if ! grep -Fq "| v${minor}.0 " README.md; then
               row="| v${minor}.0 | Planned | Tracking [here]($url). |"
               awk -v row="$row" \

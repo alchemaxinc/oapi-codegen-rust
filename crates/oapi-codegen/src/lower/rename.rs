@@ -7,7 +7,7 @@
 //! original schema name, resolving the type also requires rewriting those
 //! references so they point at the final identifier. The item names themselves
 //! are set from the same resolution map during lowering (see
-//! [`crate::lower::schema`]); this pass only rewrites the `Named` references
+//! [`crate::lower::schema`]). this pass only rewrites the `Named` references
 //! left pointing at the original name.
 
 use std::collections::HashMap;
@@ -39,7 +39,7 @@ use crate::naming::to_ident;
 ///
 /// * an `x-rust-name` override (inline schemas only), and
 /// * collision de-confliction, when distinct schema names collapse onto the same
-///   Rust identifier (e.g. `foo-bar` and `fooBar` both becoming `FooBar`) — the
+///   Rust identifier (for example `foo-bar` and `fooBar` both becoming `FooBar`) — the
 ///   later schema in document order gains a numeric suffix (`FooBar2`).
 ///
 /// Schemas whose emitted name is unchanged are omitted, so the common case
@@ -92,7 +92,7 @@ pub fn rewrite_service(service: &mut Service, renames: &HashMap<String, String>)
 /// Apply `visit` to every leaf [`RustType`] referenced by the service's
 /// operation signatures (path/query/header/cookie params, request and response
 /// bodies, and response headers). Container types (`Vec`/`Map`/`Option`) are
-/// traversed to their leaf; `visit` receives the leaf in place.
+/// traversed to their leaf. `visit` receives the leaf in place.
 fn visit_service_types(service: &mut Service, visit: &mut dyn FnMut(&mut RustType)) {
     for operation in &mut service.operations {
         for param in &mut operation.path_params {
@@ -199,14 +199,14 @@ fn rewrite_type(ty: &mut RustType, renames: &HashMap<String, String>) {
 ///
 /// In the flat layout, component models, per-operation types (response enums,
 /// parameter structs, request/response body enums), and the requested generator
-/// interfaces (`reserved`, e.g. the `Api` trait or `Client` struct) all share
+/// interfaces (`reserved`, for example the `Api` trait or `Client` struct) all share
 /// the crate root. A model whose name matches one of those — most commonly a
 /// schema named `<Op>Response`, or a schema literally named `Api`/`Client` —
 /// will produce two items with the same name. Rather than silently rename,
 /// generation fails so the author resolves the clash deliberately: rename the
 /// schema with `x-rust-name`, or, for a response-enum clash, set
 /// `output-options.response-type-suffix`. Only locally emitted models are
-/// considered; import-mapped models are referenced through a qualified path and
+/// considered. import-mapped models are referenced through a qualified path and
 /// cannot collide with a crate-root type.
 pub fn check_type_name_collisions(service: &Service, module: &Module, reserved: &[ReservedTypeName]) -> Result<()> {
     let models: HashSet<&str> = module.items.iter().map(|item| return item.name()).collect();
@@ -252,7 +252,7 @@ pub fn check_type_name_collisions(service: &Service, module: &Module, reserved: 
 /// taken by an emitted component model. `is_response` selects the remedy hint:
 /// for a response-enum clash it leads with the surgical, per-schema `x-rust-name`
 /// fix and offers the broad `response-type-suffix` as an alternative, since that
-/// suffix renames *every* response enum, not just the colliding one.
+/// suffix renames *every* response enum, not the colliding one.
 fn ensure_free(
     name: &crate::naming::RustIdent,
     artifact: &str,
