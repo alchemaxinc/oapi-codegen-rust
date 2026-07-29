@@ -537,7 +537,7 @@ fn emit_headers_extractor(headers: &Headers) -> Result<TokenStream> {
     });
 }
 
-/// Emit the `let <field> = ....` binding that reads and parses one header,
+/// Emit the `let <field> = ...` binding that reads and parses one header,
 /// returning a `400` on a missing required header or an unparseable value.
 ///
 /// String headers are taken verbatim. other scalars are `trim()`-ed before
@@ -622,7 +622,7 @@ fn emit_cookies_extractor(cookies: &Cookies) -> Result<TokenStream> {
     });
 }
 
-/// Emit the `let <field> = ....` binding that reads and parses one cookie from
+/// Emit the `let <field> = ...` binding that reads and parses one cookie from
 /// the jar, returning a `400` on a missing required cookie or an unparseable
 /// value. String cookies are taken verbatim. other scalars are `trim()`-ed
 /// before parsing.

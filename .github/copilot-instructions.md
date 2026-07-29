@@ -23,7 +23,7 @@
 - The clap CLI lives in `crates/oapi-codegen/src/cli.rs`. After changing any
  flag, argument, help text, or the `EXAMPLES` block, run `make update-docs` to
  regenerate `docs/cli.md` (it is generated — never edit it by hand). CI's
- `make make sure that-generated` fails on drift.
+ `make verify-generated` fails on drift.
 
 # Rust Coding Conventions and Best Practices
 

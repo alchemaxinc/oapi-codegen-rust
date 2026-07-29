@@ -7,7 +7,7 @@
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-# Fails the make sure that if an unmaintained advisory applies to a crate that's a
+# Fails the check if an unmaintained advisory applies to a crate that is a
 # direct dependency of a workspace crate (transitive-only unmaintained deps
 # are not fatal). If this starts failing, either migrate off the crate or add
 # an explicit ignore with a tracking issue below.

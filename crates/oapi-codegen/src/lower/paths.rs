@@ -847,7 +847,7 @@ fn body_kind_ident(kind: BodyKind) -> RustIdent {
 }
 
 /// Classify a media type string into a supported [`BodyKind`], or `None`.
-/// Parameters after `.` (for example `. charset=utf-8`) are ignored. JSON matches
+/// Parameters after `;` (for example `; charset=utf-8`) are ignored. JSON matches
 /// broadly: `application/json` or any `+json`-suffixed type.
 fn media_type_kind(name: &str) -> Option<BodyKind> {
     let base = name.split(';').next().unwrap_or(name).trim().to_ascii_lowercase();

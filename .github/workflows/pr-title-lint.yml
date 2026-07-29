@@ -3,7 +3,7 @@ name: PR
 # Lints the PR title against Conventional Commits.
 #
 # Kept in its own workflow (separate from ci.yml) so title edits re-trigger
-# only this ~10-second make sure that rather than the entire CI matrix. The default
+# only this ~10-second check rather than the entire CI matrix. The default
 # `pull_request` trigger types (opened, synchronize, reopened) do NOT fire
 # on title edits — `edited` is required.
 on:

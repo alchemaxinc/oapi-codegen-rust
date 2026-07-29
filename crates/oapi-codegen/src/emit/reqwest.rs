@@ -603,7 +603,7 @@ fn multipart_form_mutations(multipart: &Multipart) -> Vec<TokenStream> {
 
 /// The request-builder mutations that apply the operation's security credentials.
 ///
-/// Each configured credential is optional, so an unset scheme  sends no
+/// Each configured credential is optional, so an unset scheme sends no
 /// auth. Cookie-carried API keys are applied by [`cookie_mutations`] (folded into
 /// the single `Cookie` header), so they are skipped here. Operations that require
 /// an unresolved or [`SecuritySchemeKind::Unsupported`] scheme are rejected in

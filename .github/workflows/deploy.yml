@@ -94,7 +94,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          # semantic-release tags the released commit. make sure that it out so we build
+          # semantic-release tags the released commit. Check it out so we build
           # from the released sources, then stamp the tag version into the
           # workspace manifests below (set-version keeps Cargo.lock consistent,
           # so the build still runs --locked).
@@ -216,7 +216,7 @@ jobs:
         # and make an ephemeral local commit (never pushed) so `cargo publish`
         # sees a clean tree and we avoid `--allow-dirty` — which will otherwise
         # silently bundle any unrelated dirty file. Committing only these two
-        # paths keeps cargo's own dirty make sure that as a guard against that.
+        # paths keeps Cargo's own dirty check as a guard against that.
         env:
           TAG: ${{ needs.semantic-release.outputs.tag }}
         run: |

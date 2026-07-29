@@ -39,7 +39,7 @@ struct Usage {
 
 /// Compute the serde derive set for every generated model, keyed by its logical
 /// name. Names absent from the returned map are unreferenced by any operation
-/// (for example under `skip-prune`) and must derive both traits.
+/// (for example under `skip-prune`) derive both traits.
 pub(crate) fn model_derives(module: &Module, service: &Service, targets: Targets) -> HashMap<String, SerdeDerives> {
     let adjacency = adjacency(module);
     let mut usage: HashMap<String, Usage> = HashMap::new();
