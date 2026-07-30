@@ -8,6 +8,11 @@
 //! point at the final identifier. Lowering sets the item names from the same
 //! resolution map. See [`crate::lower::schema`]. This pass rewrites the `Named`
 //! references that still point at the original name.
+//!
+//! An unresolved collision is not reported here. Default pruning drops a schema
+//! that no operation uses, and a collision between two dropped schemas never
+//! reaches the output. [`type_renames`] therefore returns the collisions it found,
+//! and the caller reports them when the set of emitted models is final.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -34,36 +39,116 @@ use crate::naming::RustIdent;
 use crate::naming::X_RUST_NAME;
 use crate::naming::to_ident;
 
-/// A map from an original schema name to the final Rust type identifier. Every
-/// reference to that schema must resolve to this identifier. The map holds one
-/// entry for each top-level schema whose emitted name differs from the plain
-/// `to_ident(name)`. Two sources add an entry:
+/// The final Rust type name of every top-level schema, together with each
+/// collision that still needs a decision from the author.
 ///
-/// * an `x-rust-name` override (inline schemas only), and
-/// * a collision suffix from `output-options.type-name-suffix`, added to the
-///   second of two schema names that collapse onto one Rust identifier.
+/// A collision is not an error at resolution time. Default pruning drops a schema
+/// that no generated operation uses, and two dropped schemas that collapse onto
+/// one Rust identifier cause no problem in the output. The caller therefore holds
+/// this value until the module is final and then calls [`TypeNames::check_emitted`].
+#[derive(Debug)]
+pub struct TypeNames {
+    /// A map from an original schema name to the final Rust type identifier.
+    renames: HashMap<String, String>,
+    /// Every collision found, in document order.
+    collisions: Vec<Collision>,
+}
+
+/// Two schema names that collapse onto one Rust identifier, and no suffix to
+/// tell them apart. The fields are kept instead of a built [`Error`], because the
+/// caller decides later whether this collision reaches the output at all.
+#[derive(Debug)]
+struct Collision {
+    /// The Rust identifier that both schemas produce.
+    ident: String,
+    /// The schema that claimed `ident` first.
+    first: String,
+    /// The schema that collided with `first`.
+    second: String,
+    /// Whether `second` carries an `x-rust-name`, which changes the remedy.
+    overridden: bool,
+}
+
+impl TypeNames {
+    /// The renames to apply to every `Named` reference and item name.
+    ///
+    /// The map holds one entry for each top-level schema whose emitted name
+    /// differs from the plain `to_ident(name)`. Two sources add an entry:
+    ///
+    /// * an `x-rust-name` override (inline schemas only), and
+    /// * a collision suffix from `output-options.type-name-suffix`, added to the
+    ///   second of two schema names that collapse onto one Rust identifier.
+    ///
+    /// The map omits a schema whose emitted name does not change. The common case
+    /// therefore gives an empty map, and the rewrite passes do no work.
+    ///
+    /// An unresolved collision adds no entry, so both schemas keep the plain
+    /// name. The module then holds two items with that one name, which is why an
+    /// unchecked collision must never reach the emitter.
+    pub fn renames(&self) -> &HashMap<String, String> {
+        return &self.renames;
+    }
+
+    /// Report a collision whose Rust type name `module` still holds, and collect
+    /// every such collision into one result.
+    ///
+    /// The emitted name is what decides. Two items with one name do not compile,
+    /// whatever schema each item came from, and a schema that `module` does not
+    /// hold emits no item at all. The check is therefore keyed on the identifier
+    /// and not on the provenance of the two schemas.
+    ///
+    /// Keying on the identifier also covers a name that a hoisted inline type
+    /// takes. Pruning is name-based (see [`crate::lower::prune`]), so an inline
+    /// item named `FooBar` keeps two unused `foo-bar` and `fooBar` components
+    /// alive. Three items then share one name. The collision is real there, even
+    /// though no operation reaches either component.
+    ///
+    /// A caller that prunes nothing gets a module that holds every schema, so
+    /// every collision reports.
+    ///
+    /// # Errors
+    ///
+    /// Returns one [`Error::SchemaNameCollision`] for a single surviving
+    /// collision, or an [`Error::Validation`] that holds all of them.
+    pub fn check_emitted(&self, module: &Module) -> Result<()> {
+        let emitted: HashSet<&str> = module.items.iter().map(|item| return item.name()).collect();
+        let mut diagnostics = crate::lower::validate::Diagnostics::new();
+        for collision in &self.collisions {
+            if !emitted.contains(collision.ident.as_str()) {
+                continue;
+            }
+            diagnostics.push(Error::SchemaNameCollision {
+                ident: collision.ident.clone(),
+                first: collision.first.clone(),
+                second: collision.second.clone(),
+                hint: collision_hint(&collision.ident, &collision.second, collision.overridden),
+            });
+        }
+        return diagnostics.into_result();
+    }
+}
+
+/// Resolve the Rust type name of every top-level schema in `spec`.
 ///
-/// The map omits a schema whose emitted name does not change. The common case
-/// therefore gives an empty map, and this pass skips reference rewriting.
+/// Two distinct schema names can collapse onto one Rust identifier. For example,
+/// `foo-bar` and `fooBar` both become `FooBar`. When `suffix` is set, the second
+/// name takes the suffix. When `suffix` is `None`, the collision is recorded in
+/// the returned [`TypeNames`] for the caller to report, because the generator
+/// will not choose a name for one of two distinct schemas. That choice belongs to
+/// the author.
 ///
 /// # Errors
 ///
-/// Two distinct schema names can collapse onto one Rust identifier. For example,
-/// `foo-bar` and `fooBar` both become `FooBar`. Such a collision is an error when
-/// `suffix` is `None`. The generator will not choose a name for one of two
-/// distinct schemas, because that choice belongs to the author. The error names
-/// both schemas and both remedies.
-///
-/// A `suffix` that contributes no characters to an identifier is also an error.
+/// A `suffix` that contributes no characters to an identifier is an error.
 /// Casing removes punctuation, so a suffix such as `-` leaves the name unchanged
 /// and cannot resolve a collision. A valid suffix holds a letter or a digit.
-pub fn type_renames(spec: &Spec, suffix: Option<&str>) -> Result<HashMap<String, String>> {
+pub fn type_renames(spec: &Spec, suffix: Option<&str>) -> Result<TypeNames> {
     let suffix = checked_suffix(suffix)?;
     let mut resolved = HashMap::new();
+    let mut collisions = Vec::new();
     // Maps a claimed identifier back to the schema name that claimed it, so a
     // collision error can name the earlier schema and not the identifier alone.
     let mut claimed: HashMap<String, String> = HashMap::new();
-    let mut diagnostics = crate::lower::validate::Diagnostics::new();
     for (name, entry) in spec.schemas() {
         let override_name = match entry {
             ReferenceOr::Item(schema) => schema
@@ -81,11 +166,11 @@ pub fn type_renames(spec: &Spec, suffix: Option<&str>) -> Result<HashMap<String,
                     ident = suffixed_ident(&ident, suffix, &claimed);
                 }
                 None => {
-                    diagnostics.push(Error::SchemaNameCollision {
+                    collisions.push(Collision {
                         ident: ident.logical().to_owned(),
                         first: first.clone(),
                         second: name.clone(),
-                        hint: collision_hint(ident.logical(), name, override_name.is_some()),
+                        overridden: override_name.is_some(),
                     });
                     continue;
                 }
@@ -96,8 +181,10 @@ pub fn type_renames(spec: &Spec, suffix: Option<&str>) -> Result<HashMap<String,
             resolved.insert(name.clone(), ident.logical().to_owned());
         }
     }
-    diagnostics.into_result()?;
-    return Ok(resolved);
+    return Ok(TypeNames {
+        renames: resolved,
+        collisions,
+    });
 }
 
 /// Reject a configured suffix that adds nothing to a Rust type name.

@@ -92,6 +92,12 @@ One pass collects every collision in the document, so the report lists all of
 them at once. Numbered suffixes remain in use inside an enum, where the variant
 names belong to one type and a reader sees them next to their wire values.
 
+A collision is an error only when the generated file holds both schemas. Default
+pruning drops a schema that no generated operation reaches, and two dropped
+schemas cannot collide in a file that holds neither of them. The check therefore
+runs after pruning. With `output-options.skip-prune`, or with models-only
+generation, the file holds every schema and every collision reports.
+
 ## OpenAPI 3.0
 
 The generator reads OpenAPI 3.0 documents through the `openapiv3` crate.

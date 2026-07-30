@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: Unused colliding schemas whose name a hoisted inline type also takes
+  version: 1.0.0
+paths:
+  /foos:
+    get:
+      operationId: getFoo
+      responses:
+        "200":
+          description: A foo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Foo"
+components:
+  schemas:
+    # The operation reaches `Foo`. Its inline `bar` property hoists to an item
+    # named `FooBar`.
+    Foo:
+      type: object
+      required: [bar]
+      properties:
+        bar:
+          type: object
+          required: [x]
+          properties:
+            x:
+              type: string
+    # Two names that collapse onto `FooBar`, the same name the hoisted inline type
+    # takes. No operation reaches either schema, but pruning is name-based, so the
+    # hoisted item keeps both. Three items would then share one name, which does
+    # not compile, and generation must stop.
+    foo-bar:
+      type: object
+      properties:
+        sku:
+          type: string
+    fooBar:
+      type: object
+      properties:
+        quantity:
+          type: integer

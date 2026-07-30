@@ -466,7 +466,13 @@ const COMBINED_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// identifier, and the spec offers no remedy. `type_name_collision_suffix` must
 /// succeed, because `output-options.type-name-suffix` resolves the collision. The
 /// tests below exercise both.
-const NAMING_COLLISION_FIXTURES: &[&str] = &["type_name_collision_error", "type_name_collision_suffix"];
+const NAMING_COLLISION_FIXTURES: &[&str] = &[
+    "type_name_collision_error",
+    "type_name_collision_suffix",
+    "type_name_collision_pruned",
+    "type_name_collision_reachable",
+    "type_name_collision_inline_overlap",
+];
 
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {
@@ -1234,6 +1240,141 @@ fn type_name_suffix_with_punctuation_and_letters_is_accepted() {
         code.contains("pub struct OrderItemV2v2 "),
         "suffix repeated for the third collision: {code}",
     );
+}
+
+/// A server configuration for a collision fixture, with pruning under control of
+/// the caller. The four tests below differ only in this flag and the fixture.
+fn prune_config(skip_prune: bool) -> oapi_codegen::Config {
+    let mut config = oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            std_http_server: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    config.output_options.skip_prune = skip_prune;
+    return config;
+}
+
+/// Pruning drops a schema that no operation reaches, so a collision between two
+/// dropped schemas causes no problem in the output and must not stop generation.
+///
+/// The generator once resolved every type name before it knew which models the
+/// file holds, so two unused schemas failed a run that emitted neither of them.
+#[test]
+fn collision_between_pruned_schemas_is_not_an_error() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_pruned.yaml");
+    let code = oapi_codegen::generate(&fixture, &prune_config(false))
+        .expect("a collision between two pruned schemas must not stop generation");
+    assert!(
+        code.contains("pub struct Widget"),
+        "the reachable model is kept: {code}"
+    );
+    assert!(
+        !code.contains("OrderItem") && !code.contains("PriceTag"),
+        "neither colliding schema is emitted: {code}",
+    );
+}
+
+/// `skip-prune` keeps every schema, so each collision reaches the output and one
+/// run must report all of them.
+#[test]
+fn collision_between_unused_schemas_fails_with_skip_prune() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_pruned.yaml");
+    let err = oapi_codegen::generate(&fixture, &prune_config(true))
+        .expect_err("`skip-prune` emits every schema, so the collisions must stop generation");
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    assert_eq!(problems.len(), 2, "expected both collisions, got: {problems:?}");
+}
+
+/// Pruning keys reachability on the canonical `PascalCase` name, so a reference to
+/// one schema of a collision keeps both. Both then reach the output, and
+/// generation must stop.
+#[test]
+fn collision_that_survives_pruning_fails() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_reachable.yaml");
+    let err = oapi_codegen::generate(&fixture, &prune_config(false))
+        .expect_err("a collision the operation reaches must stop generation");
+    let oapi_codegen::Error::SchemaNameCollision { ident, .. } = &err else {
+        panic!("expected a single SchemaNameCollision, got: {err:?}");
+    };
+    assert_eq!(ident, "OrderItem");
+}
+
+/// A hoisted inline type can take the same name as two colliding component
+/// schemas that no operation reaches. Generation must still stop.
+///
+/// Pruning is name-based, so the hoisted item keeps the two unused components as
+/// well. Three items then share one name, and `rustc` rejects that with `E0428`.
+/// The name is what does not compile, whatever schema each item came from, so the
+/// check must stay keyed on the emitted identifier. Narrowing it to the component
+/// schemas that reachability alone keeps would emit code that does not build.
+#[test]
+fn collision_that_a_hoisted_inline_name_keeps_alive_fails() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("type_name_collision_inline_overlap.yaml");
+    let err = oapi_codegen::generate(&fixture, &prune_config(false))
+        .expect_err("three items sharing one name must stop generation");
+    let oapi_codegen::Error::SchemaNameCollision { ident, .. } = &err else {
+        panic!("expected a single SchemaNameCollision, got: {err:?}");
+    };
+    assert_eq!(ident, "FooBar");
+}
+
+/// The test above must not make every unused collision an error again. A collision
+/// on a name that no emitted item takes still generates, which is the point of the
+/// post-prune check.
+#[test]
+fn unused_collision_on_a_free_name_still_generates() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_pruned.yaml");
+    let code = oapi_codegen::generate(&fixture, &prune_config(false))
+        .expect("an unused collision on an otherwise free name must not stop generation");
+    assert!(
+        !code.contains("OrderItem"),
+        "the unused colliding schemas are not emitted: {code}",
+    );
+}
+
+/// A `server-urls`-only run emits constants and no type, so it resolves no type
+/// name. Neither a collision nor an unusable `type-name-suffix` concerns it.
+///
+/// This matches `response-type-suffix`, which only a server or client run reads.
+/// An option is checked by the run that uses it, and a spec-wide pass over the
+/// schemas would otherwise fail a run that emits none of them.
+#[test]
+fn server_urls_only_ignores_type_name_options() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_error.yaml");
+    let mut config = oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            server_urls: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // Both a collision in the spec and a suffix that cannot resolve one. Neither
+    // reaches the output, so neither stops the run.
+    config.output_options.type_name_suffix = Some("-".to_owned());
+    let code = oapi_codegen::generate(&fixture, &config).expect("a server-urls-only run emits no type to collide");
+    assert!(
+        !code.contains("OrderItem"),
+        "a server-urls-only run emits no model: {code}",
+    );
+}
+
+/// Models-only generation prunes nothing, so every collision reaches the file
+/// even when no operation refers to it.
+#[test]
+fn collision_between_unused_schemas_fails_for_models_only() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_pruned.yaml");
+    let err = oapi_codegen::generate_models_string(&fixture)
+        .expect_err("models-only generation emits every schema, so the collisions must stop generation");
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    assert_eq!(problems.len(), 2, "expected both collisions, got: {problems:?}");
 }
 
 /// A parameter declared `in: path` with no matching `{placeholder}` in the path

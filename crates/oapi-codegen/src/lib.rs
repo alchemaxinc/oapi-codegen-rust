@@ -45,15 +45,22 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     } else {
         None
     };
+    // A run that emits no type resolves no type name. `server-urls` on its own
+    // emits constants only, so it must not read `type-name-suffix` and must not
+    // report a collision between two schemas that it never looks at. This matches
+    // `response-type-suffix`, which only a server or client run reads.
+    if !(config.generate.models || want_server || want_client) {
+        return emit::emit_module(&Module::default(), server_urls.as_ref());
+    }
     // A set but useless suffix is an error, and not silently "unset". The
-    // lowering checks it, so every caller of `type_renames` gets the check.
+    // resolution checks it, so every caller of `type_renames` gets the check.
     // See `lower::rename::checked_suffix`.
     let type_name_suffix = config.output_options.type_name_suffix.as_deref();
-    let mut module = if config.generate.models || want_server || want_client {
-        lower::generate_models(&spec, type_name_suffix)?
-    } else {
-        Module::default()
-    };
+    // Resolve the type names one time and share them. An unresolved collision is
+    // held inside `names` and reported below, after pruning decides which models
+    // the file holds.
+    let names = lower::type_renames(&spec, type_name_suffix)?;
+    let mut module = lower::generate_models(&spec, &names)?;
     if want_server || want_client {
         let response_type_suffix = config
             .output_options
@@ -62,10 +69,14 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
             .filter(|suffix| return !suffix.is_empty())
             .unwrap_or(crate::config::DEFAULT_RESPONSE_SUFFIX);
         let mut service = lower::generate_service(&spec, &config.import_mapping, response_type_suffix)?;
-        lower::rewrite_service(&mut service, &lower::type_renames(&spec, type_name_suffix)?);
+        lower::rewrite_service(&mut service, names.renames());
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
+        // The module is final here, so a collision between two pruned schemas is
+        // no longer a problem and only a surviving one is reported. With
+        // `skip-prune` the module holds every schema, so every collision reports.
+        names.check_emitted(&module)?;
         let targets = emit::Targets {
             server: want_server,
             client: want_client,
@@ -73,6 +84,9 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         lower::check_type_name_collisions(&service, &module, &emit::reserved_type_names(targets))?;
         return emit::emit_flat(&module, &service, server_urls.as_ref(), targets);
     }
+    // Models-only generation prunes nothing, so the module holds every schema and
+    // every collision reports.
+    names.check_emitted(&module)?;
     return emit::emit_module(&module, server_urls.as_ref());
 }
 
@@ -86,11 +100,15 @@ pub fn generate_to_file(spec_path: &Path, config: &Config, output_path: &Path) -
 /// Generate Rust models from a spec file and return the formatted source.
 ///
 /// This entry point takes no config, so two schema names that collapse onto one
-/// Rust identifier are an error. Use [`generate`] with
+/// Rust identifier are an error. Every schema becomes an item, because no
+/// operation exists to prune against. Use [`generate`] with
 /// `output-options.type-name-suffix` to resolve such a collision by config.
 pub fn generate_models_string(spec_path: &Path) -> Result<String> {
     let spec = Spec::load(spec_path)?;
-    let module = lower::generate_models(&spec, None)?;
+    let names = lower::type_renames(&spec, None)?;
+    let module = lower::generate_models(&spec, &names)?;
+    // Every schema becomes an item here, so every collision reaches the file.
+    names.check_emitted(&module)?;
     let code = emit::emit_module(&module, None)?;
     return Ok(code);
 }
