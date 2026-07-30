@@ -1,0 +1,31 @@
+openapi: 3.0.3
+info:
+  title: Type name collision that pruning keeps
+  version: 1.0.0
+paths:
+  /order-items:
+    get:
+      operationId: listOrderItems
+      responses:
+        "200":
+          description: An order item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/order-item"
+components:
+  schemas:
+    # The operation reaches `order-item`, so pruning keeps it. Reachability uses
+    # the canonical `OrderItem` name, which `orderItem` also produces, so pruning
+    # keeps that schema too. The file would hold two items named `OrderItem`, and
+    # generation must stop.
+    order-item:
+      type: object
+      properties:
+        sku:
+          type: string
+    orderItem:
+      type: object
+      properties:
+        quantity:
+          type: integer

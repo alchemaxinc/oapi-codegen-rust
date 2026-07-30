@@ -96,6 +96,13 @@ Two remedies exist:
 
 The order is document order. The first schema in the file keeps the plain name.
 
+Only a collision that reaches the generated file is an error. Default pruning drops a schema that no generated
+operation uses, so two unused schemas that collapse onto one name do not stop generation. `skip-prune` keeps every
+schema, and then every collision is an error.
+
+A run that emits no type reads neither this key nor the collision rule. `server-urls` on its own emits constants, so it
+generates whatever the schemas hold.
+
 The suffix must hold at least one letter or digit. Casing removes punctuation and separators, so a suffix such as `-`
 or `_` leaves the type name unchanged and cannot resolve a collision. Such a suffix is an error. A suffix that mixes
 punctuation with letters is fine, because `-v2` reduces to `V2`. To make a collision an error instead, remove the key.

@@ -54,14 +54,16 @@ const MAX_SCHEMA_DEPTH: usize = 100;
 
 /// Lower every component schema in `spec` into a module of Rust items.
 ///
-/// `type_name_suffix` comes from `output-options.type-name-suffix`. It resolves
-/// two schema names that collapse onto one Rust identifier. `None` makes such a
-/// collision an error. See [`crate::lower::rename::type_renames`].
-pub fn generate_models(spec: &Spec, type_name_suffix: Option<&str>) -> Result<Module> {
-    let renames = crate::lower::rename::type_renames(spec, type_name_suffix)?;
+/// `names` holds the final Rust type name of every schema, from
+/// [`crate::lower::rename::type_renames`]. The caller resolves the names first,
+/// because it also applies them to the service and decides when to report an
+/// unresolved collision. A module built from unchecked `names` can hold two items
+/// with one name, so the caller must check `names` before the emit pass.
+pub fn generate_models(spec: &Spec, names: &crate::lower::rename::TypeNames) -> Result<Module> {
+    let renames = names.renames();
     let mut mapper = Mapper {
         spec,
-        renames: &renames,
+        renames,
         extra: Vec::new(),
         depth: 0,
     };
@@ -90,7 +92,7 @@ pub fn generate_models(spec: &Spec, type_name_suffix: Option<&str>) -> Result<Mo
     }
     items.append(&mut mapper.extra);
     let mut module = Module { items };
-    crate::lower::rename::rewrite_module(&mut module, &renames);
+    crate::lower::rename::rewrite_module(&mut module, renames);
     return Ok(module);
 }
 
@@ -727,8 +729,15 @@ mod tests {
     fn emit_yaml(yaml: &str) -> String {
         let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse spec");
         let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
-        let module = generate_models(&spec, None).expect("map schemas");
+        let module = lower_models(&spec).expect("map schemas");
         return crate::emit::emit_module(&module, None).expect("emit module");
+    }
+
+    /// Lower every schema with no configured suffix. None of the specs below
+    /// holds a name collision, so the resolved names need no further check.
+    fn lower_models(spec: &Spec) -> Result<Module> {
+        let names = crate::lower::rename::type_renames(spec, None)?;
+        return generate_models(spec, &names);
     }
 
     const PREAMBLE: &str = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n";
@@ -772,7 +781,7 @@ mod tests {
     #[test]
     fn schema_at_the_depth_limit_errors_instead_of_overflowing() {
         let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH));
-        let err = generate_models(&spec, None).expect_err("reaching the limit should hit the depth guard");
+        let err = lower_models(&spec).expect_err("reaching the limit should hit the depth guard");
         assert!(
             matches!(err, Error::SchemaDepthExceeded { limit, .. } if limit == MAX_SCHEMA_DEPTH),
             "expected SchemaDepthExceeded, got {err:?}"
@@ -782,7 +791,7 @@ mod tests {
     #[test]
     fn schema_just_under_the_depth_limit_still_lowers() {
         let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH - 1));
-        generate_models(&spec, None).expect("just under the limit should lower cleanly");
+        lower_models(&spec).expect("just under the limit should lower cleanly");
     }
 
     #[test]

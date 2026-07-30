@@ -1,0 +1,48 @@
+openapi: 3.0.3
+info:
+  title: Type name collisions that pruning removes
+  version: 1.0.0
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      responses:
+        "200":
+          description: A widget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+components:
+  schemas:
+    # The one schema the operation reaches. Pruning keeps it.
+    Widget:
+      type: object
+      properties:
+        id:
+          type: string
+    # Two names that collapse onto `OrderItem`, and no remedy. No operation
+    # reaches either schema, so default pruning drops both and the collision
+    # never reaches the output. Generation must succeed.
+    order-item:
+      type: object
+      properties:
+        sku:
+          type: string
+    orderItem:
+      type: object
+      properties:
+        quantity:
+          type: integer
+    # A second collision, on `PriceTag`. The operation does not reach it either.
+    # With `skip-prune` both collisions survive, so one run must report both.
+    price-tag:
+      type: object
+      properties:
+        currency:
+          type: string
+    priceTag:
+      type: object
+      properties:
+        amount:
+          type: number
