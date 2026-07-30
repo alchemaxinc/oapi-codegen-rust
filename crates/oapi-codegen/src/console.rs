@@ -182,10 +182,10 @@ pub fn report_install_failed(dep: &Dependency, detail: &str) {
 fn hints_for(err: &Error) -> Vec<String> {
     match err {
         Error::ReadSpec { path, source } => {
-            return io_read_hints("spec", path, source.kind());
+            return io_read_hints("spec file", path, source.kind());
         }
         Error::ReadConfig { path, source } => {
-            return io_read_hints("config", path, source.kind());
+            return io_read_hints("config file", path, source.kind());
         }
         Error::ReadRefFile { file, source } => {
             return io_read_hints("referenced file", file, source.kind());
@@ -250,11 +250,15 @@ fn hints_for(err: &Error) -> Vec<String> {
 }
 
 /// Hints for a failed read, keyed on the underlying IO error kind.
+///
+/// `what` names the kind of file, and the caller supplies the whole noun phrase
+/// (for example `spec file`). Every message below reads it as one noun, so no
+/// message adds a word of its own to it.
 fn io_read_hints(what: &str, path: &str, kind: ErrorKind) -> Vec<String> {
     match kind {
         ErrorKind::NotFound => {
             return vec![format!(
-                "No {what} file exists at `{path}`; check the path and your working directory."
+                "No {what} exists at `{path}`; check the path and your working directory."
             )];
         }
         ErrorKind::PermissionDenied => {
@@ -417,6 +421,26 @@ mod tests {
                 .iter()
                 .any(|h| return h.contains("does not look like an OpenAPI 3 document"))
         );
+    }
+
+    /// Every caller of [`io_read_hints`] must pass a complete noun phrase. A
+    /// caller that passes `referenced` instead of `referenced file` reads as
+    /// "No referenced exists at", and one that also adds `file` inside the
+    /// message reads as "No referenced file file exists at". This pins the three
+    /// call sites so neither mistake returns.
+    #[test]
+    fn read_hints_name_the_file_kind_one_time() {
+        for (what, expected) in [
+            ("spec file", "No spec file exists at `x.yaml`"),
+            ("config file", "No config file exists at `x.yaml`"),
+            ("referenced file", "No referenced file exists at `x.yaml`"),
+        ] {
+            let hints = io_read_hints(what, "x.yaml", ErrorKind::NotFound);
+            assert!(
+                hints.iter().any(|hint| return hint.starts_with(expected)),
+                "hint for `{what}` should start with `{expected}`, got: {hints:?}",
+            );
+        }
     }
 
     #[test]
