@@ -18,7 +18,7 @@ use crate::error::Result;
 pub struct Config {
     /// Target module/package name (informational for the Rust generator).
     pub package: Option<String>,
-    /// Output file path the generated code must be written to.
+    /// Output file path for generated code, when configured.
     pub output: Option<PathBuf>,
     /// Which artifacts to generate.
     #[serde(default)]

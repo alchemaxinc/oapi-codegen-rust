@@ -114,9 +114,9 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
   per-request and a panic will return a connection reset instead of a proper error response. Return `Result`, degrade
   gracefully, or log a warning and use a fallback.
 - **`expect()` is acceptable only in:**
-- Startup/config validation (fail fast with a clear message before serving traffic).
-- Client/resource construction (for example `reqwest::Client::builder().build().expect(...)`) that runs once at init.
-- Test code (where panicking is the failure mechanism).
+  - Startup/config validation (fail fast with a clear message before serving traffic).
+  - Client/resource construction (for example `reqwest::Client::builder().build().expect(...)`) that runs once at init.
+  - Test code (where panicking is the failure mechanism).
 - **Never use bare `unwrap()`** anywhere — if a panic is truly justified, use `expect("reason")` so the message
   explains the invariant.
 - For values that are compile-time known (for example static timezone strings), prefer compile-time constants over runtime
