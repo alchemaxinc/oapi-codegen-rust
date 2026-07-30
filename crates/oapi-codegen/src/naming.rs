@@ -4,9 +4,11 @@
 use proc_macro2::Ident;
 use proc_macro2::Span;
 
-/// The `x-rust-name` extension key: override a generated identifier (of a type,
-/// field, or server) with a caller-supplied name. Shared so every consumer and
-/// any user-facing message names the same key.
+/// The `x-rust-name` extension key: override a generated identifier with a
+/// caller-supplied name. It applies to a top-level schema (the type name), a
+/// property (the field name), an operation (the method name, and so the name of
+/// every artifact derived from it), and a `servers:` entry (the server URL name).
+/// Shared so every consumer and any user-facing message names the same key.
 pub(crate) const X_RUST_NAME: &str = "x-rust-name";
 
 /// `snake_case` / `UpperCamelCase` conversion used by [`to_ident`].

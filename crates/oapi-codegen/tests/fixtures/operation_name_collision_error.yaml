@@ -1,0 +1,34 @@
+openapi: 3.0.3
+info:
+  title: Operation name collision without a remedy
+  version: 1.0.0
+paths:
+  # Two `operationId`s that differ only in punctuation and case collapse onto one
+  # Rust method name (`list_widgets`). Every artifact of an operation derives from
+  # that name, so generation must stop.
+  /widgets:
+    get:
+      operationId: list-widgets
+      responses:
+        "200":
+          description: ok
+  /gadgets:
+    get:
+      operationId: listWidgets
+      responses:
+        "200":
+          description: ok
+  # A second, independent collision on `get_thing`. One run must report this
+  # collision and the one above together, and not stop at the first one.
+  /things:
+    get:
+      operationId: get-thing
+      responses:
+        "200":
+          description: ok
+  /stuff:
+    get:
+      operationId: getThing
+      responses:
+        "200":
+          description: ok

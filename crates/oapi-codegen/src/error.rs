@@ -155,6 +155,26 @@ pub enum Error {
         hint: String,
     },
 
+    /// Two operations collapsed onto one Rust method name.
+    ///
+    /// Every artifact of an operation derives from this one name, so the file
+    /// holds a duplicate trait method, response enum, and handler, and the router
+    /// points both routes at one handler. The generator will not choose which
+    /// operation keeps the plain name, because that choice belongs to the spec
+    /// author.
+    OperationNameCollision {
+        /// The Rust method name that both operations produce.
+        ident: String,
+        /// `method path` of the operation that claimed the name first, in
+        /// document order.
+        first: String,
+        /// `method path` of the operation that collided with `first`.
+        second: String,
+        /// How to resolve the clash. Rendered by the console as a hint, and not
+        /// by `Display`, so the console does not print it twice.
+        hint: String,
+    },
+
     /// `output-options.type-name-suffix` holds no identifier characters.
     ///
     /// Casing drops punctuation and separators, so a suffix such as `-` or `_`
@@ -256,6 +276,14 @@ impl std::fmt::Display for Error {
                     "component schemas `{first}` and `{second}` both produce the Rust type name `{ident}`"
                 );
             }
+            Error::OperationNameCollision {
+                ident, first, second, ..
+            } => {
+                return write!(
+                    f,
+                    "operations `{first}` and `{second}` both produce the Rust method name `{ident}`"
+                );
+            }
             Error::InvalidTypeNameSuffix { suffix, .. } => {
                 return write!(
                     f,
@@ -297,6 +325,7 @@ impl std::error::Error for Error {
             | Error::SchemaDepthExceeded { .. }
             | Error::TypeNameCollision { .. }
             | Error::SchemaNameCollision { .. }
+            | Error::OperationNameCollision { .. }
             | Error::InvalidTypeNameSuffix { .. }
             | Error::InvalidPathParameter { .. }
             | Error::UndeclaredPathParameter { .. }

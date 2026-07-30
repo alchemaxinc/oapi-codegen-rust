@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: Operation name collision resolved by x-rust-name
+  version: 1.0.0
+paths:
+  # `list-widgets` and `listWidgets` both give `list_widgets`. An `x-rust-name` on
+  # the second operation names its generated method, so the two no longer collide.
+  # Every artifact of that operation follows the overridden name, so the response
+  # enum is `ListGadgetsResponse` and the handler is `list_gadgets_handler`.
+  /widgets:
+    get:
+      operationId: list-widgets
+      responses:
+        "200":
+          description: ok
+  /gadgets:
+    get:
+      operationId: listWidgets
+      x-rust-name: list_gadgets
+      responses:
+        "200":
+          description: ok

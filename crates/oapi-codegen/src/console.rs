@@ -235,6 +235,7 @@ fn hints_for(err: &Error) -> Vec<String> {
         }
         Error::TypeNameCollision { hint, .. }
         | Error::SchemaNameCollision { hint, .. }
+        | Error::OperationNameCollision { hint, .. }
         | Error::InvalidTypeNameSuffix { hint, .. } => {
             return vec![hint.clone()];
         }

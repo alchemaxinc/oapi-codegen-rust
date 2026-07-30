@@ -459,19 +459,27 @@ const COMBINED_UNSUPPORTED_FIXTURES: &[&str] = &[
     "combined_reserved_name_client_error",
 ];
 
-/// Model-only fixtures for schema-name collisions. The golden-file tests do not
-/// cover these, because one must fail and the other needs a config option.
+/// Fixtures for name collisions. The golden-file tests do not cover these,
+/// because some must fail and others need a config option or an extension.
 ///
 /// `type_name_collision_error` must fail. Two schema names collapse onto one Rust
 /// identifier, and the spec offers no remedy. `type_name_collision_suffix` must
-/// succeed, because `output-options.type-name-suffix` resolves the collision. The
-/// tests below exercise both.
+/// succeed, because `output-options.type-name-suffix` resolves the collision.
+///
+/// The `operation_name_collision_*` fixtures do the same for a method name.
+/// `_error` and `_synthesised` must fail, `_rust_name` succeeds through
+/// `x-rust-name`, and `_filtered` succeeds because a filter removes one of the two
+/// operations before lowering. The tests below exercise each one.
 const NAMING_COLLISION_FIXTURES: &[&str] = &[
     "type_name_collision_error",
     "type_name_collision_suffix",
     "type_name_collision_pruned",
     "type_name_collision_reachable",
     "type_name_collision_inline_overlap",
+    "operation_name_collision_error",
+    "operation_name_collision_rust_name",
+    "operation_name_collision_synthesised",
+    "operation_name_collision_filtered",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -1375,6 +1383,120 @@ fn collision_between_unused_schemas_fails_for_models_only() {
         panic!("expected an aggregated Validation error, got: {err:?}");
     };
     assert_eq!(problems.len(), 2, "expected both collisions, got: {problems:?}");
+}
+
+/// Two `operationId`s that collapse onto one Rust method name must stop
+/// generation, and one run must report every collision.
+///
+/// Every artifact of an operation derives from its method name, so a collision
+/// emitted a duplicate trait method, response enum, and handler, and pointed both
+/// routes at one handler. `rustc` rejects that with `E0428`.
+#[test]
+fn colliding_operation_ids_fail() {
+    let fixture = tests_dir().join("fixtures").join("operation_name_collision_error.yaml");
+    let err = oapi_codegen::generate(&fixture, &server_config())
+        .expect_err("two operations that produce one method name must stop generation");
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    assert_eq!(problems.len(), 2, "expected both collisions, got: {problems:?}");
+    let report = problems
+        .iter()
+        .map(|problem| {
+            return problem.to_string();
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+    assert!(
+        report.contains("list_widgets") && report.contains("get_thing"),
+        "the report names both colliding method names, got: {report}",
+    );
+    assert!(
+        report.contains("get /widgets") && report.contains("get /gadgets"),
+        "the report names the route of each colliding operation, got: {report}",
+    );
+}
+
+/// The client emitter derives its names from the same lowered operation, so it
+/// must reject the same collision. One check in the shared lowering pass covers
+/// both emitters.
+#[test]
+fn colliding_operation_ids_fail_for_the_client() {
+    let fixture = tests_dir().join("fixtures").join("operation_name_collision_error.yaml");
+    let err = oapi_codegen::generate(&fixture, &client_config())
+        .expect_err("a client run derives the same names, so the collision must stop it");
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    assert_eq!(problems.len(), 2, "expected both collisions, got: {problems:?}");
+}
+
+/// `x-rust-name` is the only escape hatch for an operation, and it names every
+/// artifact of that operation and not the trait method alone.
+#[test]
+fn x_rust_name_resolves_an_operation_collision() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_name_collision_rust_name.yaml");
+    let code = oapi_codegen::generate(&fixture, &server_config())
+        .expect("`x-rust-name` must resolve the collision it exists for");
+    for expected in [
+        "fn list_widgets",
+        "fn list_gadgets",
+        "enum ListWidgetsResponse",
+        "enum ListGadgetsResponse",
+        "list_gadgets_handler",
+    ] {
+        assert!(
+            code.contains(expected),
+            "the override names every artifact, and `{expected}` is missing from: {code}",
+        );
+    }
+}
+
+/// An operation with no `operationId` takes its name from the method and the path,
+/// so two such paths can collide as well. The remedy differs, because there is no
+/// `operationId` to change.
+#[test]
+fn colliding_synthesised_operation_names_fail() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_name_collision_synthesised.yaml");
+    let err = oapi_codegen::generate(&fixture, &server_config())
+        .expect_err("two synthesised names that collide must stop generation");
+    let oapi_codegen::Error::OperationNameCollision { ident, hint, .. } = &err else {
+        panic!("expected a single OperationNameCollision, got: {err:?}");
+    };
+    assert_eq!(ident, "get_widgets_list");
+    assert!(
+        hint.contains("declares no `operationId`"),
+        "the remedy must address the missing `operationId`, got: {hint}",
+    );
+}
+
+/// Filtering runs before lowering, so a collision that a filter removes must not
+/// stop generation. This is the trap the schema-name check fell into: reporting a
+/// collision between an item the file holds and one that it never emits.
+#[test]
+fn operation_collision_a_filter_removes_still_generates() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_name_collision_filtered.yaml");
+    let mut config = server_config();
+    config
+        .output_options
+        .exclude_operation_ids
+        .push("listWidgets".to_owned());
+    let code = oapi_codegen::generate(&fixture, &config)
+        .expect("only one operation survives the filter, so no collision remains");
+    assert!(
+        code.contains("fn list_widgets"),
+        "the operation that survives is emitted: {code}",
+    );
+    assert!(
+        !code.contains("/gadgets"),
+        "the operation the filter removes is not emitted: {code}",
+    );
 }
 
 /// A parameter declared `in: path` with no matching `{placeholder}` in the path
