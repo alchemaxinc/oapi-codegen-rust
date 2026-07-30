@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: Per-operation types that take the name of a generator interface
+  version: 1.0.0
+paths:
+  # A `response-type-suffix` that adds no characters leaves each response enum
+  # named after its operation alone. The response enum of `api` then takes `Api`,
+  # which the server interface trait also takes. The names of `client` and
+  # `client_error` do the same for the client target. The interface names are fixed,
+  # so only the operation side can move.
+  /a:
+    get:
+      operationId: api
+      responses:
+        "200":
+          description: OK
+  /b:
+    get:
+      operationId: client
+      responses:
+        "200":
+          description: OK
+  /c:
+    get:
+      operationId: client_error
+      responses:
+        "200":
+          description: OK

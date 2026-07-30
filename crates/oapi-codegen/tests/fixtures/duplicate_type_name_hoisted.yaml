@@ -1,0 +1,37 @@
+openapi: 3.0.3
+info:
+  title: A hoisted inline type that takes the name of a component schema
+  version: 1.0.0
+paths:
+  /foos:
+    get:
+      operationId: getFoo
+      responses:
+        "200":
+          description: A foo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Foo"
+components:
+  schemas:
+    # The inline `bar` property hoists to an item named after its property path,
+    # which gives `FooBar`.
+    Foo:
+      type: object
+      required: [bar]
+      properties:
+        bar:
+          type: object
+          required: [x]
+          properties:
+            x:
+              type: string
+    # This component also produces `FooBar`. The resolution pass compares component
+    # names only, so it sees one name here and reports nothing. The file then holds
+    # two items named `FooBar`, which does not compile, and generation must stop.
+    FooBar:
+      type: object
+      properties:
+        sku:
+          type: string

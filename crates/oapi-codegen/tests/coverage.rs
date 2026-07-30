@@ -470,6 +470,12 @@ const COMBINED_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// `_error` and `_synthesised` must fail, `_rust_name` succeeds through
 /// `x-rust-name`, and `_filtered` succeeds because a filter removes one of the two
 /// operations before lowering. The tests below exercise each one.
+///
+/// `duplicate_type_name_hoisted` must fail. A hoisted inline type takes the name
+/// of a component schema, which the component-name resolution pass cannot see.
+/// The `operation_type_collision_*` fixtures cover two per-operation types that
+/// take one name. Both need a `response-type-suffix` to reach the clash, so both
+/// succeed with the default config and fail with that option set.
 const NAMING_COLLISION_FIXTURES: &[&str] = &[
     "type_name_collision_error",
     "type_name_collision_suffix",
@@ -480,6 +486,11 @@ const NAMING_COLLISION_FIXTURES: &[&str] = &[
     "operation_name_collision_rust_name",
     "operation_name_collision_synthesised",
     "operation_name_collision_filtered",
+    "duplicate_type_name_hoisted",
+    "operation_type_collision_one_operation",
+    "operation_type_collision_two_operations",
+    "operation_type_collision_aggregated",
+    "operation_type_collision_reserved",
 ];
 
 /// Absolute path to the crate's `tests` directory.
@@ -1149,6 +1160,218 @@ fn schema_name_collision_without_remedy_fails() {
         !message.contains("x-rust-name"),
         "`Display` must not repeat the hint that the console prints, got: {message}",
     );
+}
+
+/// A hoisted inline type that takes the name of a component schema must stop
+/// generation. The component-name resolution pass compares `components` entries
+/// only, so it sees one `FooBar` and reports nothing. The emitted item names hold
+/// the duplicate, which is why the check reads the final module.
+#[test]
+fn hoisted_inline_type_that_duplicates_a_schema_fails() {
+    let fixture = tests_dir().join("fixtures").join("duplicate_type_name_hoisted.yaml");
+    let err = oapi_codegen::generate_models_string(&fixture)
+        .expect_err("a hoisted inline type that duplicates a schema name must stop generation");
+    let oapi_codegen::Error::DuplicateTypeName { name, hint } = &err else {
+        panic!("expected DuplicateTypeName, got: {err:?}");
+    };
+    assert_eq!(name, "FooBar");
+    // An inline schema carries no name to override, so advice to rename "the
+    // schema" with `x-rust-name` would be impossible to follow. The hint must
+    // name an action the author can take.
+    assert!(
+        hint.contains("enclosing component schema") && hint.contains("$ref"),
+        "the hint must offer a remedy that an inline schema allows, got: {hint}",
+    );
+    assert!(
+        !err.to_string().contains("x-rust-name"),
+        "`Display` must not repeat the hint that the console prints, got: {err}",
+    );
+}
+
+/// The same duplicate must also stop a server run, which reaches the check
+/// through a different path than models-only generation.
+#[test]
+fn hoisted_inline_duplicate_fails_for_the_server() {
+    let fixture = tests_dir().join("fixtures").join("duplicate_type_name_hoisted.yaml");
+    let err = oapi_codegen::generate(&fixture, &server_config())
+        .expect_err("a hoisted duplicate must stop a server run as well");
+    assert!(
+        matches!(&err, oapi_codegen::Error::DuplicateTypeName { name, .. } if name == "FooBar"),
+        "expected DuplicateTypeName for `FooBar`, got: {err:?}",
+    );
+}
+
+/// Two per-operation types of one operation that take one name must fail. No
+/// method name can separate two types of one operation, so the hint must name the
+/// suffix that made them equal and must not suggest `x-rust-name`.
+#[test]
+fn operation_types_of_one_operation_that_collide_fail() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_type_collision_one_operation.yaml");
+    let mut config = server_config();
+    config.output_options.response_type_suffix = Some("Query".to_owned());
+    let err = oapi_codegen::generate(&fixture, &config)
+        .expect_err("a response enum that takes its own query-struct name must stop generation");
+    let oapi_codegen::Error::OperationTypeCollision { name, hint, .. } = &err else {
+        panic!("expected OperationTypeCollision, got: {err:?}");
+    };
+    assert_eq!(name, "AQuery");
+    assert!(
+        hint.contains("response-type-suffix") && !hint.contains("x-rust-name"),
+        "the hint must name the suffix and must not suggest a method rename, got: {hint}",
+    );
+    let message = err.to_string();
+    assert!(
+        message.contains("response enum") && message.contains("query-parameter struct"),
+        "the message must name both artifacts, got: {message}",
+    );
+}
+
+/// The same spec must generate with the default suffix. The clash comes from the
+/// configured suffix and not from the spec, so the check must not reject a spec
+/// that no option breaks.
+#[test]
+fn operation_types_of_one_operation_generate_by_default() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_type_collision_one_operation.yaml");
+    oapi_codegen::generate(&fixture, &server_config())
+        .expect("the default response suffix must leave this spec free of collisions");
+}
+
+/// Two per-operation types of two different operations that take one name must
+/// fail. A method name can separate them here, so the hint names `x-rust-name` on
+/// one of the two operations.
+#[test]
+fn operation_types_of_two_operations_that_collide_fail() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_type_collision_two_operations.yaml");
+    let mut config = server_config();
+    config.output_options.response_type_suffix = Some("AltQuery".to_owned());
+    let err = oapi_codegen::generate(&fixture, &config)
+        .expect_err("per-operation types of two operations that take one name must fail");
+    let oapi_codegen::Error::OperationTypeCollision {
+        name,
+        first,
+        second,
+        hint,
+    } = &err
+    else {
+        panic!("expected OperationTypeCollision, got: {err:?}");
+    };
+    assert_eq!(name, "AAltQuery");
+    assert!(
+        first.contains("`a`") && second.contains("`a_alt`"),
+        "the problem must name both operations, got: {first} / {second}",
+    );
+    assert!(
+        hint.contains("x-rust-name") && hint.contains("a_alt"),
+        "the hint must offer a method rename on a named operation, got: {hint}",
+    );
+}
+
+/// One run must report every per-operation collision. Two operations that each
+/// clash cost one run, not one run for each clash.
+#[test]
+fn operation_type_collisions_are_reported_together() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_type_collision_aggregated.yaml");
+    let mut config = server_config();
+    // This suffix makes the response enum of each operation take the name of that
+    // operation's own query-parameter struct, so both operations clash.
+    config.output_options.response_type_suffix = Some("Query".to_owned());
+    let err = oapi_codegen::generate(&fixture, &config).expect_err("both collisions must fail generation");
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    assert_eq!(
+        problems.len(),
+        2,
+        "one run must report every collision, got: {problems:?}"
+    );
+    let report = problems
+        .iter()
+        .map(|problem| {
+            return problem.to_string();
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+    assert!(
+        report.contains("AQuery") && report.contains("BQuery"),
+        "the report must cover both operations, got: {report}",
+    );
+}
+
+/// A per-operation type that takes the name of a generator interface must stop
+/// generation. The reserved names were once compared against component models
+/// only, so a response enum named `Api` emitted both `pub enum Api` and
+/// `pub trait Api` and exited successfully.
+#[test]
+fn operation_type_that_takes_a_reserved_name_fails() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_type_collision_reserved.yaml");
+    // A suffix with no identifier characters leaves each response enum named after
+    // its operation alone, so `api` produces the reserved name `Api`.
+    let mut config = server_config();
+    config.output_options.response_type_suffix = Some("-".to_owned());
+    let err = oapi_codegen::generate(&fixture, &config)
+        .expect_err("a response enum named like the `Api` trait must stop generation");
+    let oapi_codegen::Error::OperationTypeCollision { name, first, hint, .. } = &err else {
+        panic!("expected OperationTypeCollision, got: {err:?}");
+    };
+    assert_eq!(name, "Api");
+    assert!(
+        first.contains("server interface trait"),
+        "the problem must name the interface that reserves the name, got: {first}",
+    );
+    // The interface name is fixed, so the remedy must act on the operation.
+    assert!(
+        hint.contains("x-rust-name") && hint.contains("api"),
+        "the hint must offer a method rename on the operation, got: {hint}",
+    );
+}
+
+/// The client target reserves `Client` and `ClientError`. Both must be checked
+/// against per-operation types, and one run must report both.
+#[test]
+fn operation_types_that_take_client_reserved_names_fail() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_type_collision_reserved.yaml");
+    let mut config = client_config();
+    config.output_options.response_type_suffix = Some("-".to_owned());
+    let err = oapi_codegen::generate(&fixture, &config).expect_err("both reserved client names must collide");
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    let report = problems
+        .iter()
+        .map(|problem| {
+            return problem.to_string();
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+    assert!(
+        report.contains("`Client`") && report.contains("`ClientError`"),
+        "one run must report both reserved names, got: {report}",
+    );
+}
+
+/// A reserved name is only reserved when its target is requested. The server-only
+/// `Api` trait must not block an operation whose response enum takes that name in a
+/// client-only run.
+#[test]
+fn reserved_name_check_for_operation_types_is_target_scoped() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("operation_type_collision_reserved.yaml");
+    let mut config = client_config();
+    config.output_options.response_type_suffix = Some("Response".to_owned());
+    oapi_codegen::generate(&fixture, &config).expect("a client-only run must not reserve the server-only `Api` name");
 }
 
 /// One run must report every independent collision. A spec with two separate

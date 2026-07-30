@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: Two per-operation types of one operation that take one name
+  version: 1.0.0
+paths:
+  # With `response-type-suffix: Query`, the response enum of operation `a` takes
+  # the name `AQuery`, which is also the name of its own query-parameter struct.
+  # No method name can separate two types of one operation, so the remedy is the
+  # suffix and not `x-rust-name`.
+  /a:
+    get:
+      operationId: a
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK

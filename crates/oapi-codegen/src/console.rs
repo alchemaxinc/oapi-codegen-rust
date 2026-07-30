@@ -234,6 +234,8 @@ fn hints_for(err: &Error) -> Vec<String> {
             )];
         }
         Error::TypeNameCollision { hint, .. }
+        | Error::DuplicateTypeName { hint, .. }
+        | Error::OperationTypeCollision { hint, .. }
         | Error::SchemaNameCollision { hint, .. }
         | Error::OperationNameCollision { hint, .. }
         | Error::InvalidTypeNameSuffix { hint, .. } => {

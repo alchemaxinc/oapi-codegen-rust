@@ -83,3 +83,38 @@ paths:
 There is no suffix option for a method name, unlike `type-name-suffix` for a type
 name. A consumer of the generated code writes each method name into an `impl`
 block, so every method name stays the choice of the spec author.
+
+## Inline schemas
+
+`x-rust-name` applies to a top-level schema and to a property. It does not apply to
+an inline schema. Go's `oapi-codegen` documents `x-go-name` the same way.
+
+The generator hoists an inline object to the crate root and names it after the
+property path that encloses it. The inline `bar` property of schema `Foo` therefore
+gives an item named `FooBar`. A component schema named `FooBar` gives that same
+name, so the file holds two items with one name and does not compile. The generator
+reports the clash and stops.
+
+Two remedies apply. Put `x-rust-name` on the component schema that encloses the
+inline object, or move the inline object into a component schema of its own and
+refer to it with `$ref`:
+
+```yaml
+components:
+  schemas:
+    Foo:
+      type: object
+      properties:
+        bar:
+          $ref: "#/components/schemas/FooBarInner"
+    FooBarInner:
+      type: object
+      properties:
+        x:
+          type: string
+    FooBar:
+      type: object
+      properties:
+        sku:
+          type: string
+```

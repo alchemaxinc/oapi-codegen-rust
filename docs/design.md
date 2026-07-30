@@ -121,6 +121,42 @@ Filtering runs before lowering, so an operation that
 collision. One pass over the paths collects every collision, so the report lists all
 of them at once.
 
+## One namespace holds every generated type
+
+The flat layout puts every generated type at the crate root. Four kinds of type
+share one namespace there. These are the component models, the inline schemas that
+the generator hoists, the per-operation types, and the generator interfaces (`Api`,
+`Client`, and `ClientError`). Any two of them that take one name emit two items with
+that name, which does not compile. One check therefore holds one namespace and
+reports every name that two items take. Three cases reach it.
+
+A hoisted inline schema takes its name from the property path that encloses it. The
+inline `bar` property of schema `Foo` gives `FooBar`, which is also the name that a
+component schema `FooBar` gives. Name resolution compares `components` entries only,
+so it cannot see this pair. The check reads the final item names instead.
+
+An inline schema carries no name of its own, so `x-rust-name` on that schema has
+nothing to override. The remedy acts on the component schema that encloses it, or it
+moves the inline schema into a component of its own. This matches Go's
+`oapi-codegen`, which documents `x-go-name` on a component schema and on a property,
+and not on an inline schema.
+
+A per-operation type can take the name of a model. A schema named `<Op>Response` is
+the common case.
+
+A per-operation type can take the name of a generator interface. An operation named
+`api` gives a response enum named `Api`, which is also the name of the server
+interface trait. The interface name is fixed, so only the operation side can move. A
+reserved name applies only when its target is requested, so a client-only run does
+not reserve `Api`.
+
+A per-operation type can also take the name of another per-operation type. Every
+such name is a method name plus a fixed suffix, so a `response-type-suffix` such as
+`Query` makes one operation's response enum take the name of a query-parameter
+struct. Two types of one operation need a different suffix, because no method name
+separates them. Two types of different operations take `x-rust-name` on one of the
+two operations.
+
 ## OpenAPI 3.0
 
 The generator reads OpenAPI 3.0 documents through the `openapiv3` crate.

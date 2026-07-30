@@ -139,6 +139,47 @@ pub enum Error {
         hint: String,
     },
 
+    /// Two emitted items took one Rust type name, and at least one of them came
+    /// from an inline schema that lowering hoisted to the crate root.
+    ///
+    /// Two component schemas that collapse onto one identifier are reported as
+    /// [`Error::SchemaNameCollision`], which names both schemas. A hoisted inline
+    /// schema has no name of its own, so this variant names the identifier only.
+    DuplicateTypeName {
+        /// The Rust type name that two emitted items take.
+        name: String,
+        /// How to resolve the clash. Rendered by the console as a hint, and not
+        /// by `Display`, so the console does not print it twice.
+        hint: String,
+    },
+
+    /// A per-operation type took the Rust type name of a second per-operation
+    /// type, or of a generator interface.
+    ///
+    /// Every per-operation type name derives from the method name of its
+    /// operation and a fixed suffix, so two of them clash when a configured suffix
+    /// makes them equal, or when two method names differ only by a suffix that
+    /// another artifact also adds. The same suffix can also give a per-operation
+    /// type the fixed name of a requested interface, such as the `Api` trait.
+    ///
+    /// A clash with a model is reported as [`Error::TypeNameCollision`] instead,
+    /// because the remedy names the schema and not an operation.
+    OperationTypeCollision {
+        /// The Rust type name that both items take.
+        name: String,
+        /// The item that claimed the name first, in document order, as a noun
+        /// phrase. A per-operation type names its kind and its operation. A
+        /// generator interface names what emits it and holds no operation, because
+        /// the name is fixed and belongs to no operation.
+        first: String,
+        /// The item that collided with `first`, always a per-operation type, in the
+        /// same form.
+        second: String,
+        /// How to resolve the clash. Rendered by the console as a hint, and not
+        /// by `Display`, so the console does not print it twice.
+        hint: String,
+    },
+
     /// Two component schema names collapsed onto one Rust identifier.
     ///
     /// The generator will not choose which schema keeps the plain name, because
@@ -268,6 +309,14 @@ impl std::fmt::Display for Error {
                     "generated {artifact} `{name}` collides with a component schema of the same name"
                 );
             }
+            Error::DuplicateTypeName { name, .. } => {
+                return write!(f, "two generated items both take the Rust type name `{name}`");
+            }
+            Error::OperationTypeCollision {
+                name, first, second, ..
+            } => {
+                return write!(f, "{first} and {second} both take the Rust type name `{name}`");
+            }
             Error::SchemaNameCollision {
                 ident, first, second, ..
             } => {
@@ -324,6 +373,8 @@ impl std::error::Error for Error {
             | Error::UnsupportedSchema { .. }
             | Error::SchemaDepthExceeded { .. }
             | Error::TypeNameCollision { .. }
+            | Error::DuplicateTypeName { .. }
+            | Error::OperationTypeCollision { .. }
             | Error::SchemaNameCollision { .. }
             | Error::OperationNameCollision { .. }
             | Error::InvalidTypeNameSuffix { .. }
