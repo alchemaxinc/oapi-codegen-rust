@@ -6,7 +6,7 @@ const README_MD: &str = "README.md";
 
 /// Serializes tests that mutate the process working directory. `set_current_dir`
 /// is process-global, so the doc tests that switch directories must not run
-/// concurrently or they would observe each other's directory.
+/// concurrently or they will observe each other's directory.
 static WORKING_DIR_LOCK: Mutex<()> = Mutex::new(());
 
 struct WorkingDirGuard {

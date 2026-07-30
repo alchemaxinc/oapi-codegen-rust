@@ -7,7 +7,7 @@
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-# Fails the check if an unmaintained advisory applies to a crate that's a
+# Fails the check if an unmaintained advisory applies to a crate that is a
 # direct dependency of a workspace crate (transitive-only unmaintained deps
 # are not fatal). If this starts failing, either migrate off the crate or add
 # an explicit ignore with a tracking issue below.
@@ -18,13 +18,13 @@ ignore = [
 
 [bans]
 # Duplicate versions of the same crate bloat builds but aren't a hard failure
-# on their own; surface them without blocking merges.
+# on their own. Surface them without blocking merges.
 multiple-versions = "warn"
 wildcards = "deny"
 deny = []
 
 [licenses]
-# Workspace itself is MIT (see Cargo.toml); allow-list covers the licenses used
+# Workspace itself is MIT (see Cargo.toml). allow-list covers the licenses used
 # across the current dependency tree plus common permissive variants.
 allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-3-Clause", "Unicode-3.0"]
 confidence-threshold = 0.8

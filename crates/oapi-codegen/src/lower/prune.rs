@@ -4,14 +4,14 @@
 //! `#/components` entries before generation: only the schema models reachable
 //! from an operation survive. Roots are the types an operation references
 //! directly (path/query/header/cookie parameters, request and response bodies,
-//! and response headers); reachability then follows each retained model's own
+//! and response headers). Reachability then follows each retained model's own
 //! type references to a fixpoint, so a chain `A -> B -> C` rooted at an
 //! operation keeps all three while a model referenced by nothing is dropped.
 //!
 //! Import-mapped (`External`) types are emitted into other modules and never
 //! appear as items here, so they are naturally excluded from the reachable set.
 //! Pruning is only applied when a server or client is generated (operations
-//! provide the roots); models-only generation keeps every schema.
+//! provide the roots). Models-only generation keeps every schema.
 
 use std::collections::BTreeSet;
 use std::collections::HashMap;

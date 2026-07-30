@@ -318,7 +318,7 @@ impl Spec {
 
     /// Look up a named component in the main document (`origin` is `None`) or a
     /// referenced document, returning an owned copy. `select` extracts the
-    /// specific component map's entry from a document; `reference` is the full
+    /// specific component map's entry from a document. `reference` is the full
     /// `$ref` fragment currently being resolved, reported verbatim in the
     /// unresolved-reference error so a miss points at the exact ref (kind,
     /// component, and file). The origin dispatch and error are shared across
@@ -384,9 +384,9 @@ impl Spec {
 /// Extract the trailing schema name from a *same-document* `$ref`
 /// (`#/components/schemas/Foo` -> `Foo`).
 ///
-/// Cross-file references (e.g. `schemas/x.yaml#/components/schemas/Foo`) yield
+/// Cross-file references (for example `schemas/x.yaml#/components/schemas/Foo`) yield
 /// `None`: the models pipeline and the same-document `$ref` resolver only handle
-/// in-document schemas, so accepting a cross-file name here would risk emitting a
+/// in-document schemas, so accepting a cross-file name here will risk emitting a
 /// local `Named` type for what is actually external. The server generator reads
 /// cross-file names via [`ref_component_name`] paired with [`ref_file_part`].
 pub fn ref_target_name(reference: &str) -> Option<&str> {
@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn ref_target_name_is_same_document_schemas_only() {
         assert_eq!(ref_target_name("#/components/schemas/Foo"), Some("Foo"));
-        // Cross-file schema refs are rejected here; the server path resolves
+        // Cross-file schema refs are rejected here. The server path resolves
         // them via `ref_component_name` + `ref_file_part` instead.
         assert_eq!(
             ref_target_name("schemas/common.yaml#/components/schemas/ErrorResponse"),
@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn unresolved_component_error_preserves_the_full_reference() {
         // A same-document miss reports the full `$ref` fragment (kind + name),
-        // not just the bare component name.
+        // not the bare component name.
         let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  parameters: {}\n";
         let spec = Spec::from_parts(parse_openapi(yaml), std::path::PathBuf::from("inline.yaml"));
         let result = spec.resolve_parameter("#/components/parameters/Missing");

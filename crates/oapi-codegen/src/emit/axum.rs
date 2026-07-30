@@ -29,7 +29,7 @@ use crate::naming::operations::axum_handler_name;
 /// The axum server-interface emitter.
 pub struct AxumServer;
 
-/// Name of the emitted server trait; reserved at the crate root so a component
+/// Name of the emitted server trait. reserved at the crate root so a component
 /// schema cannot collide with it (see [`crate::emit::reserved_type_names`]).
 pub(crate) const API_TRAIT_NAME: &str = "Api";
 
@@ -72,7 +72,7 @@ fn response_body_term(kind: crate::ir::BodyKind) -> TokenStream {
 /// The `IntoResponse` match arms that render each representation of a negotiated
 /// response body, binding the inner value to `body`. `status` is the status
 /// expression (a `STATUS` constant or a bound `status`) placed first in the
-/// response tuple; when `with_headers` is set, the in-scope `header_map` is
+/// response tuple. when `with_headers` is set, the in-scope `header_map` is
 /// inserted between the status and the body wrapper.
 fn negotiated_response_arms(body: &NegotiatedBody, status: &TokenStream, with_headers: bool) -> Vec<TokenStream> {
     let enum_name = body.name.to_token();
@@ -477,7 +477,7 @@ fn emit_response_with_headers(
 
 /// Emit the insertion of one response header into `header_map`. A required
 /// header whose value cannot encode as a `HeaderValue` aborts the arm with a
-/// `500`, since dropping it would violate the declared contract; an optional
+/// `500`, since dropping it will violate the declared contract. An optional
 /// header is inserted only when present, and is silently skipped if its value
 /// cannot encode.
 fn emit_response_header_insert(header: &ResponseHeader) -> TokenStream {
@@ -537,12 +537,12 @@ fn emit_headers_extractor(headers: &Headers) -> Result<TokenStream> {
     });
 }
 
-/// Emit the `let <field> = ...;` binding that reads and parses one header,
+/// Emit the `let <field> = ...` binding that reads and parses one header,
 /// returning a `400` on a missing required header or an unparseable value.
 ///
-/// String headers are taken verbatim; other scalars are `trim()`-ed before
+/// String headers are taken verbatim. other scalars are `trim()`-ed before
 /// parsing, since HTTP permits optional surrounding whitespace (OWS) that
-/// `FromStr` would otherwise reject.
+/// `FromStr` will otherwise reject.
 fn emit_header_binding(param: &HeaderParam) -> Result<TokenStream> {
     let ident = param.name.to_token();
     let header_name = &param.header_name;
@@ -622,9 +622,9 @@ fn emit_cookies_extractor(cookies: &Cookies) -> Result<TokenStream> {
     });
 }
 
-/// Emit the `let <field> = ...;` binding that reads and parses one cookie from
+/// Emit the `let <field> = ...` binding that reads and parses one cookie from
 /// the jar, returning a `400` on a missing required cookie or an unparseable
-/// value. String cookies are taken verbatim; other scalars are `trim()`-ed
+/// value. String cookies are taken verbatim. other scalars are `trim()`-ed
 /// before parsing.
 fn emit_cookie_binding(param: &CookieParam) -> Result<TokenStream> {
     let ident = param.name.to_token();
@@ -680,9 +680,9 @@ fn emit_cookie_binding(param: &CookieParam) -> Result<TokenStream> {
 ///
 /// axum has no typed multipart extractor, so the implementation drives
 /// `axum::extract::Multipart`, reads each declared field (text scalars are
-/// parsed with `FromStr`; binary/file fields are read as raw bytes), and
+/// parsed with `FromStr`. binary/file fields are read as raw bytes), and
 /// returns a `400 Bad Request` with a short plaintext reason on a missing
-/// required field or an unparseable value. Unknown fields are ignored; a
+/// required field or an unparseable value. Unknown fields are ignored. a
 /// repeated field keeps its last value.
 fn emit_multipart_extractor(multipart: &Multipart) -> Result<TokenStream> {
     let name = multipart.name.to_token();
@@ -779,7 +779,7 @@ fn emit_multipart_arm(field: &MultipartField) -> Result<TokenStream> {
 }
 
 /// Emit the struct-literal initialiser for one multipart field. A non-optional
-/// field is unwrapped with a `400` on absence; an optional field passes its
+/// field is unwrapped with a `400` on absence. An optional field passes its
 /// `Option<..>` accumulator straight through via field-init shorthand.
 fn emit_multipart_init(field: &MultipartField) -> TokenStream {
     let ident = field.rust_name.to_token();
@@ -799,7 +799,7 @@ fn emit_multipart_init(field: &MultipartField) -> TokenStream {
 /// The implementation reads the request's `Content-Type` header, matches it
 /// against each declared content type in priority order (JSON > form > text),
 /// and delegates to the matching axum extractor. A recognised type that fails
-/// to decode yields a `400 Bad Request`; an unrecognised or missing type yields
+/// to decode yields a `400 Bad Request`. An unrecognised or missing type yields
 /// a `415 Unsupported Media Type`.
 fn emit_request_body_extractor(request: &NegotiatedBody) -> Result<TokenStream> {
     let name = request.name.to_token();

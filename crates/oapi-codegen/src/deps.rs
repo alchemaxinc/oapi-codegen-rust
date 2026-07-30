@@ -5,7 +5,7 @@
 //! like `http::StatusCode` reveals neither the crate version nor the Cargo
 //! features a consumer must enable. The generator is the only component that
 //! knows exactly what it emitted, so it reports the crates (with versions and
-//! features) a consumer should add to `Cargo.toml`.
+//! features) a consumer must add to `Cargo.toml`.
 //!
 //! The set is derived by scanning the generated source for the crate-root paths
 //! and method calls the emitters produce. Deriving it from the actual output
@@ -13,10 +13,10 @@
 //! with the emitters: if they stop or start referencing a crate, the report
 //! follows without a parallel rule set to maintain.
 //!
-//! The report lists every crate the generated file references; it deliberately
+//! The report lists every crate the generated file references. It deliberately
 //! does not read the consumer's `Cargo.toml` to prune crates already present.
 //! Interpreting a consumer manifest (workspace inheritance, dev/target scopes,
-//! feature sufficiency) is Cargo's job — so on `--install-deps` the CLI simply
+//! feature sufficiency) is Cargo's job — so on `--install-deps` the CLI
 //! runs `cargo add`, which merges with any existing declaration.
 
 /// This crate's own manifest, embedded at compile time so the versions the
@@ -58,7 +58,7 @@ fn parse_manifest_version<'a>(manifest: &'a str, crate_name: &str) -> Option<&'a
             continue;
         };
         let value = value.trim_start();
-        // `name = "x"` gives the version directly; `name = { version = "x", .. }`
+        // `name = "x"` gives the version directly. `name = { version = "x", .. }`
         // needs the `version` *key* located — matched as a `version =` token so a
         // feature like `conversion` (which contains "version") is not mistaken
         // for it.
@@ -80,10 +80,10 @@ fn parse_manifest_version<'a>(manifest: &'a str, crate_name: &str) -> Option<&'a
 }
 
 /// A crate the generated code references, with the version requirement and Cargo
-/// features a consumer should declare in `Cargo.toml`.
+/// features a consumer must declare in `Cargo.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dependency {
-    /// The crates.io crate name (e.g. `axum-extra`).
+    /// The crates.io crate name (for example `axum-extra`).
     pub name: &'static str,
     /// Recommended version requirement (taken from this crate's manifest, so it
     /// matches the version the generated code is built and tested against).
@@ -98,7 +98,7 @@ impl Dependency {
     /// Render the `Cargo.toml` `[dependencies]` entry for this crate.
     ///
     /// A crate needing neither features nor a `default-features` change renders
-    /// as the short `name = "version"` form; otherwise the inline-table form.
+    /// as the short `name = "version"` form. Otherwise the inline-table form.
     pub fn toml(&self) -> String {
         if self.default_features && self.features.is_empty() {
             return format!("{} = \"{}\"", self.name, self.version);
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn version_key_matched_as_token_not_substring() {
-        // The fixture declares `axum = { features = ["conversion"], version = "0.8.9" }`;
+        // The fixture declares `axum = { features = ["conversion"], version = "0.8.9" }`.
         // the `conversion` feature contains "version" but must not be matched.
         let manifest = include_str!("../tests/fixtures/manifests/reordered_version_key.toml");
         assert_eq!(parse_manifest_version(manifest, "axum"), Some("0.8.9"));
@@ -347,8 +347,8 @@ mod tests {
 
     #[test]
     fn every_reportable_crate_has_a_manifest_version() {
-        // A code blob that trips every detection branch; if any reported crate
-        // lacked a manifest entry, `manifest_version` would panic here.
+        // A code blob that trips every detection branch. if any reported crate
+        // lacked a manifest entry, `manifest_version` will panic here.
         let code = "\
             serde::Serialize serde_json::Value chrono::DateTime uuid::Uuid http::StatusCode \
             axum::extract::Multipart axum_extra::extract::Query axum_extra::extract::CookieJar \
@@ -368,7 +368,7 @@ mod tests {
                 && rest.starts_with([' ', '\t', '='])
             {
                 let quoted: Vec<&str> = line.split('"').collect();
-                // `name = "x"` -> [.., "x", ..]; `{ version = "x", features = [..] }`
+                // `name = "x"` -> [.., "x", ..]. `{ version = "x", features = [..] }`
                 // -> the version is the first quoted token.
                 if quoted.len() >= 2 {
                     return quoted[1].to_owned();

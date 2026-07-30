@@ -1,12 +1,12 @@
 SHELL := /bin/bash
 
 .PHONY: help
-help: ## Show this help
+help: ## Show this help text
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-35s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: clean
-clean: ## Clean up built files
+clean: ## Remove built files
 	cargo clean
 
 .PHONY: run
@@ -14,7 +14,7 @@ run: ## Run the CLI
 	cargo run -p oapi-codegen
 
 .PHONY: lint
-lint: ## Run linter
+lint: ## Run the linter
 	cargo clippy \
 		--all-targets \
 		--workspace \
@@ -27,7 +27,7 @@ lint: ## Run linter
 	npx prettier --check .
 
 .PHONY: format
-format: ## Format files
+format: ## Format source files
 	cargo clippy \
 		--all-targets \
 		--fix \
@@ -48,7 +48,7 @@ test-integration: ## Run integration tests
 	cargo test --features integration --test '*_integration' -- --nocapture
 
 .PHONY: test-e2e
-test-e2e: ## Run the Docker end-to-end test (generated server + client over HTTP)
+test-e2e: ## Run the Docker end-to-end test for the generated server and client
 	@compose="docker compose -f crates/oapi-codegen/tests/integration/docker-compose.yml"; \
 	trap 'code=$$?; $$compose down --remove-orphans --volumes; exit $$code' EXIT; \
 	$$compose up --build --exit-code-from client --abort-on-container-exit
@@ -62,7 +62,7 @@ update-docs: ## Refresh docs/cli.md from the clap CLI definition
 	UPDATE_DOCS=1 cargo test -p oapi-codegen --test cli_docs
 
 .PHONY: generate-example
-generate-example: ## Regenerate the composed bookstore example from its OpenAPI spec
+generate-example: ## Regenerate the bookstore example from its OpenAPI specification
 	cd examples/bookstore && \
 		cargo run -q -p oapi-codegen -- --config-file oapi-codegen-common.yaml schemas/common.yaml && \
 		cargo run -q -p oapi-codegen -- --config-file oapi-codegen-catalog.yaml schemas/catalog.yaml && \
@@ -70,13 +70,13 @@ generate-example: ## Regenerate the composed bookstore example from its OpenAPI 
 		cargo run -q -p oapi-codegen -- --config-file oapi-codegen-client.yaml openapi.yaml
 
 .PHONY: verify-generated
-verify-generated: ## Regenerate all generated files and fail if they drift from what is committed
+verify-generated: ## Regenerate all generated files and fail when they differ from committed files
 	$(MAKE) generate-example
 	$(MAKE) update-generated
 	$(MAKE) update-docs
 	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md)" ]; then \
 		echo "ERROR: generated files are out of date."; \
-		echo "Run 'make generate-example', 'make update-generated' and 'make update-docs', then commit the result."; \
+		echo "Run 'make generate-example', 'make update-generated' and 'make update-docs'. Commit the result."; \
 		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
 		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
 		exit 1; \

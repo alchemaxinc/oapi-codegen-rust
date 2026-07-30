@@ -2,7 +2,7 @@
 //!
 //! Each operation is lowered into typed inputs (path/query/header parameters and
 //! a JSON request body) plus a response enum. The generator only models what it
-//! can translate faithfully; anything else is rejected with an error rather than
+//! can translate faithfully. Anything else is rejected with an error rather than
 //! mis-generated.
 //!
 //! Supported:
@@ -10,7 +10,7 @@
 //! - **Path parameters** — inline scalars, or a same-document `$ref` to a scalar.
 //! - **Query parameters** — scalars and arrays of scalars, lowered into a
 //!   per-operation `Deserialize` struct extracted via
-//!   `axum_extra::extract::Query`. Required parameters stay bare; optional ones
+//!   `axum_extra::extract::Query`. Required parameters stay bare. optional ones
 //!   become `Option<..>`. Arrays must use the default `form`/`explode: true`
 //!   encoding (repeated keys).
 //! - **Header parameters** — scalars only, lowered into a per-operation struct
@@ -23,11 +23,11 @@
 //!   `#/components/parameters/*` and `#/components/requestBodies/*` are resolved
 //!   against the document.
 //! - **Responses** — explicit status codes, the `default` catch-all, and ranges
-//!   (`5XX`); component `$ref` responses are resolved against the document.
+//!   (`5XX`). Component `$ref` responses are resolved against the document.
 //! - **Cross-file `$ref` parameters, request bodies, and responses** — the
 //!   referenced structural object is read from the sibling file (resolved
 //!   relative to the main spec's directory), following chains across files.
-//!   Parameter inner schemas must still resolve to scalars; body/response inner
+//!   Parameter inner schemas must still resolve to scalars. body/response inner
 //!   schema `$ref`s route through the `import-mapping` to an external type
 //!   (they are never inlined).
 //!
@@ -104,7 +104,7 @@ const REQUEST_BODY_PRIORITY: [BodyKind; 4] = [BodyKind::Json, BodyKind::Form, Bo
 const RESPONSE_BODY_PRIORITY: [BodyKind; 3] = [BodyKind::Json, BodyKind::Form, BodyKind::Text];
 
 /// A lowered response body before it is named. A single content type yields a
-/// [`Body`]; several yield the per-representation variants, which the caller
+/// [`Body`]. several yield the per-representation variants, which the caller
 /// names into a [`NegotiatedBody`] (the name depends on the response variant).
 enum LoweredResponseBody {
     Single(Body),
@@ -114,7 +114,7 @@ enum LoweredResponseBody {
 /// Rust field names the response emitter injects into a header-bearing struct
 /// variant (`status` for dynamic responses, `body` when a body is present). A
 /// declared response header whose `snake_case` identifier equals one of these
-/// would collide, so such headers are rejected during lowering.
+/// will collide, so such headers are rejected during lowering.
 const RESERVED_RESPONSE_FIELDS: [&str; 2] = ["status", "body"];
 
 /// Check whether a header name is valid for use with `HeaderName::from_static`.
@@ -126,7 +126,7 @@ fn is_valid_header_name(name: &str) -> bool {
         return false;
     }
     for byte in name.as_bytes() {
-        // RFC 7230 tchar. `-`..`9` (0x2D..0x39) would wrongly include `/`
+        // RFC 7230 tchar. `-`..`9` (0x2D..0x39) will wrongly include `/`
         // (0x2F), which is not a valid header-name char, so digits are their
         // own range and `-`/`.` are listed explicitly.
         let valid = matches!(
@@ -299,7 +299,7 @@ impl Lowerer<'_> {
             });
         }
         // A parameter declared `in: path` must have a matching `{placeholder}` in
-        // the template. Driving the loop above from the template alone would
+        // the template. Driving the loop above from the template alone will
         // otherwise silently drop such a parameter from the generated signature,
         // producing a handler that omits a required input.
         for parameter in params {
@@ -392,7 +392,7 @@ impl Lowerer<'_> {
     /// scalars. Cross-file `$ref`s, `content`, and non-scalar shapes (including
     /// arrays of non-scalars) are rejected. Array parameters must use OpenAPI's
     /// default `form`/`explode: true` encoding (repeated keys), since the
-    /// generated server reads them through `axum-extra`'s `Query` extractor;
+    /// generated server reads them through `axum-extra`'s `Query` extractor.
     /// other array encodings are rejected rather than silently mis-parsed.
     fn query_param_type(
         &self,
@@ -469,7 +469,7 @@ impl Lowerer<'_> {
 
     /// Resolve a parameter schema reference to an owned concrete schema. A
     /// same-document reference is resolved against the main document, or against
-    /// the referenced document the parameter came from (`origin`); a cross-file
+    /// the referenced document the parameter came from (`origin`). a cross-file
     /// inner `$ref` is out of scope and rejected.
     fn resolve_param_schema(
         &self,
@@ -553,9 +553,9 @@ impl Lowerer<'_> {
     }
 
     /// Map a header/response-header schema to a scalar Rust type, applying the
-    /// shared rules: reject `content`, non-scalar shapes, and `byte`/`binary`;
-    /// resolve a same-document/origin schema `$ref` to a scalar; reject a
-    /// cross-file schema `$ref`. `kind_label` is used in error messages (e.g.
+    /// shared rules: reject `content`, non-scalar shapes, and `byte`/`binary`.
+    /// resolve a same-document/origin schema `$ref` to a scalar. reject a
+    /// cross-file schema `$ref`. `kind_label` is used in error messages (for example
     /// "header parameter" or "response header").
     fn scalar_from_format(
         &self,
@@ -718,7 +718,7 @@ impl Lowerer<'_> {
     /// [`BodyKind`] and ordered by the caller's `priority` (requests and
     /// responses differ — see [`REQUEST_BODY_PRIORITY`] /
     /// [`RESPONSE_BODY_PRIORITY`]). When several media entries map to the same
-    /// kind (e.g. `application/json` and `application/vnd.api+json`), the first
+    /// kind (for example `application/json` and `application/vnd.api+json`), the first
     /// in document order wins. An empty result means the map declares no content
     /// type the `priority` accepts.
     fn supported_bodies<'m>(
@@ -739,8 +739,8 @@ impl Lowerer<'_> {
     }
 
     /// Lower a selected body media entry into a typed [`Body`] for the given
-    /// content kind. Text bodies must be `string`; form bodies must reference a
-    /// named object schema; JSON reuses the existing body-type mapping.
+    /// content kind. Text bodies must be `string`. form bodies must reference a
+    /// named object schema. JSON reuses the existing body-type mapping.
     fn body_from_media(
         &self,
         path: &str,
@@ -847,7 +847,7 @@ fn body_kind_ident(kind: BodyKind) -> RustIdent {
 }
 
 /// Classify a media type string into a supported [`BodyKind`], or `None`.
-/// Parameters after `;` (e.g. `; charset=utf-8`) are ignored. JSON matches
+/// Parameters after `;` (for example `; charset=utf-8`) are ignored. JSON matches
 /// broadly: `application/json` or any `+json`-suffixed type.
 fn media_type_kind(name: &str) -> Option<BodyKind> {
     let base = name.split(';').next().unwrap_or(name).trim().to_ascii_lowercase();
@@ -885,7 +885,7 @@ impl Lowerer<'_> {
     /// tuple), so a `$ref` is resolved to its concrete schema and the scalar-only
     /// rule is enforced — the same as header and cookie parameters. A
     /// same-document `$ref` is resolved against the main document, or against the
-    /// referenced document the parameter came from (`origin`); a cross-file inner
+    /// referenced document the parameter came from (`origin`). a cross-file inner
     /// `$ref` is rejected.
     fn param_type(
         &self,
@@ -927,11 +927,11 @@ impl Lowerer<'_> {
     }
 
     /// Lower an operation's request body, if it declares one. A cross-file
-    /// wrapper `$ref` is resolved against the referenced file; its inner schema
+    /// wrapper `$ref` is resolved against the referenced file. Its inner schema
     /// `$ref`s are then interpreted against that file (`origin`). A single
-    /// supported content type yields a [`RequestPayload::Single`]; a
+    /// supported content type yields a [`RequestPayload::Single`]. a
     /// `multipart/form-data` body yields a per-operation extractor (`op_name`
-    /// seeds its name); several supported content types yield a
+    /// seeds its name). several supported content types yield a
     /// [`RequestPayload::Negotiated`] dispatch enum. `multipart/form-data`
     /// cannot be combined with other content types (it needs a bespoke
     /// extractor rather than a `Content-Type` branch).
@@ -1009,7 +1009,7 @@ impl Lowerer<'_> {
     /// Lower a `multipart/form-data` request body into a per-operation extractor
     /// struct (`<Op>Multipart`) that parses it. The schema must be an object,
     /// declared either inline or as a same-document `$ref` (so its fields can be
-    /// enumerated); each property must be a scalar or a binary/file string.
+    /// enumerated). each property must be a scalar or a binary/file string.
     /// Composite, nested-object, array, and cross-file/external bodies are
     /// rejected.
     ///
@@ -1048,7 +1048,7 @@ impl Lowerer<'_> {
     }
 
     /// Resolve a multipart body schema to its [`ObjectType`]. An inline object is
-    /// taken directly; a `$ref` must be same-document (no cross-file part, and
+    /// taken directly. a `$ref` must be same-document (no cross-file part, and
     /// the body must not itself come from a referenced file) and resolve to an
     /// object. Non-object schemas and cross-file/external references are
     /// rejected — their fields cannot be enumerated into a typed extractor.
@@ -1095,7 +1095,7 @@ impl Lowerer<'_> {
     /// `Option<..>` when it is not `required` or its schema is `nullable`, and
     /// its identifier is the property's `snake_case` name. Each property must
     /// resolve to a scalar (a binary/`byte` string becomes a `Vec<u8>` file
-    /// field); a same-document `$ref` is resolved first. Non-scalar properties
+    /// field). a same-document `$ref` is resolved first. Non-scalar properties
     /// (nested objects/arrays) and cross-file `$ref` properties are rejected.
     fn lower_multipart_fields(&self, path: &str, method: &str, object: &ObjectType) -> Result<Vec<MultipartField>> {
         let mut fields = Vec::with_capacity(object.properties.len());
@@ -1140,7 +1140,7 @@ impl Lowerer<'_> {
     }
 
     /// Lower a response's declared headers into scalar-typed [`ResponseHeader`]s.
-    /// Inline `Header` objects only; a `Header` that is itself a `$ref` is
+    /// Inline `Header` objects only. a `Header` that is itself a `$ref` is
     /// rejected. De-duplicated by case-insensitive name, first-seen winning.
     fn lower_response_headers(
         &self,
@@ -1176,7 +1176,7 @@ impl Lowerer<'_> {
             let ident = to_ident(header_name, Case::Snake);
             // The response emitter injects `status` (dynamic responses) and
             // `body` (responses with a body) fields into the struct variant. A
-            // header whose Rust field name collides with one of those would emit
+            // header whose Rust field name collides with one of those will emit
             // duplicate fields. Reject rather than mis-generate.
             if RESERVED_RESPONSE_FIELDS.contains(&ident.logical()) {
                 return Err(Error::UnsupportedOperation {
@@ -1189,7 +1189,7 @@ impl Lowerer<'_> {
                 });
             }
             // Distinct header names can collapse to the same Rust field
-            // identifier (e.g. `X-Foo` and `X_Foo` both → `x_foo`), which would
+            // identifier (for example `X-Foo` and `X_Foo` both → `x_foo`), which will
             // emit a struct with duplicate fields. Reject rather than
             // mis-generate.
             if seen_idents.iter().any(|other| return other == ident.logical()) {
@@ -1218,7 +1218,7 @@ impl Lowerer<'_> {
 
     /// Lower an operation's responses into typed enum variants, resolving
     /// component `$ref` responses against the document. A fixed status code
-    /// becomes a reason-named variant with a compile-time status constant; a
+    /// becomes a reason-named variant with a compile-time status constant. a
     /// range (`5XX` → `Status5xx`) or the `default` response becomes a variant
     /// that carries the `axum::http::StatusCode` the handler supplies at runtime.
     fn lower_responses(
@@ -1314,7 +1314,7 @@ impl Lowerer<'_> {
     /// Extract a response's body, if it declares supported content. Inner
     /// schema `$ref`s are interpreted against the response's origin file when it
     /// was resolved from a referenced document. A single supported content type
-    /// yields [`LoweredResponseBody::Single`]; several yield the
+    /// yields [`LoweredResponseBody::Single`]. several yield the
     /// per-representation variants the caller names into a [`NegotiatedBody`].
     fn response_body(
         &self,
@@ -1346,7 +1346,7 @@ impl Lowerer<'_> {
     }
 
     /// Name a lowered response body against its response variant: a single
-    /// content type stays [`ResponseBody::Single`]; several become a
+    /// content type stays [`ResponseBody::Single`]. several become a
     /// [`ResponseBody::Negotiated`] enum named `<Response><Variant>Body`.
     fn name_response_body(
         &self,
@@ -1414,7 +1414,7 @@ impl Lowerer<'_> {
     /// Decide the Rust type for a schema `$ref`, given the referenced file the
     /// enclosing structural object was resolved from (`origin`). A cross-file
     /// ref, or a same-document ref whose enclosing object came from a referenced
-    /// file, resolves through the `import-mapping` to a [`RustType::External`];
+    /// file, resolves through the `import-mapping` to a [`RustType::External`].
     /// a same-document ref in the main document stays a local [`RustType::Named`].
     fn schema_ref_type(&self, path: &str, method: &str, origin: Option<&str>, reference: &str) -> Result<RustType> {
         let target = ref_component_name(reference, "schemas").ok_or_else(|| {
@@ -1445,7 +1445,7 @@ impl Lowerer<'_> {
 }
 
 /// Derive the trait method name: the `operationId` if present, else a name
-/// synthesised from the method and path (e.g. `get /v1/widgets` -> `get_v1_widgets`).
+/// synthesised from the method and path (for example `get /v1/widgets` -> `get_v1_widgets`).
 fn operation_name(path: &str, method: &str, operation: &OasOperation) -> crate::naming::RustIdent {
     if let Some(id) = &operation.operation_id {
         return operations::operation_method_name(id);
@@ -1501,7 +1501,7 @@ mod tests {
         assert!(is_valid_header_name("X-RateLimit-Remaining"));
         assert!(is_valid_header_name("Sec-CH-UA-Platform-Version"));
         assert!(is_valid_header_name("a.b"));
-        // Empty and separator characters (which would panic `from_static`) are
+        // Empty and separator characters (which will panic `from_static`) are
         // rejected — notably `/` (0x2F), which sits between `-` (0x2D) and the
         // digits, and `:`, space, and control-ish punctuation.
         assert!(!is_valid_header_name(""));

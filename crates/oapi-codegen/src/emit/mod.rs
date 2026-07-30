@@ -30,7 +30,7 @@ use crate::naming::to_ident;
 
 /// Emits a server interface for a lowered [`Service`] as top-level token items.
 ///
-/// One implementation per target framework; `AxumServer` is the only one today.
+/// One implementation per target framework. `AxumServer` is the only one today.
 pub trait ServerEmitter {
     /// Emit the server-interface items (trait, response enums, router, handlers).
     fn emit(&self, service: &Service) -> Result<Vec<TokenStream>>;
@@ -38,7 +38,7 @@ pub trait ServerEmitter {
 
 /// Emits a client for a lowered [`Service`] as top-level token items.
 ///
-/// One implementation per target HTTP library; `ReqwestClient` is the only one
+/// One implementation per target HTTP library. `ReqwestClient` is the only one
 /// today.
 pub trait ClientEmitter {
     /// Emit the client items (error type, `Client` struct, per-operation methods,
@@ -75,15 +75,15 @@ pub struct Targets {
 /// which a component-schema model must not collide with.
 #[derive(Debug, Clone, Copy)]
 pub struct ReservedTypeName {
-    /// The reserved Rust identifier (e.g. `Api`).
+    /// The reserved Rust identifier (for example `Api`).
     pub name: &'static str,
-    /// Human-readable description of what emits it (e.g. `server interface
+    /// Human-readable description of what emits it (for example `server interface
     /// trait`), used in the collision error.
     pub description: &'static str,
 }
 
 /// The crate-root type names the requested `targets` emit. A component schema
-/// whose generated name matches one of these would produce a duplicate item, so
+/// whose generated name matches one of these will produce a duplicate item, so
 /// [`crate::lower::check_type_name_collisions`] rejects it up front.
 pub fn reserved_type_names(targets: Targets) -> Vec<ReservedTypeName> {
     let mut names = Vec::new();
@@ -251,7 +251,7 @@ pub(crate) fn emit_type(ty: &RustType) -> Result<TokenStream> {
 /// Emit the plain per-operation multipart struct (`<Op>Multipart`) shared by the
 /// server extractor and the client request builder: one public field per part,
 /// wrapped in `Option` when the part is optional. The server augments this with a
-/// `FromRequest` impl; the client reads the fields to build a `reqwest` form.
+/// `FromRequest` impl. The client reads the fields to build a `reqwest` form.
 pub(crate) fn emit_multipart_struct(multipart: &Multipart) -> Result<TokenStream> {
     let name = multipart.name.to_token();
     let mut field_defs = Vec::with_capacity(multipart.fields.len());

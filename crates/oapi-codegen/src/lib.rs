@@ -24,11 +24,11 @@ pub use crate::error::Result;
 use crate::ir::Module;
 use crate::loader::Spec;
 
-/// Generate Rust from a spec file according to `config`, returning the source.
+/// Generate Rust from a spec file according to `configuration`, returning the source.
 ///
 /// Models are emitted when `generate.models` is set, or implicitly when the
 /// server or client is generated (so referenced types are in scope). The axum
-/// server interface is appended when `generate.std-http-server` is set; the
+/// server interface is appended when `generate.std-http-server` is set. The
 /// blocking `reqwest` client is appended when `generate.client` is set. Models,
 /// per-operation types, and both generators are emitted flat at the crate root,
 /// so server and client can share one file.
@@ -76,7 +76,7 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     return emit::emit_module(&module, server_urls.as_ref());
 }
 
-/// Generate Rust from a spec file according to `config` and write it to
+/// Generate Rust from a spec file according to `configuration` and write it to
 /// `output_path`, creating parent directories as needed.
 pub fn generate_to_file(spec_path: &Path, config: &Config, output_path: &Path) -> Result<()> {
     let code = generate(spec_path, config)?;

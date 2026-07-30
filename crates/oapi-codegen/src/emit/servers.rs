@@ -1,6 +1,6 @@
 //! Emitting the [`ServerUrls`] IR as top-level Rust items.
 //!
-//! Variable-free servers become `pub const` string constants; servers with
+//! Variable-free servers become `pub const` string constants. servers with
 //! `{placeholder}`s become builder functions returning `Result<String, String>`
 //! that substitute each variable and reject any leftover placeholder. Enum
 //! variables get a dedicated enum type exposing an `as_str` accessor.

@@ -3,7 +3,7 @@
 //! Only the shared lowering pass runs here: it catalogues the document's
 //! `components.securitySchemes` and resolves each operation's *effective*
 //! security requirement. The server emitter ignores the result (server-side
-//! auth is not generated yet); the client emitter turns supported schemes into
+//! auth is not generated yet). The client emitter turns supported schemes into
 //! credential fields and rejects operations that require an
 //! [`crate::ir::SecuritySchemeKind::Unsupported`] scheme.
 

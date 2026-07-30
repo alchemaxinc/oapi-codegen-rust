@@ -673,7 +673,7 @@ fn generated_server_handles_multipart_body() {
 /// Read a full HTTP/1.1 request (head and body) from a mock-server connection,
 /// returning it as a lossy UTF-8 string so tests can assert on the request line,
 /// headers, and body. Handles both `Content-Length` and `Transfer-Encoding:
-/// chunked` framing, since `reqwest` may stream some bodies (e.g. multipart)
+/// chunked` framing, since `reqwest` can stream some bodies (for example, multipart)
 /// without declaring a length up front.
 #[allow(
     clippy::expect_used,

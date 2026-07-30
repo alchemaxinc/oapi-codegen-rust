@@ -31,11 +31,11 @@ use crate::ir::Service;
 /// The blocking `reqwest` client emitter.
 pub struct ReqwestClient;
 
-/// Name of the emitted client struct; reserved at the crate root so a component
+/// Name of the emitted client struct. reserved at the crate root so a component
 /// schema cannot collide with it (see [`crate::emit::reserved_type_names`]).
 pub(crate) const CLIENT_STRUCT_NAME: &str = "Client";
 
-/// Name of the emitted client error enum; reserved at the crate root so a
+/// Name of the emitted client error enum. reserved at the crate root so a
 /// component schema cannot collide with it.
 pub(crate) const CLIENT_ERROR_NAME: &str = "ClientError";
 
@@ -110,8 +110,8 @@ fn client_error() -> TokenStream {
             /// The response `Content-Type` matched none of the representations the
             /// operation declares for its status.
             UnexpectedContentType(String),
-            /// The response could not be decoded: a body that failed to
-            /// deserialize (e.g. malformed form-urlencoded content), or a
+            /// The response cannot be decoded: a body that failed to
+            /// deserialize (for example malformed form-urlencoded content), or a
             /// required response header that was missing or unparsable.
             Decode(String),
         }
@@ -174,8 +174,8 @@ fn client_struct(schemes: &[SecurityScheme]) -> TokenStream {
     return quote! {
         /// A blocking HTTP client for the API.
         ///
-        /// `base_url` is used as a prefix for every request path and should not
-        /// carry a trailing slash (e.g. `https://api.example.com`).
+        /// `base_url` is used as a prefix for every request path and must not
+        /// carry a trailing slash (for example `https://api.example.com`).
         #[derive(Debug, Clone)]
         pub struct Client {
             base_url: String,
@@ -201,7 +201,7 @@ fn emit_client_impl(service: &Service) -> Result<TokenStream> {
     });
     methods.push(quote! {
         /// Build a client targeting `base_url` with a caller-provided
-        /// `reqwest::blocking::Client` (e.g. preconfigured with timeouts).
+        /// `reqwest::blocking::Client` (for example preconfigured with timeouts).
         pub fn with_client(base_url: impl Into<String>, http: reqwest::blocking::Client) -> Self {
             return Self { base_url: base_url.into(), http, #(#inits,)* };
         }
@@ -414,7 +414,7 @@ fn url_expr(operation: &Operation) -> TokenStream {
 
 /// The request-builder mutations that append query parameters. Arrays are sent
 /// as repeated keys (OpenAPI's default `explode: true`), matching the server's
-/// `axum_extra` query extractor; `serde_urlencoded` cannot serialize sequences,
+/// `axum_extra` query extractor. `serde_urlencoded` cannot serialize sequences,
 /// so each pair is appended individually.
 fn query_mutations(operation: &Operation) -> Vec<TokenStream> {
     let Some(query) = &operation.query else {
@@ -603,7 +603,7 @@ fn multipart_form_mutations(multipart: &Multipart) -> Vec<TokenStream> {
 
 /// The request-builder mutations that apply the operation's security credentials.
 ///
-/// Each configured credential is optional, so an unset scheme simply sends no
+/// Each configured credential is optional, so an unset scheme sends no
 /// auth. Cookie-carried API keys are applied by [`cookie_mutations`] (folded into
 /// the single `Cookie` header), so they are skipped here. Operations that require
 /// an unresolved or [`SecuritySchemeKind::Unsupported`] scheme are rejected in
@@ -653,7 +653,7 @@ fn auth_mutations(operation: &Operation, schemes: &[SecurityScheme]) -> Vec<Toke
 /// Emit the status-code dispatch that decodes the response into a typed variant.
 ///
 /// Fixed status codes are tried first (most specific), then ranges (`5XX`), then
-/// the `default` catch-all; an undeclared status yields `UnexpectedStatus`.
+/// the `default` catch-all. An undeclared status yields `UnexpectedStatus`.
 fn decode_response(operation: &Operation) -> Result<TokenStream> {
     let name = operation.response_enum.to_token();
     let mut fixed = Vec::new();
@@ -772,8 +772,8 @@ fn response_body_type(body: &Option<ResponseBody>) -> Result<Option<TokenStream>
 /// The statement(s) that decode the response body into `body`, or nothing when
 /// the response declares no body.
 ///
-/// JSON and text use `reqwest`'s built-in decoders; form bodies are decoded with
-/// `serde_urlencoded` (`reqwest` has no form decoder); negotiated bodies dispatch
+/// JSON and text use `reqwest`'s built-in decoders. form bodies are decoded with
+/// `serde_urlencoded` (`reqwest` has no form decoder). negotiated bodies dispatch
 /// on the response `Content-Type` (see [`negotiated_response_decode`]).
 fn body_decode(body: &Option<ResponseBody>) -> Result<TokenStream> {
     return Ok(match body {

@@ -12,7 +12,7 @@ pub fn operation_method_name(raw: &str) -> RustIdent {
 }
 
 /// The generated response-enum name for an operation, `<Op><Suffix>` (the
-/// suffix defaults to `Response`; override it via `response-type-suffix` to
+/// suffix defaults to `Response`. Override it via `response-type-suffix` to
 /// resolve a clash with a component schema of the same name).
 pub fn response_enum_name(op: &RustIdent, suffix: &str) -> RustIdent {
     return to_ident(&format!("{}_{}", op.logical(), suffix), Case::Pascal);

@@ -25,12 +25,12 @@ use crate::console::SpecStats;
 enum CliFailure {
     /// A generator/loader error occurred.
     Generator(Error),
-    /// The config parsed but enabled no artifacts.
+    /// The configuration parsed but enabled no artifacts.
     NoArtifacts {
-        /// Path to the offending config file.
+        /// Path to the offending configuration file.
         config: PathBuf,
     },
-    /// No output destination was given on the CLI or in the config.
+    /// No output destination was given on the CLI or in the configuration.
     NoOutput,
     /// Generation succeeded but produced no code.
     EmptyOutput {
@@ -38,7 +38,7 @@ enum CliFailure {
         spec: PathBuf,
         /// Counts explaining why nothing was generated.
         stats: SpecStats,
-        /// What the config requested.
+        /// What the configuration requested.
         generate: Generate,
     },
 }
@@ -127,7 +127,7 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
 /// The nearest `Cargo.toml` at or above the output file's directory — the
 /// package the generated code belongs to, used as the `cargo add` target.
 ///
-/// This only locates the file; it does not parse it. `cargo add` interprets it
+/// This only locates the file. It does not parse it. `cargo add` interprets it
 /// (and reports a clear error itself if it is a virtual workspace manifest).
 fn nearest_manifest(output: &Path) -> Option<PathBuf> {
     let canonical = std::fs::canonicalize(output).unwrap_or_else(|_| return output.to_path_buf());

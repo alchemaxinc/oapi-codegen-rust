@@ -1,7 +1,7 @@
 //! Intermediate representation (IR) of generated Rust types.
 //!
 //! The schema mapping pass ([`crate::lower::schema`]) lowers OpenAPI schemas into this
-//! IR; the emit pass ([`crate::emit`]) turns the IR into a token stream. Keeping
+//! IR. The emit pass ([`crate::emit`]) turns the IR into a token stream. Keeping
 //! the two separate makes the mapping logic testable without touching token
 //! generation, and keeps emission free of OpenAPI concerns.
 
@@ -71,7 +71,7 @@ pub struct Field {
     /// overrides it.
     pub required: bool,
     /// `x-omitempty` override: `Some(true)`/`Some(false)` forces the
-    /// `skip_serializing_if` on/off; `None` keeps the default (skip when optional).
+    /// `skip_serializing_if` on/off. `None` keeps the default (skip when optional).
     pub omit_empty: Option<bool>,
     /// `x-rust-serde-skip`: drop the field from (de)serialization via `#[serde(skip)]`.
     pub serde_skip: bool,
@@ -245,13 +245,13 @@ pub struct MultipartField {
     /// Target struct field identifier on the generated `<Op>Multipart` struct.
     pub rust_name: RustIdent,
     /// The decoded field type: `Vec<u8>` for a binary (file) part, else a
-    /// scalar. This is the bare inner type even when the field is optional;
+    /// scalar. This is the bare inner type even when the field is optional.
     /// [`MultipartField::optional`] records whether the struct wraps it in
     /// `Option<..>`.
     pub ty: RustType,
     /// Whether the generated struct wraps this field in `Option<..>` (true when
     /// the property is not `required`, or is `nullable`). An absent
-    /// non-optional field is a `400`; an absent optional field is `None`.
+    /// non-optional field is a `400`. An absent optional field is `None`.
     pub optional: bool,
     /// Whether the part is a binary/file field read as raw bytes (`Vec<u8>`).
     pub is_file: bool,
@@ -259,7 +259,7 @@ pub struct MultipartField {
 
 /// An operation's request payload, when it declares one.
 ///
-/// The three cases are mutually exclusive by construction, replacing what would
+/// The three cases are mutually exclusive by construction, replacing what will
 /// otherwise be several mutually-exclusive `Option` fields on [`Operation`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum RequestPayload {
@@ -280,7 +280,7 @@ pub enum RequestPayload {
 /// generated enum with one variant per representation.
 ///
 /// For a request the enum is a hand-written `FromRequest` that dispatches on
-/// `Content-Type`; for a response it is a plain enum the handler selects a
+/// `Content-Type`. for a response it is a plain enum the handler selects a
 /// representation from, which the generated `IntoResponse` renders with the
 /// matching `Content-Type`.
 #[derive(Debug, Clone, PartialEq)]
@@ -310,7 +310,7 @@ pub enum ResponseBody {
     /// A single supported content type, rendered by the matching axum response
     /// wrapper.
     Single(Body),
-    /// Several supported content types the handler chooses among; the generated
+    /// Several supported content types the handler chooses among. The generated
     /// `IntoResponse` renders whichever representation the handler selected.
     Negotiated(NegotiatedBody),
 }
@@ -323,17 +323,17 @@ pub struct Service {
     pub operations: Vec<Operation>,
     /// Security schemes referenced by at least one operation, in the order they
     /// are declared in `components.securitySchemes`. The client emitter turns
-    /// each into a credential field and a `with_<scheme>` builder setter; the
+    /// each into a credential field and a `with_<scheme>` builder setter. The
     /// server emitter ignores them (server-side auth is not generated yet).
     pub security_schemes: Vec<SecurityScheme>,
 }
 
 /// A security scheme the client can apply to outgoing requests.
 ///
-/// Derived from a `components.securitySchemes` entry; only the schemes the
+/// Derived from a `components.securitySchemes` entry. only the schemes the
 /// client generator can carry as a stored credential are modelled here, plus an
 /// [`SecuritySchemeKind::Unsupported`] catch-all so an operation that *requires*
-/// an unmodelled scheme (e.g. OAuth2) can be rejected with a clear message.
+/// an unmodelled scheme (for example OAuth2) can be rejected with a clear message.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SecurityScheme {
     /// The scheme's key in `components.securitySchemes`, matched against each
@@ -436,10 +436,10 @@ pub struct HeaderParam {
     /// Rust field identifier (`snake_case`).
     pub name: RustIdent,
     /// The exact OpenAPI header name, used for the case-insensitive lookup in
-    /// the generated extractor (e.g. `X-Request-Id`).
+    /// the generated extractor (for example `X-Request-Id`).
     pub header_name: String,
     /// The parsed scalar type. Unlike [`Field`], this is the bare element type
-    /// even when the header is optional; the emitter adds the `Option<..>`
+    /// even when the header is optional. The emitter adds the `Option<..>`
     /// wrapper for absent headers.
     pub ty: RustType,
     /// Whether the header is required. A missing required header is a `400`.
@@ -468,7 +468,7 @@ pub struct CookieParam {
     /// The exact OpenAPI cookie name, used for the `CookieJar` lookup.
     pub cookie_name: String,
     /// The parsed scalar type. Like [`HeaderParam`], this is the bare element
-    /// type even when optional; the emitter adds the `Option<..>` wrapper.
+    /// type even when optional. The emitter adds the `Option<..>` wrapper.
     pub ty: RustType,
     /// Whether the cookie is required. A missing required cookie is a `400`.
     pub required: bool,
@@ -499,10 +499,10 @@ pub struct ResponseCase {
 pub struct ResponseHeader {
     /// Rust field identifier (`snake_case`).
     pub name: RustIdent,
-    /// Exact header name as written to the response (e.g. `X-Request-Id`).
+    /// Exact header name as written to the response (for example `X-Request-Id`).
     pub header_name: String,
     /// Scalar type serialized to a header value via `ToString`. Bare element
-    /// type even when optional; the emitter adds the `Option<..>` wrapper.
+    /// type even when optional. The emitter adds the `Option<..>` wrapper.
     pub ty: RustType,
     /// Whether the header is always written (`false` → `Option<..>` field).
     pub required: bool,
@@ -512,16 +512,16 @@ pub struct ResponseHeader {
 
 /// How a response variant's HTTP status code is produced.
 ///
-/// Fixed codes are emitted as a compile-time constant; `default` and range
+/// Fixed codes are emitted as a compile-time constant. `default` and range
 /// responses have no single code, so the variant instead carries an
 /// `axum::http::StatusCode` the handler supplies at runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponseStatus {
-    /// A concrete status code (e.g. `200`), emitted as a `StatusCode` constant.
+    /// A concrete status code (for example `200`), emitted as a `StatusCode` constant.
     Fixed(u16),
-    /// The `default` catch-all response; the handler supplies the status code.
+    /// The `default` catch-all response. The handler supplies the status code.
     Default,
-    /// A status-code range such as `5XX`, carrying the leading digit (`1..=5`);
+    /// A status-code range such as `5XX`, carrying the leading digit (`1..=5`).
     /// the handler supplies a concrete code within the class.
     Range(u8),
 }
@@ -530,7 +530,7 @@ pub enum ResponseStatus {
 /// declared server URL, plus the enum types their variables reference.
 ///
 /// Emitted when `generate.server-urls` is set. A server whose URL has no
-/// `{placeholder}` becomes a `const`; one with placeholders becomes a builder
+/// `{placeholder}` becomes a `const`. one with placeholders becomes a builder
 /// function that substitutes each variable and validates the result.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerUrls {

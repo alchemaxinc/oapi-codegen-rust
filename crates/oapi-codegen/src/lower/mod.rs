@@ -1,6 +1,6 @@
 //! Lowering OpenAPI documents into the intermediate representation (IR).
 //!
-//! [`schema`] lowers component schemas into an [`crate::ir::Module`]; [`paths`]
+//! [`schema`] lowers component schemas into an [`crate::ir::Module`]. [`paths`]
 //! lowers operations into an [`crate::ir::Service`]. Both feed the emit pass.
 //! [`validate`] collects independent semantic problems so one run can report
 //! every problem it finds rather than aborting on the first.
