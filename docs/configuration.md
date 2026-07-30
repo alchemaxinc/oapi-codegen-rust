@@ -6,20 +6,23 @@
 oapi-codegen [OPTIONS] --config-file <CONFIG_FILE> <SPEC_FILE>
 ```
 
-- `<SPEC_FILE>` — Path to the OpenAPI 3 document (YAML or JSON). Required.
-- `--config-file, -c` — Path to a YAML configuration file. Required.
-- `--output-file, -o` — Output file path. Required unless the config sets `output:`.
+- `<SPEC_FILE>` — path to the OpenAPI 3 document (YAML or JSON). Required.
+- `--config-file, -c` — path to a YAML config file. Required, and must enable at
+  least one artifact under `generate:` (`models`, `std-http-server`, `client`,
+  or `server-urls`); the tool errors with guidance otherwise.
+- `--output-file, -o` — output file. Required unless the config sets `output:`
+  (`--output-file` overrides it); the tool errors if neither is given. If
+  generation produces no code, nothing is written and the tool exits with an
+  explanation.
 
-The configuration file must enable at least one artifact under `generate:`:
-`models`, `std-http-server`, `client`, or `server-urls`.
-
-For the full generated reference, read [`cli.md`](./cli.md).
-Run `make update-docs` after you change the CLI.
+For a full, auto-generated reference of every flag and argument, see
+[`cli.md`](./cli.md) (regenerate with `make update-docs`).
 
 ## Config file
 
-The YAML keys match [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen).
-Unknown keys are ignored. Only the keys below are used.
+Keys mirror [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen)'s
+YAML config; unknown keys are ignored, so an existing Go config can be reused
+as-is. Only the subset below is interpreted.
 
 | Key              | Type   | Purpose                                                                |
 | ---------------- | ------ | ---------------------------------------------------------------------- |
@@ -29,50 +32,73 @@ Unknown keys are ignored. Only the keys below are used.
 
 ### `generate`
 
-| Key               | Purpose                                                   |
-| ----------------- | --------------------------------------------------------- |
-| `models`          | Generate structs and enums from component schemas.        |
-| `std-http-server` | Generate an axum server interface (`trait Api` + router). |
-| `client`          | Generate a blocking `reqwest` client.                     |
-| `server-urls`     | Generate constants/builders for `servers` URLs.           |
-| `embedded-spec`   | _Not implemented_. The tool rejects this key.             |
+| Key               | Purpose                                                |
+| ----------------- | ------------------------------------------------------ |
+| `models`          | Emit structs/enums from component schemas.             |
+| `std-http-server` | Emit an axum server interface (`trait Api` + router).  |
+| `client`          | Emit a blocking `reqwest` client.                      |
+| `server-urls`     | Emit constants/builders for the spec's `servers` URLs. |
+| `embedded-spec`   | _Not implemented_ — rejected if set.                   |
 
-If you set both `std-http-server` and `client`, the tool generates one shared
-file at the crate root. The file contains shared types for each operation.
+Setting both `std-http-server` and `client` emits models, per-operation types,
+and both interfaces flat at the crate root, so the server and client share one
+file and the same response types.
 
 ## Dependencies
 
-Cargo does not infer dependencies from `use` paths in generated files.
-After generation, the CLI prints the needed crates, versions, and features.
-It prints a `Cargo.toml` snippet and `cargo add` commands.
+Cargo does not infer crate dependencies from a generated file's `use` paths (the
+way Go's `go mod tidy` does), so after each run the CLI reports the crates — with
+versions and features — that the generated code references, as both a
+`Cargo.toml` snippet and `cargo add` commands. Pass `--install-deps` to run those
+`cargo add` commands automatically without prompting; otherwise, on an
+interactive terminal you are prompted first. `cargo add` targets the package
+whose `Cargo.toml` is nearest the output and merges with any existing
+declaration, so a crate you already depend on is updated in place rather than
+duplicated. The report lists every referenced crate rather than reading your
+manifest to prune ones you already have — interpreting a manifest (workspace
+inheritance, dev/target scopes, feature sufficiency) is Cargo's job.
 
-Use `--install-deps` to run those `cargo add` commands automatically.
-Interactive terminals show a prompt without that flag.
-Non-interactive runs print only the dependency list.
+The recommended versions are taken from `oapi-codegen`'s own manifest, so they
+match the versions the generated code is built and tested against.
 
-`cargo add` targets the package whose `Cargo.toml` is nearest the output file.
-If the dependency already exists, Cargo updates it in place.
-
-Recommended versions come from the `oapi-codegen` manifest.
-They match the versions used for build and test.
-
-Dependencies depend on the generated output.
-For example, model-only output usually needs `serde`.
-An axum server also needs `axum`, `http`, and sometimes `axum-extra`.
-A `reqwest` client needs `reqwest`, `percent-encoding`, and sometimes
-`serde_urlencoded`.
+The set is per generated file. For example, a models-only file typically needs
+only `serde`; an axum server also needs `axum`, `http`, and (with query or cookie
+parameters) `axum-extra`; a `reqwest` client needs `reqwest`, `percent-encoding`,
+and, for form responses, `serde_urlencoded`. `chrono`, `uuid`, and `serde_json`
+are added when the schemas use dates, UUIDs, or free-form values.
 
 ### `output-options`
 
-| Key                     | Purpose                                                                                            |
-| ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `skip-prune`            | Keep schemas that no kept operation/schema references.                                             |
-| `include-tags`          | Generate only operations with one of these tags.                                                   |
-| `exclude-tags`          | Skip operations with any of these tags.                                                            |
-| `include-operation-ids` | Generate only these `operationId` values.                                                          |
-| `exclude-operation-ids` | Skip these `operationId` values.                                                                   |
-| `exclude-schemas`       | Remove these component schemas before lowering.                                                    |
-| `response-type-suffix`  | Suffix for response enums (default `Response`). Use it to resolve a name clash with a schema name. |
+| Key                     | Purpose                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| `skip-prune`            | Keep schemas not referenced by any retained operation/schema.                                       |
+| `include-tags`          | Only generate operations with one of these tags.                                                    |
+| `exclude-tags`          | Skip operations with any of these tags.                                                             |
+| `include-operation-ids` | Only generate these `operationId`s.                                                                 |
+| `exclude-operation-ids` | Skip these `operationId`s.                                                                          |
+| `exclude-schemas`       | Drop these component schemas before lowering.                                                       |
+| `response-type-suffix`  | Suffix for response enums (default `Response`). Set it to resolve a clash with a same-named schema. |
+| `type-name-suffix`      | Suffix for a schema name that collapses onto a Rust type name another schema already has.           |
+
+### `type-name-suffix`
+
+Two different schema names can produce one Rust type name. For example, `order-item` and `orderItem` both produce
+`OrderItem`. The default behavior is an error, because the generator does not choose which of the two schemas keeps the
+plain name. That choice belongs to the spec author.
+
+Two remedies exist:
+
+1. Put `x-rust-name` on one of the two schemas. This is the preferred remedy. It records the type name the author wants,
+   and it changes that one schema only. See [vendor extensions](extensions.md).
+2. Set `type-name-suffix`. The generator then adds the suffix to each schema after the first that collides. With
+   `type-name-suffix: Alt`, the two schemas above become `OrderItem` and `OrderItemAlt`. A third collision becomes
+   `OrderItemAltAlt`.
+
+The order is document order. The first schema in the file keeps the plain name.
+
+The suffix must hold at least one letter or digit. Casing removes punctuation and separators, so a suffix such as `-`
+or `_` leaves the type name unchanged and cannot resolve a collision. Such a suffix is an error. A suffix that mixes
+punctuation with letters is fine, because `-v2` reduces to `V2`. To make a collision an error instead, remove the key.
 
 ## Example
 

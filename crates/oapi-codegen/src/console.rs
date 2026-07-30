@@ -1,9 +1,10 @@
-//! Terminal output for the CLI with guided, colored error reports.
+//! Terminal console output for the CLI: guided, colorized error reporting.
 //!
-//! This module writes to stderr through [`anstream`].
-//! It strips ANSI styling when stderr is not a terminal or `NO_COLOR` is set.
-//! It uses [`owo_colors`] for styling.
-//! Each failure states what went wrong and gives a next step when possible.
+//! Everything here writes to stderr through [`anstream`], which automatically
+//! strips ANSI styling when stderr is not a terminal or `NO_COLOR` is set, so
+//! the output degrades gracefully in pipes and logs. Styling is applied with
+//! [`owo_colors`]. The goal is a "guided" experience: every failure states
+//! what went wrong and, where possible, a concrete next step.
 
 use std::io::ErrorKind;
 use std::path::Path;
@@ -15,7 +16,7 @@ use oapi_codegen::config::Generate;
 use oapi_codegen::deps::Dependency;
 use owo_colors::OwoColorize;
 
-/// Example `generate:` block shown when a configuration enables no artifacts. Each
+/// Example `generate:` block shown when a config enables no artifacts. Each
 /// line is printed dimmed and indented under the hint.
 const GENERATE_EXAMPLE: &str = "\
 generate:
@@ -35,9 +36,9 @@ pub struct SpecStats {
     pub servers: usize,
 }
 
-/// Return `true` when generated `code` contains no items.
-/// The code can contain only the header comment and blank lines.
-/// The CLI reports this result as a failure.
+/// Return `true` when generated `code` contains no items, only the header
+/// comment and blank lines. Such a file is confusing to write to disk, so the
+/// CLI treats it as a failure and explains why instead.
 pub fn is_effectively_empty(code: &str) -> bool {
     return code.lines().all(|line| {
         let trimmed = line.trim();
@@ -46,26 +47,46 @@ pub fn is_effectively_empty(code: &str) -> bool {
 }
 
 /// Print a guided, styled error report for a generator `err` to stderr.
+///
+/// An [`Error::Validation`] holds several independent problems. Each one gets its
+/// own numbered heading and its own hints, because one message with every hint
+/// after it does not show which hint corrects which problem.
 pub fn report_error(err: &Error) {
+    if let Error::Validation { problems } = err {
+        eprintln!(
+            "{} found {} problems in the spec.",
+            "error:".red().bold(),
+            problems.len().bold()
+        );
+        for (index, problem) in problems.iter().enumerate() {
+            // 1-based, to match how the count above reads to a person.
+            let position = index.saturating_add(1);
+            eprintln!("  {} {}", format!("{position}.").red().bold(), problem.bold());
+            for hint in hints_for(problem) {
+                eprintln!("     {} {hint}", "hint:".cyan().bold());
+            }
+        }
+        return;
+    }
     eprintln!("{} {}", "error:".red().bold(), err.bold());
     for hint in hints_for(err) {
         eprintln!("  {} {hint}", "hint:".cyan().bold());
     }
 }
 
-/// Report that no output destination was given and show how to fix it.
+/// Report that no output destination was given, and show how to fix it.
 pub fn report_no_output() {
     eprintln!("{} no output destination was given.", "error:".red().bold());
     eprintln!(
-        "  {} pass `--output-file <file>` on the command line, or set `output:` in the configuration.",
+        "  {} pass `--output-file <file>` on the command line, or set `output:` in your config.",
         "hint:".cyan().bold()
     );
 }
 
-/// Report that a loaded configuration enables no artifacts and show how to fix it.
+/// Report that a loaded config enables no artifacts, and show how to fix it.
 pub fn report_no_artifacts(config: &Path) {
     eprintln!(
-        "{} the configuration `{}` enables no artifact.",
+        "{} the config `{}` enables nothing to generate.",
         "error:".red().bold(),
         config.display()
     );
@@ -76,15 +97,15 @@ pub fn report_no_artifacts(config: &Path) {
     print_snippet(GENERATE_EXAMPLE);
 }
 
-/// Print a multi-line code snippet with indentation under a hint.
+/// Print a multi-line code snippet dimmed and indented under a hint.
 fn print_snippet(snippet: &str) {
     for line in snippet.lines() {
         eprintln!("      {}", line.dimmed());
     }
 }
 
-/// Report that generation produced no code.
-/// The report compares the requested artifacts with the specification contents.
+/// Report that generation succeeded but produced no code, explaining the
+/// mismatch between what the config asked for and what the spec contains.
 pub fn report_empty_output(spec: &Path, stats: &SpecStats, generate: &Generate) {
     eprintln!(
         "{} generation of `{}` produced no code.",
@@ -92,7 +113,7 @@ pub fn report_empty_output(spec: &Path, stats: &SpecStats, generate: &Generate) 
         spec.display()
     );
     eprintln!(
-        "  the specification declares {} and {}.",
+        "  the spec declares {} and {}.",
         count("schema", stats.schemas).bold(),
         count("path", stats.paths).bold()
     );
@@ -101,19 +122,21 @@ pub fn report_empty_output(spec: &Path, stats: &SpecStats, generate: &Generate) 
     }
 }
 
-/// Report that the CLI wrote output to `path`.
+/// Report a successful write to `path`.
 pub fn report_wrote(path: &Path) {
     eprintln!("{} wrote {}", "✓".green().bold(), path.display());
 }
 
 /// After a successful write, list the external crates the generated code
-/// references. Print nothing when the output references no external crates.
+/// references so the consumer can add them to `Cargo.toml` — Cargo does not
+/// infer them from `use` paths the way `go mod tidy` does. Prints nothing when
+/// the output references no external crates (e.g. `server-urls` only).
 pub fn report_dependencies(deps: &[Dependency]) {
     if deps.is_empty() {
         return;
     }
     eprintln!(
-        "  {} add the crates that the generated code references to Cargo.toml:",
+        "  {} add the crates the generated code references to Cargo.toml:",
         "note:".cyan().bold()
     );
     for dep in deps {
@@ -125,8 +148,8 @@ pub fn report_dependencies(deps: &[Dependency]) {
     }
 }
 
-/// Ask whether to run the `cargo add` commands now.
-/// Return `false` on EOF or a non-affirmative answer.
+/// Ask whether to run the `cargo add` commands now. Returns `false` on EOF or a
+/// non-affirmative answer. Only meaningful on an interactive terminal.
 pub fn prompt_install_dependencies() -> bool {
     use std::io::Write;
     eprint!("  {} run these `cargo add` commands now? [y/N] ", "?".cyan().bold());
@@ -139,13 +162,14 @@ pub fn prompt_install_dependencies() -> bool {
     return answer == "y" || answer == "yes";
 }
 
-/// Report that the CLI adds a dependency with `cargo add`.
+/// Report that a dependency is being added via `cargo add`.
 pub fn report_installing(dep: &Dependency) {
     eprintln!("  {} {}", "+".green().bold(), dep.cargo_add().dimmed());
 }
 
-/// Report that a `cargo add` command failed.
-/// The output file is already written, so dependency installation remains a warning.
+/// Report that a `cargo add` invocation failed, without aborting — the output
+/// file is already written, so a failed convenience step is a warning, not a
+/// fatal error.
 pub fn report_install_failed(dep: &Dependency, detail: &str) {
     eprintln!(
         "  {} `{}` failed: {detail}",
@@ -176,7 +200,7 @@ fn hints_for(err: &Error) -> Vec<String> {
             return config_hints();
         }
         Error::WriteOutput { path, .. } => {
-            return vec![format!("Make sure that the directory for `{path}` is writable.")];
+            return vec![format!("Check that the directory for `{path}` is writable.")];
         }
         Error::Unimplemented(_) => {
             return vec!["This generation mode is not supported yet.".to_owned()];
@@ -189,31 +213,38 @@ fn hints_for(err: &Error) -> Vec<String> {
         }
         Error::UnsupportedSchema { .. } | Error::UnsupportedOperation { .. } => {
             return vec![
-                "This specification uses an unsupported feature. Simplify the schema or operation, or open an issue."
+                "This spec uses a feature the generator cannot represent yet; simplify the schema/operation or open an issue."
                     .to_owned(),
             ];
         }
         Error::SchemaDepthExceeded { .. } => {
             return vec![
-                "A schema nests too deeply. Flatten it or split the nested shape into a named component referenced by `$ref`."
+                "A schema nests too deeply; flatten it or split the nested shape into a named component referenced by `$ref`."
                     .to_owned(),
             ];
         }
         Error::InvalidPathParameter { name, .. } => {
             return vec![format!(
-                "Add `{{{name}}}` to the path template. Or change the parameter's `in:` to `query`, `header`, or `cookie`."
+                "Add `{{{name}}}` to the path template, or change the parameter's `in:` to `query`, `header`, or `cookie`."
             )];
         }
         Error::UndeclaredPathParameter { name, .. } => {
             return vec![format!(
-                "Declare a parameter with `name: {name}`, `in: path`, and `required: true`. Or remove `{{{name}}}` from the path."
+                "Declare a parameter with `name: {name}`, `in: path`, `required: true`, or remove `{{{name}}}` from the path."
             )];
         }
-        Error::TypeNameCollision { hint, .. } => {
+        Error::TypeNameCollision { hint, .. }
+        | Error::SchemaNameCollision { hint, .. }
+        | Error::InvalidTypeNameSuffix { hint, .. } => {
             return vec![hint.clone()];
         }
         Error::InvalidGeneratedCode { .. } => {
-            return vec!["This is an internal bug in oapi-codegen. Report it with your specification.".to_owned()];
+            return vec!["This is an internal bug in oapi-codegen. Please report it with your spec.".to_owned()];
+        }
+        // `report_error` renders each collected problem on its own, with that
+        // problem's own hints, so the aggregate itself adds no hint.
+        Error::Validation { .. } => {
+            return Vec::new();
         }
     }
 }
@@ -223,16 +254,16 @@ fn io_read_hints(what: &str, path: &str, kind: ErrorKind) -> Vec<String> {
     match kind {
         ErrorKind::NotFound => {
             return vec![format!(
-                "No {what} file exists at `{path}`. Make sure that the path and working directory are correct."
+                "No {what} file exists at `{path}`; check the path and your working directory."
             )];
         }
         ErrorKind::PermissionDenied => {
             return vec![format!(
-                "Permission denied while reading `{path}`. Make sure that the file permissions allow reading."
+                "Permission denied reading `{path}`; check the file's permissions."
             )];
         }
         _ => {
-            return vec![format!("The CLI could not read the {what} at `{path}`.")];
+            return vec![format!("Could not read the {what} at `{path}`.")];
         }
     }
 }
@@ -247,49 +278,45 @@ fn parse_spec_hints(message: &str) -> Vec<String> {
         ];
     }
     return vec![
-        "The specification must be a valid OpenAPI 3 document. The parser message above points at the problem."
-            .to_owned(),
+        "The spec must be a valid OpenAPI 3 document; the parser message above points at the problem.".to_owned(),
     ];
 }
 
-/// Hints for a configuration that failed to parse.
+/// Hints for a config that failed to parse.
 fn config_hints() -> Vec<String> {
     return vec![
-        "The configuration must use YAML and oapi-codegen keys, such as `output:` and a `generate:` block.".to_owned(),
+        "The config must be YAML using oapi-codegen's keys, e.g. `output:` and a `generate:` block.".to_owned(),
     ];
 }
 
-/// Build hints for empty output based on what the configuration requested versus what
+/// Build hints for empty output based on what the config requested versus what
 /// the spec actually contains.
 fn empty_output_hints(stats: &SpecStats, generate: &Generate) -> Vec<String> {
     let mut hints = Vec::new();
     if generate.models && stats.schemas == 0 {
-        hints.push("`generate.models` is on, but the specification has no `components.schemas` for models.".to_owned());
+        hints.push("`generate.models` is on, but the spec has no `components.schemas` to turn into models.".to_owned());
     }
     let wants_service = generate.std_http_server || generate.client;
     if wants_service && stats.paths == 0 {
-        hints.push("A server or client was requested, but the specification declares no paths.".to_owned());
+        hints.push("A server/client was requested, but the spec declares no paths to turn into operations.".to_owned());
     }
     if generate.server_urls && stats.servers == 0 {
         hints.push(
-            "`generate.server-urls` is on, but the specification declares no top-level `servers:` entries.".to_owned(),
+            "`generate.server-urls` is on, but the spec declares no top-level `servers:` entries to emit.".to_owned(),
         );
     }
     if hints.is_empty() {
         hints.push(
-            "The filters removed every requested item. Make sure that `output-options` includes the required items."
-                .to_owned(),
+            "Everything requested was filtered out; check your `output-options` include/exclude settings.".to_owned(),
         );
     } else {
-        hints.push(
-            "Add the missing definitions to the specification, or enable another artifact in your configuration."
-                .to_owned(),
-        );
+        hints
+            .push("Add the missing definitions to the spec, or enable a different artifact in your config.".to_owned());
     }
     return hints;
 }
 
-/// Format a count with a singular/plural noun, for example `1 schema`, `3 schemas`.
+/// Format a count with a singular/plural noun, e.g. `1 schema`, `3 schemas`.
 fn count(noun: &str, n: usize) -> String {
     if n == 1 {
         return format!("{n} {noun}");
@@ -379,7 +406,7 @@ mod tests {
             ..Default::default()
         };
         let hints = empty_output_hints(&stats, &generate);
-        assert!(hints.iter().any(|h| return h.contains("filters removed")));
+        assert!(hints.iter().any(|h| return h.contains("filtered out")));
     }
 
     #[test]
@@ -402,7 +429,7 @@ mod tests {
         let hints = hints_for(&err);
         assert!(
             hints.iter().any(|h| return h.contains("{tz}") && h.contains("query")),
-            "the hint must suggest adding the placeholder or changing `in:`, got: {hints:?}",
+            "hint should suggest adding the placeholder or changing `in:`, got: {hints:?}",
         );
     }
 
@@ -418,7 +445,7 @@ mod tests {
             hints
                 .iter()
                 .any(|h| return h.contains("in: path") && h.contains("{id}")),
-            "the hint must suggest declaring the parameter or removing the placeholder, got: {hints:?}",
+            "hint should suggest declaring the parameter or removing the placeholder, got: {hints:?}",
         );
     }
 }

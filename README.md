@@ -51,9 +51,10 @@ differ:
 - Explicit over implicit: `--config-file` is required, and an output path must be given via `--output-file` or the
   config's `output:` key; empty generation fails loudly (Go defaults these and prints to stdout).
 - Fails fast where Go assumes: where `oapi-codegen` silently defaults, guesses, or ignores an ambiguity, this generator
-  prefers to stop with a guided error and let a human decide (for example, a `<Op>Response` enum clashing with a
-  same-named schema, or a path parameter that does not match the path template). It errs toward surfacing the decision
-  rather than baking in an assumption.
+  stops with a guided error and lets a person decide. For example, two schemas that produce one Rust type name are an
+  error, and Go writes `MyWidget2` instead. A `<Op>Response` enum that clashes with a same-named schema, and a path
+  parameter that does not match the path template, are errors for the same reason. The generator surfaces the decision
+  and does not bake in an assumption.
 - `x-rust-*` vendor extensions; `x-go-*` keys ignored.
 
 See [design decisions vs. Go](docs/design.md) for the rationale.

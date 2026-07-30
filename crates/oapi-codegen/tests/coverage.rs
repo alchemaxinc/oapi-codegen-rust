@@ -459,6 +459,15 @@ const COMBINED_UNSUPPORTED_FIXTURES: &[&str] = &[
     "combined_reserved_name_client_error",
 ];
 
+/// Model-only fixtures for schema-name collisions. The golden-file tests do not
+/// cover these, because one must fail and the other needs a config option.
+///
+/// `type_name_collision_error` must fail. Two schema names collapse onto one Rust
+/// identifier, and the spec offers no remedy. `type_name_collision_suffix` must
+/// succeed, because `output-options.type-name-suffix` resolves the collision. The
+/// tests below exercise both.
+const NAMING_COLLISION_FIXTURES: &[&str] = &["type_name_collision_error", "type_name_collision_suffix"];
+
 /// Absolute path to the crate's `tests` directory.
 fn tests_dir() -> PathBuf {
     return Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
@@ -1085,6 +1094,148 @@ fn response_name_collision_without_suffix_fails() {
     );
 }
 
+/// Two distinct schema names that collapse onto one Rust identifier must stop
+/// generation. The generator once renamed the second schema to `OrderItem2`. That
+/// silent rename picked a public type name on the author's behalf, which the
+/// fail-fast design forbids.
+#[test]
+fn schema_name_collision_without_remedy_fails() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_error.yaml");
+    let err = oapi_codegen::generate_models_string(&fixture).expect_err("colliding schema names must stop generation");
+    let message = err.to_string();
+    assert!(
+        !message.contains("OrderItem2"),
+        "the generator must not invent a numeric name, got: {message}",
+    );
+    assert!(
+        message.contains("OrderItem") && message.contains("order-item") && message.contains("orderItem"),
+        "the error must name the identifier and both schemas, got: {message}",
+    );
+
+    // The remedy lives in the `hint` field, which the console prints under the
+    // message. Asserting on the field keeps `Display` free of the hint, so the
+    // CLI does not print the same text twice.
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    let first = problems.first().expect("at least one problem");
+    let oapi_codegen::Error::SchemaNameCollision { hint, ident, .. } = first else {
+        panic!("expected SchemaNameCollision, got: {first:?}");
+    };
+    assert_eq!(ident, "OrderItem");
+    assert!(
+        hint.contains("x-rust-name") && hint.contains("type-name-suffix"),
+        "the hint must name both remedies, got: {hint}",
+    );
+    assert!(
+        hint.contains("OrderItemAlt"),
+        "the hint example must use the Rust identifier, got: {hint}",
+    );
+    assert!(
+        !message.contains("x-rust-name"),
+        "`Display` must not repeat the hint that the console prints, got: {message}",
+    );
+}
+
+/// One run must report every independent collision. A spec with two separate
+/// collisions costs one run, not one run for each collision.
+#[test]
+fn independent_collisions_are_reported_together() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_error.yaml");
+    let err = oapi_codegen::generate_models_string(&fixture).expect_err("colliding schema names must fail");
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    // Three names collapse onto `OrderItem`, giving two collisions, and
+    // `price-tag`/`priceTag` give a third.
+    assert_eq!(problems.len(), 3, "expected every collision, got: {problems:?}");
+    let message = err.to_string();
+    assert!(
+        message.contains("OrderItem") && message.contains("PriceTag"),
+        "the report must cover both collision groups, got: {message}",
+    );
+}
+
+/// `output-options.type-name-suffix` resolves a collision without an annotation
+/// on each schema. The third colliding name takes the suffix twice, because the
+/// once-suffixed name is already taken.
+#[test]
+fn type_name_suffix_resolves_collisions() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_suffix.yaml");
+    let mut config = oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            models: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    config.output_options.type_name_suffix = Some("Alt".to_owned());
+    let code = oapi_codegen::generate(&fixture, &config).expect("a configured suffix must resolve the collision");
+    for expected in [
+        "pub struct OrderItem",
+        "pub struct OrderItemAlt",
+        "pub struct OrderItemAltAlt",
+    ] {
+        assert!(code.contains(expected), "missing `{expected}` in:\n{code}");
+    }
+    assert!(
+        code.contains("pub item: Option<OrderItemAlt>"),
+        "a reference must resolve to the suffixed name, got:\n{code}",
+    );
+}
+
+/// A `type-name-suffix` that adds no characters to a Rust type name is an error.
+///
+/// Casing drops punctuation and separators, so `Foo` plus `-` gives `Foo` again.
+/// Such a suffix cannot resolve a collision. The generator once searched for a
+/// free name that it could never produce, and that search did not end.
+///
+/// The error is explicit, and the generator does not treat the suffix as unset. A
+/// silent fallback would report a collision and tell the author to set
+/// `type-name-suffix`, which the author already did.
+#[test]
+fn type_name_suffix_without_identifier_characters_fails() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_suffix.yaml");
+    for suffix in ["", " ", "-", "_", "...", "-_-"] {
+        let mut config = oapi_codegen::Config {
+            generate: oapi_codegen::config::Generate {
+                models: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        config.output_options.type_name_suffix = Some(suffix.to_owned());
+        let err =
+            oapi_codegen::generate(&fixture, &config).expect_err("a suffix that adds no characters must be rejected");
+        assert!(
+            matches!(&err, oapi_codegen::Error::InvalidTypeNameSuffix { .. }),
+            "expected an InvalidTypeNameSuffix for `{suffix}`, got: {err:?}",
+        );
+    }
+}
+
+/// A suffix that carries punctuation is fine when it also carries an identifier
+/// character. `-v2` reduces to `V2`, which does lengthen the name.
+#[test]
+fn type_name_suffix_with_punctuation_and_letters_is_accepted() {
+    let fixture = tests_dir().join("fixtures").join("type_name_collision_suffix.yaml");
+    let mut config = oapi_codegen::Config {
+        generate: oapi_codegen::config::Generate {
+            models: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    config.output_options.type_name_suffix = Some("-v2".to_owned());
+    let code = oapi_codegen::generate(&fixture, &config).expect("`-v2` resolves the collisions");
+    assert!(code.contains("pub struct OrderItem "), "plain name is kept: {code}");
+    assert!(code.contains("pub struct OrderItemV2 "), "suffix applied once: {code}");
+    assert!(
+        code.contains("pub struct OrderItemV2v2 "),
+        "suffix repeated for the third collision: {code}",
+    );
+}
+
 /// A parameter declared `in: path` with no matching `{placeholder}` in the path
 /// template must fail generation with a guided error rather than silently drop
 /// the parameter from the generated signature.
@@ -1326,6 +1477,7 @@ fn fixtures_and_test_table_agree() {
         .chain(CLIENT_UNSUPPORTED_FIXTURES.iter().copied())
         .chain(COMBINED_FIXTURES.iter().copied())
         .chain(COMBINED_UNSUPPORTED_FIXTURES.iter().copied())
+        .chain(NAMING_COLLISION_FIXTURES.iter().copied())
         .collect();
 
     for stem in &referenced {

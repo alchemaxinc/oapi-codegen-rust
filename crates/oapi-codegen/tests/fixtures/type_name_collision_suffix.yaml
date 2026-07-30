@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: Type name collision resolved by a config suffix
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # Three distinct schema names that collapse onto one Rust identifier. With
+    # `output-options.type-name-suffix: Alt`, the second name becomes
+    # `OrderItemAlt` and the third becomes `OrderItemAltAlt`, because
+    # `OrderItemAlt` is taken.
+    order-item:
+      type: object
+      properties:
+        sku:
+          type: string
+    orderItem:
+      type: object
+      properties:
+        quantity:
+          type: integer
+    Order_Item:
+      type: object
+      properties:
+        price:
+          type: number
+    # A reference to the second colliding schema, proving that references resolve
+    # to the suffixed identifier.
+    cart:
+      type: object
+      properties:
+        item:
+          $ref: "#/components/schemas/orderItem"

@@ -1,14 +1,13 @@
-//! Resolving top-level type names across the lowered IR.
+//! Resolution of top-level type names across the lowered IR.
 //!
-//! A generated type name can diverge from the naive `to_ident(schema_name)` for
-//! two reasons: an explicit `x-rust-name` override, or collision de-confliction
-//! when distinct schema names collapse onto the same Rust identifier. Because
-//! every reference to a schema lowers to a [`RustType::Named`] holding the
-//! original schema name, resolving the type also requires rewriting those
-//! references so they point at the final identifier. The item names themselves
-//! are set from the same resolution map during lowering (see
-//! [`crate::lower::schema`]). this pass only rewrites the `Named` references
-//! left pointing at the original name.
+//! A generated type name differs from the plain `to_ident(schema_name)` for two
+//! reasons. The schema carries an `x-rust-name` override, or two schema names
+//! collapse onto one Rust identifier and the config supplies a suffix. Every
+//! reference to a schema lowers to a [`RustType::Named`] that holds the original
+//! schema name. Name resolution therefore must also rewrite those references to
+//! point at the final identifier. Lowering sets the item names from the same
+//! resolution map. See [`crate::lower::schema`]. This pass rewrites the `Named`
+//! references that still point at the original name.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -18,7 +17,9 @@ use openapiv3::ReferenceOr;
 use crate::config::DEFAULT_RESPONSE_SUFFIX;
 use crate::config::OUTPUT_OPTIONS_KEY;
 use crate::config::RESPONSE_TYPE_SUFFIX_KEY;
+use crate::config::TYPE_NAME_SUFFIX_KEY;
 use crate::emit::ReservedTypeName;
+use crate::error::Error;
 use crate::error::Result;
 use crate::ir::EnumKind;
 use crate::ir::Item;
@@ -29,40 +30,151 @@ use crate::ir::RustType;
 use crate::ir::Service;
 use crate::loader::Spec;
 use crate::naming::Case;
+use crate::naming::RustIdent;
 use crate::naming::X_RUST_NAME;
-use crate::naming::deconflict_ident;
 use crate::naming::to_ident;
 
-/// Map of original schema name to the final Rust type identifier that references
-/// to it must resolve to, for every top-level schema whose emitted name differs
-/// from the naive `to_ident(name)`. Two sources contribute an entry:
+/// A map from an original schema name to the final Rust type identifier. Every
+/// reference to that schema must resolve to this identifier. The map holds one
+/// entry for each top-level schema whose emitted name differs from the plain
+/// `to_ident(name)`. Two sources add an entry:
 ///
 /// * an `x-rust-name` override (inline schemas only), and
-/// * collision de-confliction, when distinct schema names collapse onto the same
-///   Rust identifier (for example `foo-bar` and `fooBar` both becoming `FooBar`) — the
-///   later schema in document order gains a numeric suffix (`FooBar2`).
+/// * a collision suffix from `output-options.type-name-suffix`, added to the
+///   second of two schema names that collapse onto one Rust identifier.
 ///
-/// Schemas whose emitted name is unchanged are omitted, so the common case
-/// yields an empty map and reference rewriting is skipped entirely.
-pub fn type_renames(spec: &Spec) -> HashMap<String, String> {
+/// The map omits a schema whose emitted name does not change. The common case
+/// therefore gives an empty map, and this pass skips reference rewriting.
+///
+/// # Errors
+///
+/// Two distinct schema names can collapse onto one Rust identifier. For example,
+/// `foo-bar` and `fooBar` both become `FooBar`. Such a collision is an error when
+/// `suffix` is `None`. The generator will not choose a name for one of two
+/// distinct schemas, because that choice belongs to the author. The error names
+/// both schemas and both remedies.
+///
+/// A `suffix` that contributes no characters to an identifier is also an error.
+/// Casing removes punctuation, so a suffix such as `-` leaves the name unchanged
+/// and cannot resolve a collision. A valid suffix holds a letter or a digit.
+pub fn type_renames(spec: &Spec, suffix: Option<&str>) -> Result<HashMap<String, String>> {
+    let suffix = checked_suffix(suffix)?;
     let mut resolved = HashMap::new();
-    let mut seen = HashSet::new();
+    // Maps a claimed identifier back to the schema name that claimed it, so a
+    // collision error can name the earlier schema and not the identifier alone.
+    let mut claimed: HashMap<String, String> = HashMap::new();
+    let mut diagnostics = crate::lower::validate::Diagnostics::new();
     for (name, entry) in spec.schemas() {
-        let effective = match entry {
+        let override_name = match entry {
             ReferenceOr::Item(schema) => schema
                 .schema_data
                 .extensions
                 .get(X_RUST_NAME)
-                .and_then(|value| return value.as_str())
-                .unwrap_or(name),
-            ReferenceOr::Reference { .. } => name.as_str(),
+                .and_then(|value| return value.as_str()),
+            ReferenceOr::Reference { .. } => None,
         };
-        let ident = deconflict_ident(to_ident(effective, Case::Pascal), &mut seen);
+        let effective = override_name.unwrap_or(name);
+        let mut ident = to_ident(effective, Case::Pascal);
+        if let Some(first) = claimed.get(ident.logical()) {
+            match suffix {
+                Some(suffix) => {
+                    ident = suffixed_ident(&ident, suffix, &claimed);
+                }
+                None => {
+                    diagnostics.push(Error::SchemaNameCollision {
+                        ident: ident.logical().to_owned(),
+                        first: first.clone(),
+                        second: name.clone(),
+                        hint: collision_hint(ident.logical(), name, override_name.is_some()),
+                    });
+                    continue;
+                }
+            }
+        }
+        claimed.insert(ident.logical().to_owned(), name.clone());
         if ident.logical() != to_ident(name, Case::Pascal).logical() {
             resolved.insert(name.clone(), ident.logical().to_owned());
         }
     }
-    return resolved;
+    diagnostics.into_result()?;
+    return Ok(resolved);
+}
+
+/// Reject a configured suffix that adds nothing to a Rust type name.
+///
+/// Casing drops punctuation and separators. `to_ident("Foo -")` therefore gives
+/// `Foo` again, and the same holds for an empty suffix. Such a suffix cannot
+/// resolve a collision, because the second name stays the same as the first.
+/// [`suffixed_ident`] would search for a free name that it can never produce.
+///
+/// The check runs one time for the whole document, and not for each schema,
+/// because the suffix comes from the config and does not change per schema.
+///
+/// This returns an error and does not treat the suffix as unset. A silent
+/// fallback would report a collision and tell the author to set
+/// `type-name-suffix`, which the author already did.
+fn checked_suffix(suffix: Option<&str>) -> Result<Option<&str>> {
+    let Some(suffix) = suffix else {
+        return Ok(None);
+    };
+    // Compare against a fixed stem, because the result must hold for every name.
+    // A suffix that adds characters to one name adds them to all names.
+    const STEM: &str = "Placeholder";
+    if to_ident(&format!("{STEM} {suffix}"), Case::Pascal).logical() != STEM {
+        return Ok(Some(suffix));
+    }
+    return Err(Error::InvalidTypeNameSuffix {
+        suffix: suffix.to_owned(),
+        hint: format!(
+            "Casing removes punctuation and separators, so `{suffix}` leaves the type name unchanged. \
+             Use a suffix with at least one letter or digit (for example \
+             `{TYPE_NAME_SUFFIX_KEY}: Alt`). To make a collision an error instead, remove \
+             `{OUTPUT_OPTIONS_KEY}.{TYPE_NAME_SUFFIX_KEY}`.",
+        ),
+    });
+}
+
+/// Add `suffix` to `ident`, and keep adding it until the result is free.
+///
+/// Repetition matters for a three-way collision. Two schemas already hold
+/// `Widget` and `WidgetAlt`, so a third must not take `WidgetAlt` again.
+///
+/// The loop ends because `suffix` adds at least one character to the identifier,
+/// which [`checked_suffix`] guarantees. Each pass therefore gives a longer name,
+/// and the supply of unclaimed names cannot run out.
+fn suffixed_ident(ident: &RustIdent, suffix: &str, claimed: &HashMap<String, String>) -> RustIdent {
+    let mut candidate = to_ident(&format!("{} {suffix}", ident.logical()), Case::Pascal);
+    while claimed.contains_key(candidate.logical()) {
+        let longer = to_ident(&format!("{} {suffix}", candidate.logical()), Case::Pascal);
+        // Defensive: `checked_suffix` rules this out. Growth is the reason the
+        // loop ends, so a non-growing step would spin forever. Stop instead.
+        if longer.logical() == candidate.logical() {
+            return candidate;
+        }
+        candidate = longer;
+    }
+    return candidate;
+}
+
+/// Build the remedy text for a schema-name collision.
+///
+/// `ident` is the Rust identifier that both schemas produce, so the example names
+/// real types and not spec names. `second` is the schema that collided.
+/// `overridden` records whether `second` already carries an `x-rust-name`. That
+/// case needs different advice, because the override itself caused the collision.
+fn collision_hint(ident: &str, second: &str, overridden: bool) -> String {
+    if overridden {
+        return format!(
+            "`{second}` already sets `{X_RUST_NAME}`, and that name also resolves to `{ident}`. \
+             Give `{second}` a name that no other schema uses.",
+        );
+    }
+    return format!(
+        "Give one of the two schemas a different Rust name with `{X_RUST_NAME}`, which records the \
+         type name the author wants. To rename every later collision instead, set \
+         `{OUTPUT_OPTIONS_KEY}.{TYPE_NAME_SUFFIX_KEY}` (for example `{TYPE_NAME_SUFFIX_KEY}: Alt`, \
+         which emits `{ident}` and `{ident}Alt`).",
+    );
 }
 
 /// Rewrite every `Named` reference in `module`'s items to honour `renames`.
@@ -92,7 +204,7 @@ pub fn rewrite_service(service: &mut Service, renames: &HashMap<String, String>)
 /// Apply `visit` to every leaf [`RustType`] referenced by the service's
 /// operation signatures (path/query/header/cookie params, request and response
 /// bodies, and response headers). Container types (`Vec`/`Map`/`Option`) are
-/// traversed to their leaf. `visit` receives the leaf in place.
+/// traversed to their leaf; `visit` receives the leaf in place.
 fn visit_service_types(service: &mut Service, visit: &mut dyn FnMut(&mut RustType)) {
     for operation in &mut service.operations {
         for param in &mut operation.path_params {
@@ -194,19 +306,19 @@ fn rewrite_type(ty: &mut RustType, renames: &HashMap<String, String>) {
         _ => {}
     }
 }
-/// Fail generation if a per-operation type name will collide with a
+/// Fail generation if a per-operation type name would collide with a
 /// component-model name emitted in the same file.
 ///
 /// In the flat layout, component models, per-operation types (response enums,
 /// parameter structs, request/response body enums), and the requested generator
-/// interfaces (`reserved`, for example the `Api` trait or `Client` struct) all share
+/// interfaces (`reserved`, e.g. the `Api` trait or `Client` struct) all share
 /// the crate root. A model whose name matches one of those — most commonly a
 /// schema named `<Op>Response`, or a schema literally named `Api`/`Client` —
-/// will produce two items with the same name. Rather than silently rename,
+/// would produce two items with the same name. Rather than silently rename,
 /// generation fails so the author resolves the clash deliberately: rename the
 /// schema with `x-rust-name`, or, for a response-enum clash, set
 /// `output-options.response-type-suffix`. Only locally emitted models are
-/// considered. import-mapped models are referenced through a qualified path and
+/// considered; import-mapped models are referenced through a qualified path and
 /// cannot collide with a crate-root type.
 pub fn check_type_name_collisions(service: &Service, module: &Module, reserved: &[ReservedTypeName]) -> Result<()> {
     let models: HashSet<&str> = module.items.iter().map(|item| return item.name()).collect();
@@ -252,7 +364,7 @@ pub fn check_type_name_collisions(service: &Service, module: &Module, reserved: 
 /// taken by an emitted component model. `is_response` selects the remedy hint:
 /// for a response-enum clash it leads with the surgical, per-schema `x-rust-name`
 /// fix and offers the broad `response-type-suffix` as an alternative, since that
-/// suffix renames *every* response enum, not the colliding one.
+/// suffix renames *every* response enum, not just the colliding one.
 fn ensure_free(
     name: &crate::naming::RustIdent,
     artifact: &str,
@@ -280,4 +392,67 @@ fn ensure_free(
         artifact: artifact.to_owned(),
         hint,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suffix_with_identifier_characters_is_accepted() {
+        for suffix in ["Alt", "2", "a", "-v2", "_alt"] {
+            let outcome = checked_suffix(Some(suffix));
+            assert!(
+                matches!(outcome, Ok(Some(kept)) if kept == suffix),
+                "`{suffix}` adds characters to a type name and must be accepted",
+            );
+        }
+    }
+
+    #[test]
+    fn absent_suffix_stays_absent() {
+        assert!(matches!(checked_suffix(None), Ok(None)));
+    }
+
+    #[test]
+    fn suffix_without_identifier_characters_is_rejected() {
+        // Casing drops each of these, so the suffix cannot resolve a collision.
+        // An unbounded search for a free name would otherwise never end.
+        for suffix in ["", " ", "-", "_", "...", "-_-"] {
+            let outcome = checked_suffix(Some(suffix));
+            assert!(
+                matches!(outcome, Err(Error::InvalidTypeNameSuffix { .. })),
+                "`{suffix}` adds nothing to a type name and must be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_suffix_names_both_remedies() {
+        let Err(err) = checked_suffix(Some("-")) else {
+            panic!("`-` must be rejected");
+        };
+        let Error::InvalidTypeNameSuffix { hint, .. } = &err else {
+            panic!("expected an InvalidTypeNameSuffix, got {err:?}");
+        };
+        // The hint must show how to make the suffix work, and how to go back to
+        // an error for a collision.
+        assert!(hint.contains(TYPE_NAME_SUFFIX_KEY), "hint names the key: {hint}");
+        assert!(hint.contains("Alt"), "hint gives a working example: {hint}");
+        assert!(hint.contains("remove"), "hint offers the error mode: {hint}");
+        // The message states the problem. The console prints the hint under it,
+        // so `Display` must not repeat the hint.
+        assert!(!err.to_string().contains(hint.as_str()));
+    }
+
+    #[test]
+    fn suffixed_ident_grows_until_the_name_is_free() {
+        let mut claimed: HashMap<String, String> = HashMap::new();
+        claimed.insert("OrderItem".to_owned(), "order-item".to_owned());
+        claimed.insert("OrderItemAlt".to_owned(), "orderItem".to_owned());
+        // `OrderItem` and `OrderItemAlt` are taken, so a third collision must
+        // repeat the suffix instead of reusing `OrderItemAlt`.
+        let ident = suffixed_ident(&to_ident("order-item", Case::Pascal), "Alt", &claimed);
+        assert_eq!(ident.logical(), "OrderItemAltAlt");
+    }
 }
