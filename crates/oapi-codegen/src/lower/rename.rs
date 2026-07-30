@@ -393,92 +393,265 @@ fn rewrite_type(ty: &mut RustType, renames: &HashMap<String, String>) {
         _ => {}
     }
 }
-/// Fail generation if a per-operation type name would collide with a
-/// component-model name emitted in the same file.
+/// Fail generation if two items of `module` take one Rust type name.
 ///
-/// In the flat layout, component models, per-operation types (response enums,
-/// parameter structs, request/response body enums), and the requested generator
-/// interfaces (`reserved`, e.g. the `Api` trait or `Client` struct) all share
-/// the crate root. A model whose name matches one of those — most commonly a
-/// schema named `<Op>Response`, or a schema literally named `Api`/`Client` —
-/// would produce two items with the same name. Rather than silently rename,
-/// generation fails so the author resolves the clash deliberately: rename the
-/// schema with `x-rust-name`, or, for a response-enum clash, set
-/// `output-options.response-type-suffix`. Only locally emitted models are
-/// considered; import-mapped models are referenced through a qualified path and
-/// cannot collide with a crate-root type.
-pub fn check_type_name_collisions(service: &Service, module: &Module, reserved: &[ReservedTypeName]) -> Result<()> {
-    let models: HashSet<&str> = module.items.iter().map(|item| return item.name()).collect();
-    for name in reserved {
-        if models.contains(name.name) {
-            return Err(crate::error::Error::TypeNameCollision {
-                name: name.name.to_owned(),
-                artifact: name.description.to_owned(),
-                hint: format!("rename the schema with `{X_RUST_NAME}`"),
+/// [`TypeNames::check_emitted`] covers two component schemas that collapse onto
+/// one identifier. It cannot cover a hoisted inline schema, because such a schema
+/// has no name in `components` for the resolution pass to see. Lowering names a
+/// hoisted item after the property path that encloses it, so a component schema
+/// named after that same path takes the same name. The emitted item is what
+/// decides, so this check reads the final item names.
+///
+/// Every generation mode calls this check, including models-only generation.
+///
+/// # Errors
+///
+/// Returns one [`Error::DuplicateTypeName`] for a single duplicate name, or an
+/// [`Error::Validation`] that holds all of them.
+pub fn check_duplicate_models(module: &Module) -> Result<()> {
+    let mut diagnostics = crate::lower::validate::Diagnostics::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for item in &module.items {
+        if !seen.insert(item.name()) {
+            diagnostics.push(Error::DuplicateTypeName {
+                name: item.name().to_owned(),
+                hint: duplicate_model_hint(item.name()),
             });
         }
     }
+    return diagnostics.into_result();
+}
+
+/// What claimed one crate-root type name.
+enum Claim {
+    /// A component model, or an inline schema that lowering hoisted to the crate
+    /// root. The two are one case here, because the emitted item is the same kind
+    /// of item and the remedy is the same.
+    Model,
+    /// A fixed type name that a requested generator interface emits, for example
+    /// the `Api` trait. The payload describes what emits it.
+    Reserved(&'static str),
+    /// A per-operation type. Every such name derives from the method name of the
+    /// operation that produced it, so the remedy names that operation.
+    Artifact {
+        /// What the generator emits, for example `query-parameter struct`.
+        kind: &'static str,
+        /// The `Api` method name of the operation that produced it.
+        operation: String,
+    },
+}
+
+/// Fail generation if two items that the file holds take one Rust type name.
+///
+/// In the flat layout, component models, inline schemas that lowering hoists to
+/// the crate root, per-operation types (response enums, parameter structs, and
+/// request/response body enums), and the requested generator interfaces
+/// (`reserved`, for example the `Api` trait or the `Client` struct) all share the
+/// crate root. Any two of them that take one name emit two items with that name,
+/// which does not compile. The check therefore holds one namespace and reports
+/// every claim that some earlier claim already took. Four cases reach it.
+///
+/// * A model against a reserved name. A component schema or a hoisted inline
+///   schema named `Api` or `Client` is the case.
+/// * A per-operation type against a model. The most common case is a schema named
+///   `<Op>Response`.
+/// * A per-operation type against a reserved name. An operation named `api` gives
+///   a response enum named `Api` when the suffix adds no characters.
+/// * A per-operation type against another per-operation type. A
+///   `response-type-suffix` that matches a parameter-struct suffix is one way to
+///   reach this, because it makes one operation's response enum take the name of
+///   a parameter struct.
+///
+/// Two models that take one name are the fifth pair in this namespace, and
+/// [`check_duplicate_models`] reports them. This check seeds the namespace with
+/// every model name and reports nothing for a repeat, so one clash gives one
+/// problem. That split needs the caller to run [`check_duplicate_models`] as
+/// well, which every generation mode does.
+///
+/// Rather than rename an item, generation fails, so the author resolves the clash.
+/// The `hint` of each problem names the remedy for that case.
+///
+/// Only locally emitted models count. An import-mapped model is referenced
+/// through a qualified path and cannot collide with a crate-root type.
+///
+/// # Errors
+///
+/// Returns one collision error for a single clash, or an [`Error::Validation`]
+/// that holds all of them. One run therefore reports every clash it finds.
+pub fn check_type_name_collisions(service: &Service, module: &Module, reserved: &[ReservedTypeName]) -> Result<()> {
+    let mut diagnostics = crate::lower::validate::Diagnostics::new();
+    // Seeding records each model name and reports nothing for a repeat, because
+    // `check_duplicate_models` owns that pair. This check does not enforce that the
+    // caller runs it. A caller that skips it emits two items with one name and no
+    // error, so every generation mode must call both.
+    let mut claimed: HashMap<String, Claim> = module
+        .items
+        .iter()
+        .map(|item| return (item.name().to_owned(), Claim::Model))
+        .collect();
+    for name in reserved {
+        // A model that took a reserved name keeps its `Claim::Model` entry, so the
+        // problem reports once here and not again for the reserved claim.
+        match claimed.insert(name.name.to_owned(), Claim::Reserved(name.description)) {
+            Some(Claim::Model) => {
+                claimed.insert(name.name.to_owned(), Claim::Model);
+                diagnostics.push(Error::TypeNameCollision {
+                    name: name.name.to_owned(),
+                    artifact: name.description.to_owned(),
+                    hint: format!("rename the schema with `{X_RUST_NAME}`"),
+                });
+            }
+            Some(Claim::Reserved(_) | Claim::Artifact { .. }) | None => {}
+        }
+    }
     for operation in &service.operations {
-        ensure_free(&operation.response_enum, "response enum", true, &models)?;
+        let mut claim = |name: &RustIdent, kind: &'static str| {
+            claim_artifact(&mut claimed, &mut diagnostics, name, kind, &operation.name);
+        };
+        claim(&operation.response_enum, "response enum");
         if let Some(query) = &operation.query {
-            ensure_free(&query.name, "query-parameter struct", false, &models)?;
+            claim(&query.name, "query-parameter struct");
         }
         if let Some(headers) = &operation.headers {
-            ensure_free(&headers.name, "header-parameter struct", false, &models)?;
+            claim(&headers.name, "header-parameter struct");
         }
         if let Some(cookies) = &operation.cookies {
-            ensure_free(&cookies.name, "cookie-parameter struct", false, &models)?;
+            claim(&cookies.name, "cookie-parameter struct");
         }
         match &operation.request {
-            Some(RequestPayload::Multipart(multipart)) => {
-                ensure_free(&multipart.name, "multipart request struct", false, &models)?;
-            }
-            Some(RequestPayload::Negotiated(request)) => {
-                ensure_free(&request.name, "request-body enum", false, &models)?;
-            }
+            Some(RequestPayload::Multipart(multipart)) => claim(&multipart.name, "multipart request struct"),
+            Some(RequestPayload::Negotiated(request)) => claim(&request.name, "request-body enum"),
             Some(RequestPayload::Single(_)) | None => {}
         }
         for response in &operation.responses {
             if let Some(ResponseBody::Negotiated(body)) = &response.body {
-                ensure_free(&body.name, "response-body enum", false, &models)?;
+                claim(&body.name, "response-body enum");
             }
         }
     }
-    return Ok(());
+    return diagnostics.into_result();
 }
 
-/// Return a [`crate::error::Error::TypeNameCollision`] when `name` is already
-/// taken by an emitted component model. `is_response` selects the remedy hint:
-/// for a response-enum clash it leads with the surgical, per-schema `x-rust-name`
-/// fix and offers the broad `response-type-suffix` as an alternative, since that
-/// suffix renames *every* response enum, not just the colliding one.
-fn ensure_free(
-    name: &crate::naming::RustIdent,
-    artifact: &str,
-    is_response: bool,
-    models: &HashSet<&str>,
-) -> Result<()> {
-    if !models.contains(name.logical()) {
-        return Ok(());
+/// Record one per-operation type name in `claimed`, or report the clash when some
+/// earlier claim already took it.
+fn claim_artifact(
+    claimed: &mut HashMap<String, Claim>,
+    diagnostics: &mut crate::lower::validate::Diagnostics,
+    name: &RustIdent,
+    kind: &'static str,
+    operation: &RustIdent,
+) {
+    let ident = name.logical();
+    match claimed.get(ident) {
+        None => {
+            claimed.insert(
+                ident.to_owned(),
+                Claim::Artifact {
+                    kind,
+                    operation: operation.logical().to_owned(),
+                },
+            );
+        }
+        Some(Claim::Model) => {
+            diagnostics.push(Error::TypeNameCollision {
+                name: ident.to_owned(),
+                artifact: kind.to_owned(),
+                hint: model_clash_hint(kind),
+            });
+        }
+        Some(Claim::Reserved(description)) => {
+            diagnostics.push(Error::OperationTypeCollision {
+                name: ident.to_owned(),
+                first: format!("the {description}"),
+                second: format!("the {kind} of operation `{}`", operation.logical()),
+                hint: reserved_clash_hint(operation.logical()),
+            });
+        }
+        Some(Claim::Artifact {
+            kind: first_kind,
+            operation: first_operation,
+        }) => {
+            diagnostics.push(Error::OperationTypeCollision {
+                name: ident.to_owned(),
+                first: format!("the {first_kind} of operation `{first_operation}`"),
+                second: format!("the {kind} of operation `{}`", operation.logical()),
+                hint: artifact_clash_hint(first_operation, operation.logical()),
+            });
+        }
     }
-    let hint = if is_response {
-        let default_suffix = to_ident(DEFAULT_RESPONSE_SUFFIX, Case::Pascal);
-        format!(
-            "give the colliding schema a different Rust name with `{X_RUST_NAME}` — a surgical, \
-             per-schema fix that leaves the other response enums untouched — or, to rename every \
-             response enum, set `{OUTPUT_OPTIONS_KEY}.{RESPONSE_TYPE_SUFFIX_KEY}` to a suffix other \
-             than the default `{}` (for example `{RESPONSE_TYPE_SUFFIX_KEY}: Resp`, which renames \
-             the enum to `<Op>Resp`)",
-            default_suffix.logical(),
-        )
-    } else {
-        format!("rename the schema with `{X_RUST_NAME}`")
-    };
-    return Err(crate::error::Error::TypeNameCollision {
-        name: name.logical().to_owned(),
-        artifact: artifact.to_owned(),
-        hint,
-    });
+}
+
+/// The remedy for two models that take one name.
+///
+/// At least one of the two is a hoisted inline schema, which carries no name of
+/// its own to override. The remedy therefore acts on the component schema that
+/// encloses it, or removes the hoist by giving the inline schema a component of
+/// its own.
+fn duplicate_model_hint(name: &str) -> String {
+    return format!(
+        "One of these comes from an inline schema that the generator hoists to the crate root, and \
+         an inline schema carries no name to override. Give the enclosing component schema a \
+         different Rust name with `{X_RUST_NAME}`, or move the inline schema into its own component \
+         schema, name that component something other than `{name}`, and refer to it with `$ref`.",
+    );
+}
+
+/// The remedy for a per-operation type that takes the name of an emitted model.
+///
+/// A response-enum clash has a second remedy, because one config key renames
+/// every response enum. The hint leads with the per-schema `x-rust-name` fix,
+/// which leaves the other response enums untouched, and offers the broad suffix
+/// after it.
+fn model_clash_hint(kind: &str) -> String {
+    if kind != "response enum" {
+        return format!("rename the schema with `{X_RUST_NAME}`");
+    }
+    let default_suffix = to_ident(DEFAULT_RESPONSE_SUFFIX, Case::Pascal);
+    return format!(
+        "give the colliding schema a different Rust name with `{X_RUST_NAME}` — a surgical, \
+         per-schema fix that leaves the other response enums untouched — or, to rename every \
+         response enum, set `{OUTPUT_OPTIONS_KEY}.{RESPONSE_TYPE_SUFFIX_KEY}` to a suffix other \
+         than the default `{}` (for example `{RESPONSE_TYPE_SUFFIX_KEY}: Resp`, which renames \
+         the enum to `<Op>Resp`)",
+        default_suffix.logical(),
+    );
+}
+
+/// The remedy for a per-operation type that takes the name of a generator
+/// interface.
+///
+/// The interface name is fixed, so only the operation side can move. Every
+/// per-operation type derives from the method name, so `x-rust-name` on the
+/// operation resolves the clash. A configured suffix can also produce this name,
+/// which the second remedy covers.
+fn reserved_clash_hint(operation: &str) -> String {
+    return format!(
+        "The generator emits this name for a requested target, so the name cannot move. Give \
+         operation `{operation}` a different method name with `{X_RUST_NAME}`, or change \
+         `{OUTPUT_OPTIONS_KEY}.{RESPONSE_TYPE_SUFFIX_KEY}` if that suffix produced the name.",
+    );
+}
+
+/// The remedy for two per-operation types that take one name.
+///
+/// One operation that produces both names is a different problem from two
+/// operations that produce one name. No method name can separate two types of one
+/// operation, so that case names the suffix that made them equal. Two operations
+/// take the per-operation `x-rust-name` remedy, because every per-operation type
+/// derives from the method name.
+fn artifact_clash_hint(first_operation: &str, second_operation: &str) -> String {
+    if first_operation == second_operation {
+        return format!(
+            "Both names belong to operation `{first_operation}`, so no method name can separate \
+             them. Set `{OUTPUT_OPTIONS_KEY}.{RESPONSE_TYPE_SUFFIX_KEY}` to a suffix that no \
+             parameter-struct or body-enum name already ends with.",
+        );
+    }
+    return format!(
+        "Every per-operation type derives from the method name of its operation. Give operation \
+         `{first_operation}` or operation `{second_operation}` a different method name with \
+         `{X_RUST_NAME}`.",
+    );
 }
 
 #[cfg(test)]

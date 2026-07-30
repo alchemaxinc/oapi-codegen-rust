@@ -77,6 +77,9 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         // no longer a problem and only a surviving one is reported. With
         // `skip-prune` the module holds every schema, so every collision reports.
         names.check_emitted(&module)?;
+        // A hoisted inline type carries no component name, so the resolution pass
+        // above cannot see it. The final item names can still hold a duplicate.
+        lower::check_duplicate_models(&module)?;
         let targets = emit::Targets {
             server: want_server,
             client: want_client,
@@ -87,6 +90,7 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     // Models-only generation prunes nothing, so the module holds every schema and
     // every collision reports.
     names.check_emitted(&module)?;
+    lower::check_duplicate_models(&module)?;
     return emit::emit_module(&module, server_urls.as_ref());
 }
 
@@ -109,6 +113,7 @@ pub fn generate_models_string(spec_path: &Path) -> Result<String> {
     let module = lower::generate_models(&spec, &names)?;
     // Every schema becomes an item here, so every collision reaches the file.
     names.check_emitted(&module)?;
+    lower::check_duplicate_models(&module)?;
     let code = emit::emit_module(&module, None)?;
     return Ok(code);
 }

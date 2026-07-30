@@ -114,6 +114,25 @@ so every method name stays the choice of the spec author. See [operation names](
 An operation that `exclude-operation-ids` or a tag filter removes claims no method name, because filtering runs before
 lowering. Such an operation joins no collision.
 
+### `response-type-suffix`
+
+This key resolves a clash between a response enum and a same-named schema. It can also cause one. Every per-operation
+type name is a method name plus a fixed suffix. A suffix that another artifact already adds therefore makes two
+per-operation types take one name. With `response-type-suffix: Query`, the response enum of operation `a` becomes
+`AQuery`, which is also the name of that operation's query-parameter struct. The generator reports the clash and stops.
+
+Pick a suffix that no parameter-struct or body-enum name ends with. The reserved endings are `Query`, `Headers`,
+`Cookies`, `Multipart`, `RequestBody`, and `Body`. The default `Response` is safe.
+
+When two _different_ operations clash this way, `x-rust-name` on one of the two operations also resolves it, because
+every per-operation type derives from the method name. When both names belong to one operation, only a different suffix
+resolves it.
+
+A suffix with no identifier characters, such as `-`, leaves each response enum named after its operation alone. This is
+not an error, unlike the same suffix for `type-name-suffix`, because a response enum needs no suffix to be unique. Such a
+suffix does make a clash more likely. An operation named `api` then gives a response enum named `Api`, which the server
+interface trait also takes.
+
 ## Example
 
 ```yaml

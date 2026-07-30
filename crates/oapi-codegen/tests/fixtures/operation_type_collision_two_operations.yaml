@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: Per-operation types of two operations that take one name
+  version: 1.0.0
+paths:
+  # With `response-type-suffix: AltQuery`, the response enum of operation `a` takes
+  # the name `AAltQuery`, which is also the query-parameter struct of operation
+  # `a_alt`. Two operations produce the clash, so a method name can separate them
+  # and the remedy is `x-rust-name` on one of the two operations.
+  /a:
+    get:
+      operationId: a
+      responses:
+        "200":
+          description: OK
+  /b:
+    get:
+      operationId: a_alt
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
