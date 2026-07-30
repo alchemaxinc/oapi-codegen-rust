@@ -79,18 +79,18 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 
 ## Patterns to Avoid
 
-- do not rely on global mutable state—use dependency injection or thread-safe containers.
+- Do not rely on global mutable state—use dependency injection or thread-safe containers.
 - Avoid deeply nested logic—refactor with functions or combinators.
-- do not ignore warnings—treat them as errors during CI.
+- Do not ignore warnings—treat them as errors during CI.
 - Avoid `unsafe` unless required and fully documented.
-- do not overuse `clone()`, use borrowing instead of cloning unless ownership transfer is needed.
+- Do not overuse `clone()`, use borrowing instead of cloning unless ownership transfer is needed.
 - Avoid premature `collect()`, keep iterators lazy until you actually need the collection.
 - Avoid unnecessary allocations—prefer borrowing and zero-copy operations.
 
 ## Code Style and Formatting
 
 - Follow the Rust Style Guide and use `rustfmt` for automatic formatting.
-- Always separate item definitions (functions, structs, enums, impls, modules) with a single blank line. never place two `fn`
+- Always separate item definitions (functions, structs, enums, impls, modules) with a single blank line. Never place two `fn`
   definitions on adjacent lines without a blank line between them.
 - Place function and struct documentation immediately before the item using `///`.
 - Use `cargo clippy` to catch common mistakes and enforce best practices.
@@ -122,7 +122,7 @@ and the broader Rust community at [users.rust-lang.org](https://users.rust-lang.
 - For values that are compile-time known (for example static timezone strings), prefer compile-time constants over runtime
   parsing with `expect()`.
 - Create custom error types using `thiserror` or implement `std::error::Error`.
-- Use `Option<T>` for values that can or can not exist.
+- Use `Option<T>` for values that can or cannot exist.
 - Provide meaningful error messages and context.
 - Error types must be meaningful and well-behaved (implement standard traits).
 - Validate function arguments and return appropriate errors for invalid input.
@@ -136,13 +136,13 @@ Eagerly implement common traits where appropriate:
 - `Copy`, `Clone`, `Eq`, `PartialEq`, `Ord`, `PartialOrd`, `Hash`, `Debug`, `Display`, `Default`
 - Use standard conversion traits: `From`, `AsRef`, `AsMut`
 - Collections must implement `FromIterator` and `Extend`
-- Note: `Send` and `Sync` are auto-implemented by the compiler when safe. avoid manual implementation unless using
+- Note: `Send` and `Sync` are auto-implemented by the compiler when safe. Avoid manual implementation unless using
   `unsafe` code
 
 ### Type Safety and Predictability
 
 - Use newtypes to provide static distinctions
-- Arguments must convey meaning through types. prefer specific types over generic `bool` parameters
+- Arguments must convey meaning through types. Prefer specific types over generic `bool` parameters
 - Use `Option<T>` appropriately for truly optional values
 - Functions with a clear receiver must be methods
 - Only smart pointers must implement `Deref` and `DerefMut`
