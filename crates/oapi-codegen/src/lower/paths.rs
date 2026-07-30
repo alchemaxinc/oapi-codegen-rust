@@ -85,6 +85,7 @@ use crate::lower::schema::string_format_type;
 use crate::lower::security;
 use crate::naming::Case;
 use crate::naming::RustIdent;
+use crate::naming::X_RUST_NAME;
 use crate::naming::operations;
 use crate::naming::to_ident;
 
@@ -169,6 +170,13 @@ impl Lowerer<'_> {
         let catalogue = security::scheme_catalogue(self.spec);
         let mut operations = Vec::new();
         let mut used_schemes: Vec<String> = Vec::new();
+        // Maps a claimed method name back to the `method path` that claimed it, so
+        // a collision error can name the earlier operation and not the identifier
+        // alone. Filtering runs before lowering (see `crate::filter`), and nothing
+        // prunes an operation afterwards, so every name claimed here reaches the
+        // file and every collision found here is real.
+        let mut claimed: BTreeMap<String, String> = BTreeMap::new();
+        let mut collisions = crate::lower::validate::Diagnostics::new();
         for (path, entry) in self.spec.paths().iter() {
             let item = match entry {
                 ReferenceOr::Item(item) => item,
@@ -182,6 +190,24 @@ impl Lowerer<'_> {
             };
             for (method, operation) in item.iter() {
                 let mut lowered = self.lower_operation(path, method, operation, &item.parameters)?;
+                let route = format!("{method} {path}");
+                match claimed.get(lowered.name.logical()) {
+                    Some(first) => {
+                        collisions.push(Error::OperationNameCollision {
+                            ident: lowered.name.logical().to_owned(),
+                            first: first.clone(),
+                            second: route,
+                            hint: operation_collision_hint(operation),
+                        });
+                        // Do not lower this operation into the service. Its
+                        // artifacts all derive from the colliding name, so keeping
+                        // it would emit the duplicates this check exists to stop.
+                        continue;
+                    }
+                    None => {
+                        claimed.insert(lowered.name.logical().to_owned(), route);
+                    }
+                }
                 lowered.security = self.operation_security(operation);
                 for key in &lowered.security {
                     if !used_schemes.iter().any(|existing| return existing == key) {
@@ -191,6 +217,7 @@ impl Lowerer<'_> {
                 operations.push(lowered);
             }
         }
+        collisions.into_result()?;
         let security_schemes = catalogue
             .into_iter()
             .filter(|scheme| return used_schemes.iter().any(|key| return *key == scheme.key))
@@ -1444,14 +1471,56 @@ impl Lowerer<'_> {
     }
 }
 
-/// Derive the trait method name: the `operationId` if present, else a name
-/// synthesised from the method and path (for example `get /v1/widgets` -> `get_v1_widgets`).
+/// Derive the trait method name: an explicit `x-rust-name`, else the
+/// `operationId`, else a name synthesised from the method and path (for example
+/// `get /v1/widgets` -> `get_v1_widgets`).
+///
+/// `x-rust-name` is the escape hatch for two `operationId`s that collapse onto one
+/// Rust name. It takes precedence over `operationId`, the same way it does for a
+/// schema, so the author names the method and the generator does not.
 fn operation_name(path: &str, method: &str, operation: &OasOperation) -> crate::naming::RustIdent {
+    if let Some(name) = operation
+        .extensions
+        .get(X_RUST_NAME)
+        .and_then(|value| return value.as_str())
+    {
+        return operations::operation_method_name(name);
+    }
     if let Some(id) = &operation.operation_id {
         return operations::operation_method_name(id);
     }
     let synthesised = format!("{method} {path}");
     return operations::operation_method_name(&synthesised);
+}
+
+/// Build the remedy text for an operation-name collision.
+///
+/// `operation` is the one that collided, and the advice depends on what it already
+/// declares. An operation that sets `x-rust-name` needs a different name and not
+/// the extension it already uses. An operation with no `operationId` derives its
+/// name from the method and path, so adding an `operationId` is the natural fix.
+///
+/// There is no suffix option for operations, unlike `type-name-suffix` for
+/// schemas. A method name appears in the trait a consumer implements, so every
+/// name a consumer writes stays the author's choice.
+fn operation_collision_hint(operation: &OasOperation) -> String {
+    if operation.extensions.contains_key(X_RUST_NAME) {
+        return format!(
+            "This operation already sets `{X_RUST_NAME}`, and that name collides too. \
+             Give it a name that no other operation uses."
+        );
+    }
+    if operation.operation_id.is_some() {
+        return format!(
+            "Two `operationId`s that differ only in case or in punctuation produce one Rust name. \
+             Give one of the two operations a different `operationId`, or set `{X_RUST_NAME}` on it \
+             to name the generated method directly."
+        );
+    }
+    return format!(
+        "This operation declares no `operationId`, so its name comes from the method and the path. \
+         Add an `operationId`, or set `{X_RUST_NAME}` on it to name the generated method directly."
+    );
 }
 
 /// The operation's doc comment, preferring `summary` over `description`.

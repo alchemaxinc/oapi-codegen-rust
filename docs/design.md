@@ -98,6 +98,29 @@ schemas cannot collide in a file that holds neither of them. The check therefore
 runs after pruning. With `output-options.skip-prune`, or with models-only
 generation, the file holds every schema and every collision reports.
 
+## Method-name collisions fail fast
+
+The same rule covers the name of a generated method. Two `operationId` values that
+differ only in case or in punctuation collapse onto one Rust name. For example,
+`list-widgets` and `listWidgets` both give `list_widgets`. An operation with no
+`operationId` takes its name from the method and the path, and two such paths can
+collide as well.
+
+Every artifact of an operation derives from that one name, so a collision emits a
+duplicate trait method, response enum, and handler, and the router points both
+routes at one handler. The generator stops and names both operations by method and
+path.
+
+There is only one remedy, and it is `x-rust-name` on one of the two operations. No
+suffix option exists here, unlike `type-name-suffix` for a type name. A consumer
+writes each method name into an `impl` block, so every method name stays the choice
+of the spec author. See [extensions](extensions.md#operation-names).
+
+Filtering runs before lowering, so an operation that
+`output-options.exclude-operation-ids` removes claims no name and joins no
+collision. One pass over the paths collects every collision, so the report lists all
+of them at once.
+
 ## OpenAPI 3.0
 
 The generator reads OpenAPI 3.0 documents through the `openapiv3` crate.

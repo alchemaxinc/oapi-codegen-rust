@@ -107,6 +107,13 @@ The suffix must hold at least one letter or digit. Casing removes punctuation an
 or `_` leaves the type name unchanged and cannot resolve a collision. Such a suffix is an error. A suffix that mixes
 punctuation with letters is fine, because `-v2` reduces to `V2`. To make a collision an error instead, remove the key.
 
+No key does the same for a method name. Two `operationId`s that collapse onto one Rust name are always an error, and
+`x-rust-name` on one of the two operations is the only remedy. A consumer writes each method name into an `impl` block,
+so every method name stays the choice of the spec author. See [operation names](extensions.md#operation-names).
+
+An operation that `exclude-operation-ids` or a tag filter removes claims no method name, because filtering runs before
+lowering. Such an operation joins no collision.
+
 ## Example
 
 ```yaml
