@@ -44,6 +44,15 @@ pub struct Cli {
     #[arg(short = 'o', long)]
     pub output_file: Option<PathBuf>,
 
+    /// Compare the generated code with the output file, and write nothing.
+    ///
+    /// The exit code is 0 when the output file holds the generated code.
+    /// The exit code is 1 when the file differs, or when the file is absent.
+    /// Use this in continuous integration to make stale output a failed build.
+    /// This flag reports no dependencies, because it adds none.
+    #[arg(long, conflicts_with = "install_deps")]
+    pub check: bool,
+
     /// After the write, run `cargo add` for each required crate.
     ///
     /// If set, this runs with no prompt.

@@ -125,6 +125,54 @@ pub fn generate_models_to_file(spec_path: &Path, output_path: &Path) -> Result<(
     return write_output(output_path, &code);
 }
 
+/// What a comparison of generated code against an output file found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Drift {
+    /// The output file holds the generated code.
+    None,
+    /// The output file does not exist. Generation creates it, so this is drift
+    /// and not a read failure.
+    Absent,
+    /// The output file exists and holds different content.
+    Differs,
+}
+
+/// Compare `code` with the content of `output_path` and report the difference.
+///
+/// This reads the file and writes nothing, so a caller can gate a build on stale
+/// generated code. The comparison is exact, because the generator formats every
+/// output through `prettyplease` and therefore produces one byte sequence for one
+/// input.
+///
+/// The comparison reads bytes and not text. Generated Rust is always UTF-8, so a
+/// file that is not gives [`Drift::Differs`]. That is what the file is, and it
+/// also keeps a hand-edited or truncated file on the drift path where the remedy
+/// applies, rather than on the error path where it does not.
+///
+/// # Errors
+///
+/// Returns [`Error::ReadOutput`] when the file exists and cannot be read, for
+/// example a directory in place of a file. An absent file gives [`Drift::Absent`]
+/// and not an error, because generation creates it.
+pub fn check_output(output_path: &Path, code: &str) -> Result<Drift> {
+    let existing = match std::fs::read(output_path) {
+        Ok(existing) => existing,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Drift::Absent);
+        }
+        Err(source) => {
+            return Err(Error::ReadOutput {
+                path: output_path.display().to_string(),
+                source,
+            });
+        }
+    };
+    if existing == code.as_bytes() {
+        return Ok(Drift::None);
+    }
+    return Ok(Drift::Differs);
+}
+
 /// Write generated source to `output_path`, creating parent directories.
 pub fn write_output(output_path: &Path, code: &str) -> Result<()> {
     if let Some(parent) = output_path.parent()
@@ -144,4 +192,117 @@ pub fn write_output(output_path: &Path, code: &str) -> Result<()> {
         };
     })?;
     return Ok(());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory under the temp directory that goes away with the test.
+    struct TestDir {
+        path: std::path::PathBuf,
+    }
+
+    impl TestDir {
+        fn new(test_name: &str) -> Self {
+            let unique = format!(
+                "oapi-codegen-check-{test_name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock should be after Unix epoch")
+                    .as_nanos(),
+            );
+            let path = std::env::temp_dir().join(unique);
+            std::fs::create_dir_all(&path).expect("create test directory");
+            return Self { path };
+        }
+
+        fn join(&self, file: &str) -> std::path::PathBuf {
+            return self.path.join(file);
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn check_output_reports_an_absent_file_as_drift() {
+        let dir = TestDir::new("absent");
+        // Generation creates the file, so absence is drift and not a read failure.
+        let drift = check_output(&dir.join("out.rs"), "pub struct Widget;\n").expect("check an absent file");
+        assert_eq!(drift, Drift::Absent);
+    }
+
+    #[test]
+    fn check_output_reports_equal_content_as_no_drift() {
+        let dir = TestDir::new("equal");
+        let path = dir.join("out.rs");
+        let code = "pub struct Widget;\n";
+        std::fs::write(&path, code).expect("write the output file");
+        let drift = check_output(&path, code).expect("check an equal file");
+        assert_eq!(drift, Drift::None);
+    }
+
+    #[test]
+    fn check_output_reports_different_content_as_drift() {
+        let dir = TestDir::new("differs");
+        let path = dir.join("out.rs");
+        std::fs::write(&path, "pub struct Widget;\n").expect("write the output file");
+        let drift = check_output(&path, "pub struct Gadget;\n").expect("check a stale file");
+        assert_eq!(drift, Drift::Differs);
+    }
+
+    #[test]
+    fn check_output_compares_exactly() {
+        let dir = TestDir::new("exact");
+        let path = dir.join("out.rs");
+        // The generator formats every output, so one input gives one byte
+        // sequence. A trailing newline is therefore a real difference and not
+        // noise to normalise away.
+        std::fs::write(&path, "pub struct Widget;").expect("write the output file");
+        let drift = check_output(&path, "pub struct Widget;\n").expect("check a file with no trailing newline");
+        assert_eq!(drift, Drift::Differs);
+    }
+
+    #[test]
+    fn check_output_reports_content_that_is_not_utf8_as_drift() {
+        let dir = TestDir::new("not-utf8");
+        let path = dir.join("out.rs");
+        // Generated Rust is always UTF-8, so such a file is a differing file and
+        // not an unreadable one. The remedy for drift applies, and the remedy for
+        // a read failure does not.
+        std::fs::write(&path, [0xFF_u8, 0xFE_u8]).expect("write the output file");
+        let drift = check_output(&path, "pub struct Widget;\n").expect("check a file that is not UTF-8");
+        assert_eq!(drift, Drift::Differs);
+    }
+
+    #[test]
+    fn check_output_writes_nothing() {
+        let dir = TestDir::new("readonly");
+        let path = dir.join("out.rs");
+        let existing = "pub struct Widget;\n";
+        std::fs::write(&path, existing).expect("write the output file");
+        let drift = check_output(&path, "pub struct Gadget;\n").expect("check a stale file");
+        assert_eq!(drift, Drift::Differs);
+        let after = std::fs::read_to_string(&path).expect("read the output file back");
+        assert_eq!(after, existing, "`check_output` must not change the file");
+    }
+
+    #[test]
+    fn check_output_fails_on_a_path_it_cannot_read() {
+        let dir = TestDir::new("unreadable");
+        let path = dir.join("out.rs");
+        // A directory exists but holds no string content, so this is a read
+        // failure and not drift.
+        std::fs::create_dir(&path).expect("create a directory where a file belongs");
+        let error = check_output(&path, "pub struct Widget;\n").expect_err("a directory is not readable as a file");
+        assert!(
+            matches!(error, Error::ReadOutput { .. }),
+            "expected `ReadOutput`, got {error:?}"
+        );
+    }
 }

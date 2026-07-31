@@ -35,6 +35,9 @@ You must set output with --output-file or the `output:` configuration key:
 
 * `-c`, `--config-file <CONFIG_FILE>` — Path to an `oapi-codegen` YAML configuration file (required)
 * `-o`, `--output-file <OUTPUT_FILE>` — Output file path (overrides configuration `output:`). Required unless the configuration sets `output:`
+* `--check` — Compare the generated code with the output file, and write nothing.
+
+   The exit code is 0 when the output file holds the generated code. The exit code is 1 when the file differs, or when the file is absent. Use this in continuous integration to make stale output a failed build. This flag reports no dependencies, because it adds none.
 * `--install-deps` — After the write, run `cargo add` for each required crate.
 
    If set, this runs with no prompt. If stdin is interactive and the flag is not set, the CLI asks first. If stdin is not interactive and the flag is not set, the CLI prints only the list. `cargo add` targets the package whose `Cargo.toml` is nearest output. It merges with an existing declaration. A crate that already exists is updated in place.

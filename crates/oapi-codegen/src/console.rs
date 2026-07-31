@@ -127,6 +127,36 @@ pub fn report_wrote(path: &Path) {
     eprintln!("{} wrote {}", "✓".green().bold(), path.display());
 }
 
+/// Report that `--check` found `path` up to date.
+pub fn report_check_passed(path: &Path) {
+    eprintln!("{} {} is up to date", "✓".green().bold(), path.display());
+}
+
+/// Report that `--check` found drift, and name the command that resolves it.
+///
+/// The message states which of the two cases holds, because an absent file and a
+/// stale file need the reader to look at different things. Both have one remedy,
+/// which is a run with no `--check`.
+pub fn report_drift(path: &Path, absent: bool) {
+    if absent {
+        eprintln!(
+            "{} {} does not exist.",
+            "error:".red().bold(),
+            path.display().to_string().bold()
+        );
+    } else {
+        eprintln!(
+            "{} {} is out of date with the spec.",
+            "error:".red().bold(),
+            path.display().to_string().bold()
+        );
+    }
+    eprintln!(
+        "  {} run the same command without `--check` to update it, and commit the result.",
+        "hint:".cyan().bold()
+    );
+}
+
 /// After a successful write, list the external crates the generated code
 /// references so the consumer can add them to `Cargo.toml` — Cargo does not
 /// infer them from `use` paths the way `go mod tidy` does. Prints nothing when
@@ -201,6 +231,11 @@ fn hints_for(err: &Error) -> Vec<String> {
         }
         Error::WriteOutput { path, .. } => {
             return vec![format!("Check that the directory for `{path}` is writable.")];
+        }
+        // An absent file is drift and not this error, so the reader has a path
+        // that exists and that the process cannot read.
+        Error::ReadOutput { path, .. } => {
+            return vec![format!("Check that `{path}` is a readable file and not a directory.")];
         }
         Error::Unimplemented(_) => {
             return vec!["This generation mode is not supported yet.".to_owned()];

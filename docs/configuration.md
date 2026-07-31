@@ -14,6 +14,9 @@ oapi-codegen [OPTIONS] --config-file <CONFIG_FILE> <SPEC_FILE>
   (`--output-file` overrides it); the tool errors if neither is given. If
   generation produces no code, nothing is written and the tool exits with an
   explanation.
+- `--check` — compare the generated code with the output file and write nothing.
+  The exit code is 0 when the file matches, and 1 when it differs or is absent.
+  Use this in continuous integration. See [build workflow](workflow.md).
 
 For a full, auto-generated reference of every flag and argument, see
 [`cli.md`](./cli.md) (regenerate with `make update-docs`).
