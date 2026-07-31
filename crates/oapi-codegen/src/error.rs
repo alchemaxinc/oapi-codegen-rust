@@ -77,11 +77,10 @@ pub enum Error {
 
     /// The document declares an OpenAPI version the generator does not read.
     ///
-    /// Only `3.0.x` is supported. A `3.1` document is rejected and not read as a
-    /// 3.0 document, because the subsets overlap. A 3.1 document whose every
-    /// construct happens to parse as 3.0 would otherwise generate quietly, and
-    /// one 3.1-only construct in the same file would fail with a `serde` message
-    /// that names neither the version nor the reason.
+    /// Only `3.0.x` is supported. A newer document is rejected and not read as a
+    /// 3.0 document, because the dialects overlap: one whose every construct
+    /// happens to parse as 3.0 would generate quietly, and one newer construct in
+    /// the same file would fail with a `serde` message that names no version.
     UnsupportedSpecVersion {
         /// The document that declares it, as a path or as the `$ref` that
         /// reached it. Every parsed document is checked, so the message must

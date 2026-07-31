@@ -20,17 +20,21 @@ use crate::error::Result;
 /// Maximum `$ref` chain length before bailing out (cycle guard).
 const MAX_REF_DEPTH: usize = 32;
 
-/// The one OpenAPI minor version the generator reads. Every parsed document must
-/// declare a patch release of it.
-const SUPPORTED_SPEC_VERSION: &str = "3.0";
+/// The OpenAPI minor versions the generator reads. Every parsed document must
+/// declare a patch release of one of them.
+///
+/// This is a list so that adding a version is one entry here. The gate and its
+/// message both read it, so neither states a version of its own.
+const SUPPORTED_SPEC_VERSIONS: [&str; 1] = ["3.0"];
 
 /// Top-level keys that carry operations the generator cannot emit. A document
 /// that declares one is rejected, because ignoring it emits no handler for any
 /// operation inside it and reads as a document that declares none.
 ///
-/// `webhooks` is a 3.1 key. The version gate rejects a 3.1 document first, so
-/// this list only reaches a 3.0 document that declares the key anyway. Such a
-/// document is still ambiguous, and the generator does not guess.
+/// `webhooks` is a 3.1 key, so today the version gate rejects such a document
+/// first and this list only reaches a 3.0 document that declares the key anyway.
+/// Such a document is still ambiguous, and the generator does not guess. The check
+/// stands on its own once a version that defines the key is supported.
 const UNSUPPORTED_TOP_LEVEL_KEYS: [&str; 1] = ["webhooks"];
 
 /// Shared empty schema map returned when a document has no components.
@@ -422,27 +426,21 @@ impl Spec {
     }
 }
 
-/// Reject a document whose `openapi:` value is not a `3.0.x` release.
+/// Reject a document whose `openapi:` value is not a patch release of a minor
+/// version in [`SUPPORTED_SPEC_VERSIONS`].
 ///
-/// The generator reads 3.0 through the `openapiv3` crate. That crate ignores the
-/// `openapi:` value, so it parses whatever subset of a 3.1 or 4.0 document
-/// happens to match 3.0 and reports nothing. A document that generates in part
-/// and fails in part is worse than one that fails at once, because the part that
-/// generates looks correct. This check therefore runs before any lowering.
+/// The parser behind the generator ignores the `openapi:` value, so without this
+/// check it reads whatever subset of an unsupported document happens to match a
+/// supported dialect, and reports nothing. A document that generates in part and
+/// fails in part is worse than one that fails at once, because the part that
+/// generates looks correct.
 ///
-/// The comparison is on the minor version. A patch release adds no construct, so
-/// `3.0.0` through `3.0.4` are one dialect and every one of them is accepted.
-///
-/// This reads the untyped tree and not the typed `OpenAPI` form, because it must
-/// run **before** the typed parse. A 3.1-only construct such as
-/// `type: [string, "null"]` fails that parse, and the message for it names a YAML
-/// shape and not a version (`invalid type: sequence, expected a string`). Reading
-/// the version first means the document that most needs this diagnostic is the
-/// one that gets it.
+/// The check runs on the untyped tree, before the typed parse. A construct that
+/// only a newer version defines fails that parse with a message about a YAML
+/// shape and not about a version.
 ///
 /// A document that declares no `openapi:` key, or declares it as a non-string,
-/// passes here. The typed parse that follows reports the missing or wrong-typed
-/// key with a message that points at the line.
+/// passes here. The typed parse reports that with a message that points at a line.
 fn check_spec_version(document: &str, value: &serde_yaml::Value) -> Result<()> {
     let Some(version) = value.get("openapi").and_then(serde_yaml::Value::as_str) else {
         return Ok(());
@@ -450,16 +448,23 @@ fn check_spec_version(document: &str, value: &serde_yaml::Value) -> Result<()> {
     let version = version.trim();
     // A patch part is optional in practice, so `3.0` and `3.0.3` both pass. The
     // dot guards against a future `3.00` reading as `3.0`.
-    let minor_matches = version == SUPPORTED_SPEC_VERSION || version.starts_with(&format!("{SUPPORTED_SPEC_VERSION}."));
-    if minor_matches {
+    let supported = SUPPORTED_SPEC_VERSIONS.iter().any(|minor| {
+        return version == *minor || version.starts_with(&format!("{minor}."));
+    });
+    if supported {
         return Ok(());
     }
+    let reads = SUPPORTED_SPEC_VERSIONS
+        .iter()
+        .map(|minor| {
+            return format!("{minor}.x");
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     return Err(Error::UnsupportedSpecVersion {
         document: document.to_owned(),
         version: version.to_owned(),
-        hint: format!(
-            "The generator reads OpenAPI {SUPPORTED_SPEC_VERSION}.x only. Convert the document to {SUPPORTED_SPEC_VERSION}, or track 3.1 support in issue #65 and 3.2 in issue #66."
-        ),
+        hint: format!("The generator reads OpenAPI {reads} only."),
     });
 }
 

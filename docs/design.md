@@ -163,18 +163,22 @@ The generator reads OpenAPI 3.0 documents through the `openapiv3` crate. Every
 document must declare a `3.0.x` version in its `openapi:` key. A document that
 declares any other version is an error.
 
-The generator does not read a 3.1 document as a 3.0 document, because the two
-subsets overlap. A 3.1 document whose every construct also parses as 3.0 would
-generate without a message. One 3.1-only construct in that same document then
-fails with a `serde` message that names neither the version nor the reason. The
-gate reports the version instead.
+The generator does not read a newer document as a 3.0 document, because the
+dialects overlap. A newer document whose every construct also parses as 3.0 would
+generate without a message. One newer construct in that same document then fails
+with a message that names a YAML shape and not a version. The gate reports the
+version instead.
 
-The gate reads the `openapi:` key before it reads the rest of the document, so a
-3.1-only construct reports as a version and not as a YAML shape.
+The gate reads the `openapi:` key before it reads the rest of the document, which
+is what makes the second case report correctly.
 
 The gate applies to a referenced file as well. A file that `$ref` reaches is a
-document of its own and declares its own version. A 3.1 fragment inside a 3.0
-document is the same overlap as a 3.1 root document.
+document of its own and declares its own version, so a newer fragment inside a
+3.0 document is the same overlap as a newer root document.
+
+Support for a newer version is a question of the parser behind the generator, and
+this document does not track it. Read the version table in the root
+[README](../README.md) for the current state.
 
 A document must also declare no `webhooks:` key. That key carries operations,
 and the generator emits no handler for them. Silence about the key reads as "the
