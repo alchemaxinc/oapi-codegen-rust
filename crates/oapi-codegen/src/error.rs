@@ -62,6 +62,19 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// Reading the output file for a comparison failed.
+    ///
+    /// An absent file is not this error. `--check` reports an absent file as
+    /// drift, because generation creates it. This covers a file that exists and
+    /// that the process cannot read, such as a directory or a file with no read
+    /// permission.
+    ReadOutput {
+        /// Path that cannot be read.
+        path: String,
+        /// Underlying IO error.
+        source: std::io::Error,
+    },
+
     /// A `$ref` pointed at something that cannot be resolved.
     UnresolvedRef(String),
 
@@ -274,6 +287,9 @@ impl std::fmt::Display for Error {
             Error::WriteOutput { path, source } => {
                 return write!(f, "failed to write output `{path}`: {source}");
             }
+            Error::ReadOutput { path, source } => {
+                return write!(f, "failed to read output `{path}`: {source}");
+            }
             Error::UnresolvedRef(reference) => {
                 return write!(f, "unresolved reference `{reference}`");
             }
@@ -363,6 +379,7 @@ impl std::error::Error for Error {
             Error::ReadConfig { source, .. } => return Some(source),
             Error::ParseConfig { source, .. } => return Some(source),
             Error::WriteOutput { source, .. } => return Some(source),
+            Error::ReadOutput { source, .. } => return Some(source),
             Error::InvalidGeneratedCode { source } => return Some(source),
             // `Validation` holds problems at the same level and wraps no cause.
             // It has no single `source`. `Display` shows the problems instead.

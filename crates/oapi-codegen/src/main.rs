@@ -14,6 +14,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use oapi_codegen::Config;
+use oapi_codegen::Drift;
 use oapi_codegen::Error;
 use oapi_codegen::Result;
 use oapi_codegen::cli::Cli;
@@ -41,6 +42,14 @@ enum CliFailure {
         /// What the configuration requested.
         generate: Generate,
     },
+    /// `--check` found the output file missing or out of date. Nothing was
+    /// written, because the flag asks for a comparison only.
+    Drift {
+        /// The output file that was compared.
+        output: PathBuf,
+        /// Whether the file is absent, as opposed to present and different.
+        absent: bool,
+    },
 }
 
 impl CliFailure {
@@ -58,6 +67,9 @@ impl CliFailure {
             }
             CliFailure::EmptyOutput { spec, stats, generate } => {
                 console::report_empty_output(spec, stats, generate);
+            }
+            CliFailure::Drift { output, absent } => {
+                console::report_drift(output, *absent);
             }
         }
     }
@@ -110,6 +122,23 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
             stats,
             generate: config.generate.clone(),
         });
+    }
+
+    if cli.check {
+        // `--check` compares and writes nothing, so it reports no dependencies
+        // either. A comparison adds no crate to the manifest.
+        match oapi_codegen::check_output(&output, &code)? {
+            Drift::None => {
+                console::report_check_passed(&output);
+                return Ok(());
+            }
+            Drift::Absent => {
+                return Err(CliFailure::Drift { output, absent: true });
+            }
+            Drift::Differs => {
+                return Err(CliFailure::Drift { output, absent: false });
+            }
+        }
     }
 
     oapi_codegen::write_output(&output, &code)?;

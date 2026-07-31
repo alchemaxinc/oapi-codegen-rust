@@ -69,9 +69,17 @@ generate-example: ## Regenerate the bookstore example from its OpenAPI specifica
 		cargo run -q -p oapi-codegen -- --config-file oapi-codegen-server.yaml openapi.yaml && \
 		cargo run -q -p oapi-codegen -- --config-file oapi-codegen-client.yaml openapi.yaml
 
+.PHONY: verify-example
+verify-example: ## Fail when the bookstore example is out of date, without writing to it
+	cd examples/bookstore && \
+		cargo run -q -p oapi-codegen -- --check --config-file oapi-codegen-common.yaml schemas/common.yaml && \
+		cargo run -q -p oapi-codegen -- --check --config-file oapi-codegen-catalog.yaml schemas/catalog.yaml && \
+		cargo run -q -p oapi-codegen -- --check --config-file oapi-codegen-server.yaml openapi.yaml && \
+		cargo run -q -p oapi-codegen -- --check --config-file oapi-codegen-client.yaml openapi.yaml
+
 .PHONY: verify-generated
 verify-generated: ## Regenerate all generated files and fail when they differ from committed files
-	$(MAKE) generate-example
+	$(MAKE) verify-example
 	$(MAKE) update-generated
 	$(MAKE) update-docs
 	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md)" ]; then \

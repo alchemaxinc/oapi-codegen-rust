@@ -86,6 +86,7 @@ against [`.github/openapi-versions.json`](.github/openapi-versions.json).
 > They have been checked and verified by humans, and can be read if interested.
 
 - [Installation](docs/installation.md)
+- [Build workflow](docs/workflow.md)
 - [Configuration](docs/configuration.md)
 - [OpenAPI extensions](docs/extensions.md)
 - [Design decisions vs. Go](docs/design.md)
