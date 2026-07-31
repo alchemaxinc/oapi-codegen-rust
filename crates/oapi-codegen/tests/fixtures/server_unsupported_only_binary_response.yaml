@@ -1,0 +1,16 @@
+openapi: 3.0.3
+info:
+  title: unsupported binary-only response
+  version: "1"
+paths:
+  /report:
+    get:
+      operationId: getReport
+      responses:
+        "200":
+          description: a PDF the generator cannot represent
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary

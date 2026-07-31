@@ -51,6 +51,16 @@ pub struct Struct {
     /// When set, the struct captures unknown keys into a flattened map of this
     /// element type (`additionalProperties`).
     pub additional_properties: Option<RustType>,
+    /// Whether the schema set `additionalProperties: false`, which becomes
+    /// `#[serde(deny_unknown_fields)]`.
+    ///
+    /// This is a field of its own and not the `None` case of
+    /// [`Self::additional_properties`], because an absent `additionalProperties`
+    /// and an explicit `false` are different statements. An absent key permits
+    /// unknown keys and drops them, which is what serde does with no attribute.
+    /// An explicit `false` rejects them. Both give no flattened map, so the map
+    /// alone cannot tell them apart.
+    pub deny_unknown_fields: bool,
 }
 
 /// A single struct field.

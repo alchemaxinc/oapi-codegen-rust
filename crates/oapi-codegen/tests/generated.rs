@@ -56,6 +56,9 @@ mod generated {
     pub mod object_additional_properties {
         include!("generated/object_additional_properties.rs");
     }
+    pub mod object_deny_unknown_fields {
+        include!("generated/object_deny_unknown_fields.rs");
+    }
     pub mod object_nested_inline {
         include!("generated/object_nested_inline.rs");
     }

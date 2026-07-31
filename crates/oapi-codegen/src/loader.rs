@@ -20,6 +20,23 @@ use crate::error::Result;
 /// Maximum `$ref` chain length before bailing out (cycle guard).
 const MAX_REF_DEPTH: usize = 32;
 
+/// The OpenAPI minor versions the generator reads. Every parsed document must
+/// declare a patch release of one of them.
+///
+/// This is a list so that adding a version is one entry here. The gate and its
+/// message both read it, so neither states a version of its own.
+const SUPPORTED_SPEC_VERSIONS: [&str; 1] = ["3.0"];
+
+/// Top-level keys that carry operations the generator cannot emit. A document
+/// that declares one is rejected, because ignoring it emits no handler for any
+/// operation inside it and reads as a document that declares none.
+///
+/// `webhooks` is a 3.1 key, so today the version gate rejects such a document
+/// first and this list only reaches a 3.0 document that declares the key anyway.
+/// Such a document is still ambiguous, and the generator does not guess. The check
+/// stands on its own once a version that defines the key is supported.
+const UNSUPPORTED_TOP_LEVEL_KEYS: [&str; 1] = ["webhooks"];
+
 /// Shared empty schema map returned when a document has no components.
 static EMPTY_SCHEMAS: std::sync::OnceLock<IndexMap<String, ReferenceOr<Schema>>> = std::sync::OnceLock::new();
 
@@ -55,9 +72,25 @@ impl Spec {
                 source,
             };
         })?;
-        let inner: OpenAPI = serde_yaml::from_str(&text).map_err(|source| {
+        let document = path.display().to_string();
+        // Parse to a `Value` first, then into `OpenAPI` from that one tree. The
+        // typed form drops every key it does not know, so a key such as
+        // `webhooks:` is only visible here. This costs no second parse of the
+        // text.
+        let value: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|source| {
             return Error::ParseSpec {
-                path: path.display().to_string(),
+                path: document.clone(),
+                source,
+            };
+        })?;
+        // Both checks read the untyped tree, and both run before the typed parse.
+        // The version gate must, because a 3.1-only construct fails that parse
+        // with a message that names a YAML shape and not a version.
+        check_spec_version(&document, &value)?;
+        check_top_level_keys(&value)?;
+        let inner: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
+            return Error::ParseSpec {
+                path: document.clone(),
                 source,
             };
         })?;
@@ -93,7 +126,19 @@ impl Spec {
                 source,
             };
         })?;
-        let parsed: OpenAPI = serde_yaml::from_str(&text).map_err(|source| {
+        let value: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|source| {
+            return Error::ParseRefFile {
+                file: file.to_owned(),
+                source,
+            };
+        })?;
+        // A referenced file is a document of its own and declares its own
+        // version. A 3.1 fragment pulled into a 3.0 document is the same
+        // ambiguity as a 3.1 root, so the same gate applies, and it applies
+        // before the typed parse for the same reason.
+        check_spec_version(file, &value)?;
+        check_top_level_keys(&value)?;
+        let parsed: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseRefFile {
                 file: file.to_owned(),
                 source,
@@ -379,6 +424,73 @@ impl Spec {
             });
         });
     }
+}
+
+/// Reject a document whose `openapi:` value is not a patch release of a minor
+/// version in [`SUPPORTED_SPEC_VERSIONS`].
+///
+/// The parser behind the generator ignores the `openapi:` value, so without this
+/// check it reads whatever subset of an unsupported document happens to match a
+/// supported dialect, and reports nothing. A document that generates in part and
+/// fails in part is worse than one that fails at once, because the part that
+/// generates looks correct.
+///
+/// The check runs on the untyped tree, before the typed parse. A construct that
+/// only a newer version defines fails that parse with a message about a YAML
+/// shape and not about a version.
+///
+/// A document that declares no `openapi:` key, or declares it as a non-string,
+/// passes here. The typed parse reports that with a message that points at a line.
+fn check_spec_version(document: &str, value: &serde_yaml::Value) -> Result<()> {
+    let Some(version) = value.get("openapi").and_then(serde_yaml::Value::as_str) else {
+        return Ok(());
+    };
+    let version = version.trim();
+    // A patch part is optional in practice, so `3.0` and `3.0.3` both pass. The
+    // dot guards against a future `3.00` reading as `3.0`.
+    let supported = SUPPORTED_SPEC_VERSIONS.iter().any(|minor| {
+        return version == *minor || version.starts_with(&format!("{minor}."));
+    });
+    if supported {
+        return Ok(());
+    }
+    let reads = SUPPORTED_SPEC_VERSIONS
+        .iter()
+        .map(|minor| {
+            return format!("{minor}.x");
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    return Err(Error::UnsupportedSpecVersion {
+        document: document.to_owned(),
+        version: version.to_owned(),
+        hint: format!("The generator reads OpenAPI {reads} only."),
+    });
+}
+
+/// Reject a document that declares a top-level key holding operations the
+/// generator cannot emit.
+///
+/// This reads the untyped tree, because the typed `OpenAPI` form drops every key
+/// it does not know and a dropped key cannot be reported. A document that is not
+/// a mapping passes here. The typed parse that follows reports that shape with
+/// its own message, which points at the line.
+fn check_top_level_keys(value: &serde_yaml::Value) -> Result<()> {
+    let Some(mapping) = value.as_mapping() else {
+        return Ok(());
+    };
+    for key in UNSUPPORTED_TOP_LEVEL_KEYS {
+        if mapping.contains_key(serde_yaml::Value::String(key.to_owned())) {
+            return Err(Error::UnsupportedSpecKey {
+                key: key.to_owned(),
+                reason: "declares operations the generator cannot emit".to_owned(),
+                hint: format!(
+                    "Remove `{key}:`, or move its operations under `paths:`. Silently ignoring it emits no handler for any operation it holds."
+                ),
+            });
+        }
+    }
+    return Ok(());
 }
 
 /// Extract the trailing schema name from a *same-document* `$ref`

@@ -212,8 +212,8 @@ const TEST_TABLE: &[Feature] = &[
     },
     Feature {
         element: "object.additionalProperties.false",
-        status: Status::Ignored,
-        fixture: None,
+        status: Status::Supported,
+        fixture: Some("object_deny_unknown_fields"),
     },
     // References
     Feature {
@@ -359,6 +359,31 @@ const TEST_TABLE: &[Feature] = &[
         status: Status::Planned,
         fixture: None,
     },
+    // Document version and top-level keys. The generator reads 3.0 only, and it
+    // rejects any other version rather than reading whatever subset parses.
+    Feature {
+        element: "doc.openapi.3.0",
+        status: Status::Supported,
+        fixture: Some("primitive_scalars"),
+    },
+    Feature {
+        element: "doc.openapi.other",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_spec_version"),
+    },
+    // The same rejection, on a document a 3.0 parser cannot read at all. The two
+    // fixtures cover the two sides of the gate: one document that would parse as
+    // 3.0 and one that would not.
+    Feature {
+        element: "doc.openapi.other.31-syntax",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_spec_version_31_syntax"),
+    },
+    Feature {
+        element: "doc.webhooks",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_webhooks"),
+    },
 ];
 
 /// Server fixtures whose generated axum interface is compile-checked against a
@@ -414,6 +439,8 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_ref_response_header",
     "server_unsupported_reserved_response_header",
     "server_unsupported_only_binary_body",
+    "server_unsupported_only_binary_response",
+    "server_unsupported_multipart_response",
     "server_unsupported_text_non_string_body",
     "server_unsupported_form_scalar_body",
     "server_unsupported_form_ref_scalar_body",
@@ -572,6 +599,7 @@ generated_tests!(
     nullable,
     number_formats,
     object_additional_properties,
+    object_deny_unknown_fields,
     object_nested_inline,
     object_optional_required,
     oneof_discriminator,
@@ -1940,6 +1968,33 @@ fn unsupported_features_are_rejected() {
         assert!(
             result.is_err(),
             "`{stem}` is catalogued as unsupported but generation succeeded",
+        );
+    }
+}
+
+/// A document that declares an unsupported version is rejected **for its
+/// version**, and not for whatever else the parser trips over first.
+///
+/// `unsupported_features_are_rejected` asserts `is_err()` only, so it passes on
+/// any error at all. That is too weak here. A 3.1 document holding a 3.1-only
+/// construct fails the typed 3.0 parse with `invalid type: sequence, expected a
+/// string`, which names no version and gives the author no remedy. The version
+/// gate therefore reads `openapi:` from the untyped tree, before that parse, and
+/// this test pins the ordering. Both fixtures must report the same variant: one
+/// would parse as 3.0, and one would not.
+#[test]
+fn a_3_1_document_is_rejected_for_its_version_and_not_by_the_parser() {
+    let dir = tests_dir();
+    for stem in ["unsupported_spec_version", "unsupported_spec_version_31_syntax"] {
+        let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+        // No `return` on this arm: `panic!` diverges, so `implicit_return` does
+        // not apply and `diverging_sub_expression` rejects the `return`.
+        let error = oapi_codegen::generate_models_string(&fixture).err().unwrap_or_else(|| {
+            panic!("`{stem}` declares an unsupported version and generation succeeded");
+        });
+        assert!(
+            matches!(error, oapi_codegen::Error::UnsupportedSpecVersion { .. }),
+            "`{stem}` must be rejected as UnsupportedSpecVersion, and reported as: {error}",
         );
     }
 }

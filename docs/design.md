@@ -157,9 +157,69 @@ struct. Two types of one operation need a different suffix, because no method na
 separates them. Two types of different operations take `x-rust-name` on one of the
 two operations.
 
-## OpenAPI 3.0
+## OpenAPI 3.0 only, and the version gate
 
-The generator reads OpenAPI 3.0 documents through the `openapiv3` crate.
+The generator reads OpenAPI 3.0 documents through the `openapiv3` crate. Every
+document must declare a `3.0.x` version in its `openapi:` key. A document that
+declares any other version is an error.
+
+The generator does not read a newer document as a 3.0 document, because the
+dialects overlap. A newer document whose every construct also parses as 3.0 would
+generate without a message. One newer construct in that same document then fails
+with a message that names a YAML shape and not a version. The gate reports the
+version instead.
+
+The gate reads the `openapi:` key before it reads the rest of the document, which
+is what makes the second case report correctly.
+
+The gate applies to a referenced file as well. A file that `$ref` reaches is a
+document of its own and declares its own version, so a newer fragment inside a
+3.0 document is the same overlap as a newer root document.
+
+Support for a newer version is a question of the parser behind the generator, and
+this document does not track it. Read the version table in the root
+[README](../README.md) for the current state.
+
+A document must also declare no `webhooks:` key. That key carries operations,
+and the generator emits no handler for them. Silence about the key reads as "the
+document declares no such operation", so the generator rejects the key.
+
+## A body must declare a content type the generator can represent
+
+A request body must declare one of `application/json`,
+`application/x-www-form-urlencoded`, `multipart/form-data`, or `text/plain`. A
+response body must declare one of the first three of those. Multipart is absent
+from the response list because `axum` has a multipart extractor and no multipart
+response writer.
+
+A body that declares `content:`, and no content type from its list, is an error.
+Such a body is not a bodyless body. A bodyless response declares no `content:`
+at all, and `204` is the common case. A response that declares
+`application/pdf` states that a payload exists, so a bodyless variant for it
+drops the payload without a message.
+
+## Unknown fields follow `additionalProperties`
+
+- `additionalProperties: false` gives `#[serde(deny_unknown_fields)]` on the
+  struct. An unknown key in the input is an error.
+- An absent `additionalProperties` key gives no attribute. An unknown key in the
+  input is dropped, which is what serde does by default.
+- An `additionalProperties` schema gives a flattened map field, which holds every
+  unknown key.
+
+The generator emits `deny_unknown_fields` only when the struct also derives
+`Deserialize`. The `Serialize` derive does not read the attribute.
+
+Two exceptions apply. A merge of `allOf` members drops the key. In JSON Schema
+each member validates the whole object, so a member with
+`additionalProperties: false` rejects every property that a sibling member
+declares. A merge that honored the key would deny the fields that the merge
+just added.
+
+A query-parameter struct also drops the key. A query string commonly carries a
+parameter that the document does not declare, such as one that a proxy or an
+analytics tool adds. A denial there rejects a whole request that the document
+permits.
 
 ## Config compatibility
 
