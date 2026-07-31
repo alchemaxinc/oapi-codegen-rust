@@ -205,6 +205,9 @@ impl Mapper<'_> {
             Some(AdditionalProperties::Any(true)) => Some(RustType::Value),
             Some(AdditionalProperties::Any(false)) | None => None,
         };
+        // Only an explicit `false` denies unknown keys. An absent key permits
+        // them, which is serde's behaviour with no attribute.
+        let deny_unknown_fields = matches!(&obj.additional_properties, Some(AdditionalProperties::Any(false)));
 
         return Ok(Struct {
             name: self.type_name_ident(name),
@@ -212,6 +215,7 @@ impl Mapper<'_> {
             deprecated: deprecation_of(data),
             fields,
             additional_properties,
+            deny_unknown_fields,
         });
     }
 
@@ -329,6 +333,13 @@ impl Mapper<'_> {
             deprecated: deprecation_of(data),
             fields,
             additional_properties: None,
+            // A merge does not read `additionalProperties` from any member. In
+            // JSON Schema each `allOf` member validates the whole object, so a
+            // member with `additionalProperties: false` rejects every property
+            // that a sibling member declares. A merge that honoured it would
+            // deny the fields it just merged in. The merge drops the key, as it
+            // already drops a member's `additionalProperties` schema.
+            deny_unknown_fields: false,
         });
     }
 

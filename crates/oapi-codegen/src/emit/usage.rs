@@ -262,6 +262,7 @@ mod tests {
             deprecated: None,
             fields,
             additional_properties: None,
+            deny_unknown_fields: false,
         });
     }
 

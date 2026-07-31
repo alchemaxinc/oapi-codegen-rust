@@ -75,6 +75,38 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// The document declares an OpenAPI version the generator does not read.
+    ///
+    /// Only `3.0.x` is supported. A `3.1` document is rejected and not read as a
+    /// 3.0 document, because the subsets overlap. A 3.1 document whose every
+    /// construct happens to parse as 3.0 would otherwise generate quietly, and
+    /// one 3.1-only construct in the same file would fail with a `serde` message
+    /// that names neither the version nor the reason.
+    UnsupportedSpecVersion {
+        /// The document that declares it, as a path or as the `$ref` that
+        /// reached it. Every parsed document is checked, so the message must
+        /// name which one failed.
+        document: String,
+        /// The `openapi:` value the document declares.
+        version: String,
+        /// What the generator reads instead.
+        hint: String,
+    },
+
+    /// The document declares a top-level key the generator cannot generate from.
+    ///
+    /// `webhooks:` is the case. It is a 3.1 key that carries operations, and a
+    /// generator that ignores it emits no handler for any of them. Silence here
+    /// reads as "the spec declares no such operation".
+    UnsupportedSpecKey {
+        /// The top-level key, as written in the document.
+        key: String,
+        /// Why the generator cannot generate from it.
+        reason: String,
+        /// What to do instead.
+        hint: String,
+    },
+
     /// A `$ref` pointed at something that cannot be resolved.
     UnresolvedRef(String),
 
@@ -111,6 +143,30 @@ pub enum Error {
         path: String,
         /// Why it is unsupported.
         reason: String,
+    },
+
+    /// A request or response body declares content, and no content type the
+    /// generator can represent.
+    ///
+    /// This is not a bodyless body. A bodyless response declares no `content:`
+    /// at all, and `204` is the common case. A body that declares
+    /// `application/pdf` states that a payload exists, so emitting no field for
+    /// it drops the payload with no message.
+    ///
+    /// Both directions report through this one variant, because both make the
+    /// same statement about the same input. The remedy differs by direction, so
+    /// the hint carries it.
+    UnsupportedContentType {
+        /// HTTP method of the offending operation.
+        method: String,
+        /// Templated request path of the offending operation.
+        path: String,
+        /// Which body it is, as a noun phrase for the message (`request body`,
+        /// or a response named by its status code).
+        location: String,
+        /// The declared content types, in document order, comma separated.
+        declared: String,
+        hint: String,
     },
 
     /// A parameter declared `in: path` has no matching `{placeholder}` in the
@@ -290,6 +346,14 @@ impl std::fmt::Display for Error {
             Error::ReadOutput { path, source } => {
                 return write!(f, "failed to read output `{path}`: {source}");
             }
+            // The remedy is a hint, which the console prints under the message.
+            // `Display` therefore states the problem only.
+            Error::UnsupportedSpecVersion { document, version, .. } => {
+                return write!(f, "`{document}` declares `openapi: {version}`, which is not supported");
+            }
+            Error::UnsupportedSpecKey { key, reason, .. } => {
+                return write!(f, "the document declares `{key}:`, which {reason}");
+            }
             Error::UnresolvedRef(reference) => {
                 return write!(f, "unresolved reference `{reference}`");
             }
@@ -304,6 +368,18 @@ impl std::fmt::Display for Error {
             }
             Error::UnsupportedOperation { method, path, reason } => {
                 return write!(f, "unsupported operation `{method} {path}`: {reason}");
+            }
+            Error::UnsupportedContentType {
+                method,
+                path,
+                location,
+                declared,
+                ..
+            } => {
+                return write!(
+                    f,
+                    "the {location} of `{method} {path}` declares only content types the generator cannot represent: {declared}"
+                );
             }
             Error::InvalidPathParameter { method, path, name } => {
                 return write!(
@@ -385,6 +461,9 @@ impl std::error::Error for Error {
             // It has no single `source`. `Display` shows the problems instead.
             Error::Validation { .. }
             | Error::Unimplemented(_)
+            | Error::UnsupportedSpecVersion { .. }
+            | Error::UnsupportedSpecKey { .. }
+            | Error::UnsupportedContentType { .. }
             | Error::UnresolvedRef(_)
             | Error::UnsupportedRef { .. }
             | Error::UnsupportedSchema { .. }

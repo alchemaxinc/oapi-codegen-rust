@@ -268,7 +268,10 @@ fn hints_for(err: &Error) -> Vec<String> {
                 "Declare a parameter with `name: {name}`, `in: path`, `required: true`, or remove `{{{name}}}` from the path."
             )];
         }
-        Error::TypeNameCollision { hint, .. }
+        Error::UnsupportedSpecVersion { hint, .. }
+        | Error::UnsupportedSpecKey { hint, .. }
+        | Error::UnsupportedContentType { hint, .. }
+        | Error::TypeNameCollision { hint, .. }
         | Error::DuplicateTypeName { hint, .. }
         | Error::OperationTypeCollision { hint, .. }
         | Error::SchemaNameCollision { hint, .. }

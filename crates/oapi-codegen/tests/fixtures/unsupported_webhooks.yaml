@@ -1,0 +1,19 @@
+openapi: 3.0.3
+info:
+  title: a document that declares webhooks the generator cannot emit
+  version: "1.0.0"
+paths: {}
+webhooks:
+  widgetCreated:
+    post:
+      operationId: onWidgetCreated
+      responses:
+        "204":
+          description: acknowledged
+components:
+  schemas:
+    Widget:
+      type: object
+      properties:
+        id:
+          type: string

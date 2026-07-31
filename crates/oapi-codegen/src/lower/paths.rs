@@ -99,9 +99,10 @@ const IGNORED_HEADER_NAMES: [&str; 3] = ["accept", "content-type", "authorizatio
 /// no multipart *response* writer.
 const REQUEST_BODY_PRIORITY: [BodyKind; 4] = [BodyKind::Json, BodyKind::Form, BodyKind::Multipart, BodyKind::Text];
 
-/// Content-type selection priority for response bodies. Multipart is excluded,
-/// so a multipart-only response is emitted bodyless (like any unsupported-only
-/// response) rather than erroring.
+/// Content-type selection priority for response bodies. Multipart is excluded:
+/// axum has a multipart *extractor* but no multipart *response* writer. A
+/// multipart-only response is therefore rejected, as any response whose every
+/// content type is unsupported is.
 const RESPONSE_BODY_PRIORITY: [BodyKind; 3] = [BodyKind::Json, BodyKind::Form, BodyKind::Text];
 
 /// A lowered response body before it is named. A single content type yields a
@@ -384,6 +385,11 @@ impl Lowerer<'_> {
             deprecated: None,
             fields,
             additional_properties: None,
+            // A query struct denies no unknown key. A query string commonly
+            // carries a parameter the spec does not declare, such as one a proxy
+            // or an analytics tool adds, and rejecting the whole request for it
+            // would break a client that the spec permits.
+            deny_unknown_fields: false,
         }));
     }
 
@@ -873,6 +879,12 @@ fn body_kind_ident(kind: BodyKind) -> RustIdent {
     return to_ident(name, Case::Pascal);
 }
 
+/// The content types a body declares, in document order, for a message. Both
+/// directions report the same way, so one function builds the list.
+fn declared_content_types(content: &indexmap::IndexMap<String, openapiv3::MediaType>) -> String {
+    return content.keys().cloned().collect::<Vec<_>>().join(", ");
+}
+
 /// Classify a media type string into a supported [`BodyKind`], or `None`.
 /// Parameters after `;` (for example `; charset=utf-8`) are ignored. JSON matches
 /// broadly: `application/json` or any `+json`-suffixed type.
@@ -985,13 +997,12 @@ impl Lowerer<'_> {
             if body.content.is_empty() {
                 return Ok(None);
             }
-            return Err(Error::UnsupportedOperation {
+            return Err(Error::UnsupportedContentType {
                 method: method.to_owned(),
                 path: path.to_owned(),
-                reason: format!(
-                    "request body declares only unsupported content type(s): {}",
-                    body.content.keys().cloned().collect::<Vec<_>>().join(", ")
-                ),
+                location: "request body".to_owned(),
+                declared: declared_content_types(&body.content),
+                hint: "A request body must declare `application/json`, `application/x-www-form-urlencoded`, `multipart/form-data`, or `text/plain`. Add one of them, or remove the `requestBody`.".to_owned(),
             });
         }
         let has_multipart = supported.iter().any(|(kind, _)| return *kind == BodyKind::Multipart);
@@ -1287,7 +1298,10 @@ impl Lowerer<'_> {
                 }
             };
             let response = self.resolve_response_ref(response)?;
-            let body = self.response_body(path, method, response.origin.as_deref(), &response.value)?;
+            // The status code names the response for a message. Two responses of
+            // one operation are otherwise indistinguishable to a reader.
+            let location = format!("`{status_code}` response");
+            let body = self.response_body(path, method, &location, response.origin.as_deref(), &response.value)?;
             let body = self.name_response_body(response_enum, &variant, body);
             let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
@@ -1302,7 +1316,13 @@ impl Lowerer<'_> {
         if let Some(default) = &operation.responses.default {
             let response = self.resolve_response_ref(default)?;
             let variant = to_ident("default", Case::Pascal);
-            let body = self.response_body(path, method, response.origin.as_deref(), &response.value)?;
+            let body = self.response_body(
+                path,
+                method,
+                "`default` response",
+                response.origin.as_deref(),
+                &response.value,
+            )?;
             let body = self.name_response_body(response_enum, &variant, body);
             let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
@@ -1343,14 +1363,31 @@ impl Lowerer<'_> {
     /// was resolved from a referenced document. A single supported content type
     /// yields [`LoweredResponseBody::Single`]. several yield the
     /// per-representation variants the caller names into a [`NegotiatedBody`].
+    ///
+    /// A response that declares content, and no content type in
+    /// [`RESPONSE_BODY_PRIORITY`], is an error. It is not a bodyless response. A
+    /// bodyless response declares no `content:` at all, and `204` is the common
+    /// case. The two are different statements, and emitting a bodyless variant
+    /// for the first drops the body with no message. The request side already
+    /// rejects the same input, so this keeps the two directions in agreement.
     fn response_body(
         &self,
         path: &str,
         method: &str,
+        location: &str,
         origin: Option<&str>,
         response: &OasResponse,
     ) -> Result<Option<LoweredResponseBody>> {
         let supported = self.supported_bodies(&response.content, &RESPONSE_BODY_PRIORITY);
+        if supported.is_empty() && !response.content.is_empty() {
+            return Err(Error::UnsupportedContentType {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                location: location.to_owned(),
+                declared: declared_content_types(&response.content),
+                hint: "A response body must declare `application/json`, `application/x-www-form-urlencoded`, or `text/plain`. Add one of them, or declare no `content:` for a bodyless response.".to_owned(),
+            });
+        }
         let mut variants = Vec::with_capacity(supported.len());
         for (kind, media) in supported {
             if let Some(body) = self.body_from_media(path, method, origin, kind, media)? {

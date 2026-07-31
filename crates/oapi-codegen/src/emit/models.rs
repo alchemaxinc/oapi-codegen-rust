@@ -114,9 +114,20 @@ pub(crate) fn emit_struct(strukt: &Struct, serde: SerdeDerives) -> Result<TokenS
         None => quote! {},
     };
 
+    // `additionalProperties: false` becomes `deny_unknown_fields`. The attribute
+    // is read by the `Deserialize` derive only, so it is gated on that derive and
+    // not on `has_serde`. A serialize-only type reads no unknown key, so it has
+    // none to deny, and the attribute on it would be orphaned.
+    let deny_unknown = if strukt.deny_unknown_fields && serde.deserialize {
+        quote! { #[serde(deny_unknown_fields)] }
+    } else {
+        quote! {}
+    };
+
     return Ok(quote! {
         #doc
         #derives
+        #deny_unknown
         #deprecated
         pub struct #name {
             #(#fields)*

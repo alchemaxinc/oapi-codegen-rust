@@ -20,6 +20,19 @@ use crate::error::Result;
 /// Maximum `$ref` chain length before bailing out (cycle guard).
 const MAX_REF_DEPTH: usize = 32;
 
+/// The one OpenAPI minor version the generator reads. Every parsed document must
+/// declare a patch release of it.
+const SUPPORTED_SPEC_VERSION: &str = "3.0";
+
+/// Top-level keys that carry operations the generator cannot emit. A document
+/// that declares one is rejected, because ignoring it emits no handler for any
+/// operation inside it and reads as a document that declares none.
+///
+/// `webhooks` is a 3.1 key. The version gate rejects a 3.1 document first, so
+/// this list only reaches a 3.0 document that declares the key anyway. Such a
+/// document is still ambiguous, and the generator does not guess.
+const UNSUPPORTED_TOP_LEVEL_KEYS: [&str; 1] = ["webhooks"];
+
 /// Shared empty schema map returned when a document has no components.
 static EMPTY_SCHEMAS: std::sync::OnceLock<IndexMap<String, ReferenceOr<Schema>>> = std::sync::OnceLock::new();
 
@@ -55,9 +68,25 @@ impl Spec {
                 source,
             };
         })?;
-        let inner: OpenAPI = serde_yaml::from_str(&text).map_err(|source| {
+        let document = path.display().to_string();
+        // Parse to a `Value` first, then into `OpenAPI` from that one tree. The
+        // typed form drops every key it does not know, so a key such as
+        // `webhooks:` is only visible here. This costs no second parse of the
+        // text.
+        let value: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|source| {
             return Error::ParseSpec {
-                path: path.display().to_string(),
+                path: document.clone(),
+                source,
+            };
+        })?;
+        // Both checks read the untyped tree, and both run before the typed parse.
+        // The version gate must, because a 3.1-only construct fails that parse
+        // with a message that names a YAML shape and not a version.
+        check_spec_version(&document, &value)?;
+        check_top_level_keys(&value)?;
+        let inner: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
+            return Error::ParseSpec {
+                path: document.clone(),
                 source,
             };
         })?;
@@ -93,7 +122,19 @@ impl Spec {
                 source,
             };
         })?;
-        let parsed: OpenAPI = serde_yaml::from_str(&text).map_err(|source| {
+        let value: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|source| {
+            return Error::ParseRefFile {
+                file: file.to_owned(),
+                source,
+            };
+        })?;
+        // A referenced file is a document of its own and declares its own
+        // version. A 3.1 fragment pulled into a 3.0 document is the same
+        // ambiguity as a 3.1 root, so the same gate applies, and it applies
+        // before the typed parse for the same reason.
+        check_spec_version(file, &value)?;
+        check_top_level_keys(&value)?;
+        let parsed: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseRefFile {
                 file: file.to_owned(),
                 source,
@@ -379,6 +420,72 @@ impl Spec {
             });
         });
     }
+}
+
+/// Reject a document whose `openapi:` value is not a `3.0.x` release.
+///
+/// The generator reads 3.0 through the `openapiv3` crate. That crate ignores the
+/// `openapi:` value, so it parses whatever subset of a 3.1 or 4.0 document
+/// happens to match 3.0 and reports nothing. A document that generates in part
+/// and fails in part is worse than one that fails at once, because the part that
+/// generates looks correct. This check therefore runs before any lowering.
+///
+/// The comparison is on the minor version. A patch release adds no construct, so
+/// `3.0.0` through `3.0.4` are one dialect and every one of them is accepted.
+///
+/// This reads the untyped tree and not the typed `OpenAPI` form, because it must
+/// run **before** the typed parse. A 3.1-only construct such as
+/// `type: [string, "null"]` fails that parse, and the message for it names a YAML
+/// shape and not a version (`invalid type: sequence, expected a string`). Reading
+/// the version first means the document that most needs this diagnostic is the
+/// one that gets it.
+///
+/// A document that declares no `openapi:` key, or declares it as a non-string,
+/// passes here. The typed parse that follows reports the missing or wrong-typed
+/// key with a message that points at the line.
+fn check_spec_version(document: &str, value: &serde_yaml::Value) -> Result<()> {
+    let Some(version) = value.get("openapi").and_then(serde_yaml::Value::as_str) else {
+        return Ok(());
+    };
+    let version = version.trim();
+    // A patch part is optional in practice, so `3.0` and `3.0.3` both pass. The
+    // dot guards against a future `3.00` reading as `3.0`.
+    let minor_matches = version == SUPPORTED_SPEC_VERSION || version.starts_with(&format!("{SUPPORTED_SPEC_VERSION}."));
+    if minor_matches {
+        return Ok(());
+    }
+    return Err(Error::UnsupportedSpecVersion {
+        document: document.to_owned(),
+        version: version.to_owned(),
+        hint: format!(
+            "The generator reads OpenAPI {SUPPORTED_SPEC_VERSION}.x only. Convert the document to {SUPPORTED_SPEC_VERSION}, or track 3.1 support in issue #65 and 3.2 in issue #66."
+        ),
+    });
+}
+
+/// Reject a document that declares a top-level key holding operations the
+/// generator cannot emit.
+///
+/// This reads the untyped tree, because the typed `OpenAPI` form drops every key
+/// it does not know and a dropped key cannot be reported. A document that is not
+/// a mapping passes here. The typed parse that follows reports that shape with
+/// its own message, which points at the line.
+fn check_top_level_keys(value: &serde_yaml::Value) -> Result<()> {
+    let Some(mapping) = value.as_mapping() else {
+        return Ok(());
+    };
+    for key in UNSUPPORTED_TOP_LEVEL_KEYS {
+        if mapping.contains_key(serde_yaml::Value::String(key.to_owned())) {
+            return Err(Error::UnsupportedSpecKey {
+                key: key.to_owned(),
+                reason: "declares operations the generator cannot emit".to_owned(),
+                hint: format!(
+                    "Remove `{key}:`, or move its operations under `paths:`. Silently ignoring it emits no handler for any operation it holds."
+                ),
+            });
+        }
+    }
+    return Ok(());
 }
 
 /// Extract the trailing schema name from a *same-document* `$ref`
