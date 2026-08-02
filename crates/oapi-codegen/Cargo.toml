@@ -15,8 +15,8 @@ workspace = true
 
 [dependencies]
 anstream = "1.0.0"
-clap = { version = "4.6.4", features = ["derive"] }
-http = "1.4.2"
+clap = { version = "4.6.5", features = ["derive"] }
+http = "1.5.0"
 indexmap = "2.14.0"
 openapiv3 = "2.2.0"
 owo-colors = "4.3.0"
