@@ -486,7 +486,7 @@ const COMBINED_UNSUPPORTED_FIXTURES: &[&str] = &[
     "combined_reserved_name_client_error",
 ];
 
-/// Fixtures for name collisions. The golden-file tests do not cover these,
+/// Fixtures for name collisions. The generated-fixture tests do not cover these,
 /// because some must fail and others need a config option or an extension.
 ///
 /// `type_name_collision_error` must fail. Two schema names collapse onto one Rust
@@ -1816,7 +1816,7 @@ fn empty_response_suffix_falls_back_to_default() {
 /// names is one the generator can actually emit. This ties `required_dependencies`
 /// to emitted code (not just synthetic strings), so a new crate the emitters
 /// start referencing — which will also force a new dev-dependency to compile the
-/// goldens — is a prompt to extend the report.
+/// generated fixtures — is a prompt to extend the report.
 #[test]
 fn dependency_report_reflects_generated_output() {
     let fixture = tests_dir().join("fixtures").join("combined_server_client.yaml");

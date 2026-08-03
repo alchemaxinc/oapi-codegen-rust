@@ -111,7 +111,15 @@ verify-msrv: ## Compile every generated file on the Rust version a consumer need
 	@echo "Compiling every generated file on Rust $(GENERATED_MSRV)."
 	# `msrv-check` is not a workspace member, so it needs its own manifest path.
 	# Compiling is the whole assertion: the crate holds no test of its own.
-	cargo +$(GENERATED_MSRV) build --manifest-path crates/oapi-codegen/tests/msrv-check/Cargo.toml
+	#
+	# `--locked` because the measured floor is a property of one dependency graph,
+	# and the committed lockfile is what names that graph. Without the flag, a
+	# manifest that gained a crate resolves it and rewrites the lockfile in place,
+	# so the run reports a floor for a graph nobody reviewed. The manifest is
+	# generated, so gaining a crate needs no edit here and is the expected case.
+	# Run `make update-msrv-manifest` and then `cargo update` for that manifest to
+	# refresh both together.
+	cargo +$(GENERATED_MSRV) build --locked --manifest-path crates/oapi-codegen/tests/msrv-check/Cargo.toml
 	@echo "Generated code compiles on Rust $(GENERATED_MSRV)."
 
 .PHONY: docs

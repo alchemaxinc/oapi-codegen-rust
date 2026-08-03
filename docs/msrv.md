@@ -69,7 +69,7 @@ need. A crate can also need a floor that it does not declare.
 
 CI does the same compile for each pull request. Read the `generated-code-msrv` job
 in `.github/workflows/ci.yml`. The job installs the declared toolchain and compiles
-each golden file with it. A dependency bump that raises the true floor therefore
+each fixture with it. A dependency bump that raises the true floor therefore
 fails the build, and it does not reach a consumer.
 
 ### The crate that does the compile
@@ -80,7 +80,7 @@ because compiling is the assertion.
 Two properties of it are deliberate. It is not a workspace member, and the
 `[workspace]` table in its manifest is what detaches it. A member gets built by
 every `cargo` command in the repository, on the pinned toolchain, which is the
-opposite of the measurement. It also sits under `tests/`, next to the golden files
+opposite of the measurement. It also sits under `tests/`, next to the fixtures
 it compiles. Cargo skips a detached crate at any depth, does not treat the
 directory as a test target, and leaves it out of `cargo package`.
 
@@ -94,7 +94,21 @@ is stale, in the way that the `cli_docs` test guards `docs/cli.md`.
 A hand-written list held three kinds of drift. A wrong version still compiles, so
 it measures a floor for a dependency set that no test exercises. An absent crate or
 feature usually stops the compile, but not when the report recommends a feature
-that no golden file uses. Generation closes all three.
+that no fixture uses. Generation closes all three.
+
+The crate holds a committed `Cargo.lock`, and the build passes `--locked`. A
+measured floor belongs to one dependency graph, and the lockfile is what names that
+graph. Without the flag, a manifest that gained a crate resolves that crate and
+rewrites the lockfile in place. The run then reports a floor for a graph that nobody
+reviewed.
+
+A new crate in the fixtures therefore needs the two steps below. Until both are
+done, the build stops with `the lock file ... needs to be updated`.
+
+```sh
+make update-msrv-manifest
+cargo update --manifest-path crates/oapi-codegen/tests/msrv-check/Cargo.toml
+```
 
 ### The dependency-update bot
 

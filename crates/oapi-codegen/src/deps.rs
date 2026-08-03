@@ -29,7 +29,7 @@ const MANIFEST: &str = include_str!("../Cargo.toml");
 ///
 /// Deriving the recommended version from our manifest (rather than a hardcoded
 /// constant) keeps the report in lockstep with the versions the generated
-/// goldens actually compile against, so a dependency bump here updates the
+/// generated fixtures actually compile against, so a dependency bump here updates the
 /// report automatically. Every crate the report can name is a (dev-)dependency
 /// of this crate — enforced by `reported_crates_have_manifest_versions` — so an
 /// absent entry is a programming error, not runtime input.
@@ -92,7 +92,7 @@ const GENERATED_CODE_TABLE: &str = "[package.metadata.generated-code]";
 /// generated file lands in.
 ///
 /// The value is read from the manifest rather than written here, so the CI job
-/// that compiles the golden files on this toolchain and the documentation that
+/// that compiles the generated fixtures on this toolchain and the documentation that
 /// quotes it both read one number. See `docs/msrv.md`.
 pub fn generated_code_rust_version() -> &'static str {
     match parse_generated_code_rust_version(MANIFEST) {
