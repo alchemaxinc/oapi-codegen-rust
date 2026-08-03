@@ -79,6 +79,56 @@ fn parse_manifest_version<'a>(manifest: &'a str, crate_name: &str) -> Option<&'a
     return None;
 }
 
+/// The `Cargo.toml` table that records the Rust version a consumer needs to
+/// compile the emitted code.
+const GENERATED_CODE_TABLE: &str = "[package.metadata.generated-code]";
+
+/// The Rust version a consumer needs to compile the code this generator emits.
+///
+/// This is not the version needed to build the generator, which is the
+/// `rust-version` of the `[package]` table. A consumer runs a released binary and
+/// needs no Rust to do it, so the generator's own floor never reaches them. The
+/// floor that does reach them is this one, and it applies to the crate the
+/// generated file lands in.
+///
+/// The value is read from the manifest rather than written here, so the CI job
+/// that compiles the golden files on this toolchain and the documentation that
+/// quotes it both read one number. See `docs/msrv.md`.
+pub fn generated_code_rust_version() -> &'static str {
+    match parse_generated_code_rust_version(MANIFEST) {
+        Some(version) => return version,
+        None => panic!(
+            "`{GENERATED_CODE_TABLE}` declares no `rust-version` in oapi-codegen's manifest; the generated-code Rust floor is unknown"
+        ),
+    }
+}
+
+/// Read `rust-version` from the [`GENERATED_CODE_TABLE`] table of `manifest`.
+///
+/// The scan starts at that table header, so it cannot pick up the `[package]`
+/// table's own `rust-version`. Those two are different numbers, and returning the
+/// wrong one would report a floor that no measurement backs.
+fn parse_generated_code_rust_version(manifest: &str) -> Option<&str> {
+    let table = manifest.find(GENERATED_CODE_TABLE)?;
+    let rest = manifest.get(table + GENERATED_CODE_TABLE.len()..)?;
+    for line in rest.lines() {
+        let line = line.trim();
+        // A later table header ends this one. Stopping here keeps the scan from
+        // reading a key that belongs to a different table.
+        if line.starts_with('[') {
+            return None;
+        }
+        let Some(value) = line.strip_prefix("rust-version") else {
+            continue;
+        };
+        let value = value.trim_start().strip_prefix('=')?.trim_start();
+        let after = value.strip_prefix('"')?;
+        let close = after.find('"')?;
+        return after.get(..close);
+    }
+    return None;
+}
+
 /// A crate the generated code references, with the version requirement and Cargo
 /// features a consumer must declare in `Cargo.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -418,6 +468,31 @@ mod tests {
             .find(|dep| return dep.name == "axum-extra")
             .expect("axum-extra present");
         assert_eq!(extra.features, vec!["cookie"]);
+    }
+
+    #[test]
+    fn generated_code_rust_version_is_read_from_the_manifest() {
+        let version = generated_code_rust_version();
+        assert!(
+            version.split('.').count() >= 2 && version.split('.').all(|part| return part.parse::<u32>().is_ok()),
+            "the generated-code Rust version must be a dotted number, and reads as `{version}`",
+        );
+    }
+
+    #[test]
+    fn generated_code_rust_version_is_not_the_package_rust_version() {
+        // The fixture declares both floors. The parse must return the
+        // generated-code one and not fall back to the `[package]` one.
+        let manifest = include_str!("../tests/fixtures/manifests/two_rust_versions.toml");
+        assert_eq!(parse_generated_code_rust_version(manifest), Some("1.88"));
+    }
+
+    #[test]
+    fn generated_code_rust_version_stops_at_the_next_table() {
+        // The fixture's generated-code table declares no `rust-version`, and the
+        // table after it does. Reading across the header reports that value.
+        let manifest = include_str!("../tests/fixtures/manifests/generated_code_table_without_rust_version.toml");
+        assert_eq!(parse_generated_code_rust_version(manifest), None);
     }
 
     #[test]

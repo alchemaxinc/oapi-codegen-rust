@@ -173,24 +173,16 @@ mod generated {
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`
-/// points its cross-file `$ref` bodies at (`crate::apimodel`). Real projects
-/// generate this module from the referenced schema file; here a minimal struct
-/// proves the emitted `crate::apimodel::CreateWidget` path resolves and that the
-/// generated handler can decode it as a JSON body.
+/// points its cross-file `$ref` bodies at (`crate::apimodel`).
+///
+/// The body lives in `tests/support/apimodel.rs`, because the `msrv-check` crate
+/// needs the same module at its own crate root. See that file for the rest.
 #[allow(
     dead_code,
     reason = "test-only stand-in for the models crate the server_refs fixture's import-mapping targets; only CreateWidget is constructed here"
 )]
 mod apimodel {
-    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-    pub struct CreateWidget {
-        pub name: String,
-    }
-
-    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-    pub struct NewThing {
-        pub name: String,
-    }
+    include!("support/apimodel.rs");
 }
 
 #[test]

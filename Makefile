@@ -61,6 +61,10 @@ update-generated: ## Refresh generated files from the coverage fixtures
 update-docs: ## Refresh docs/cli.md from the clap CLI definition
 	UPDATE_DOCS=1 cargo test -p oapi-codegen --test cli_docs
 
+.PHONY: update-msrv-manifest
+update-msrv-manifest: ## Refresh the msrv-check manifest from the dependency report
+	UPDATE_MSRV_MANIFEST=1 cargo test -p oapi-codegen --test msrv_manifest
+
 .PHONY: generate-example
 generate-example: ## Regenerate the bookstore example from its OpenAPI specification
 	cd examples/bookstore && \
@@ -82,14 +86,33 @@ verify-generated: ## Regenerate all generated files and fail when they differ fr
 	$(MAKE) verify-example
 	$(MAKE) update-generated
 	$(MAKE) update-docs
-	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md)" ]; then \
+	$(MAKE) update-msrv-manifest
+	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md crates/oapi-codegen/tests/msrv-check/Cargo.toml)" ]; then \
 		echo "ERROR: generated files are out of date."; \
-		echo "Run 'make generate-example', 'make update-generated' and 'make update-docs'. Commit the result."; \
-		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
-		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
+		echo "Run 'make generate-example', 'make update-generated', 'make update-docs' and 'make update-msrv-manifest'. Commit the result."; \
+		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md crates/oapi-codegen/tests/msrv-check/Cargo.toml; \
+		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md crates/oapi-codegen/tests/msrv-check/Cargo.toml; \
 		exit 1; \
 	fi
 	@echo "Generated files are up to date."
+
+# The Rust version a consumer needs to compile the emitted code. It is declared
+# once, in the crate manifest, and read here rather than repeated. The generator
+# reports the same number to every consumer after a write, so it has to be true.
+GENERATED_MSRV := $(shell sed -nE '/^\[package\.metadata\.generated-code\]/,/^\[/{s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p;}' crates/oapi-codegen/Cargo.toml)
+
+.PHONY: verify-msrv
+verify-msrv: ## Compile every generated file on the Rust version a consumer needs
+	@test -n "$(GENERATED_MSRV)" || { \
+		echo "ERROR: no rust-version under [package.metadata.generated-code] in crates/oapi-codegen/Cargo.toml."; \
+		exit 1; \
+	}
+	rustup toolchain install $(GENERATED_MSRV) --profile minimal
+	@echo "Compiling every generated file on Rust $(GENERATED_MSRV)."
+	# `msrv-check` is not a workspace member, so it needs its own manifest path.
+	# Compiling is the whole assertion: the crate holds no test of its own.
+	cargo +$(GENERATED_MSRV) build --manifest-path crates/oapi-codegen/tests/msrv-check/Cargo.toml
+	@echo "Generated code compiles on Rust $(GENERATED_MSRV)."
 
 .PHONY: docs
 docs: ## Generate and open Rust documentation

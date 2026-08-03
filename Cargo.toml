@@ -6,7 +6,16 @@ members = ["crates/*", "examples/*"]
 version = "0.1.0"
 edition = "2024"
 repository = "https://github.com/alchemaxinc/oapi-codegen-rust"
+# The project has no site of its own, so this is the repository. Cargo shows the
+# two as separate links on a crates.io page, and an absent `homepage` reads as
+# missing rather than as "the same as the repository".
+homepage = "https://github.com/alchemaxinc/oapi-codegen-rust"
 license = "MIT"
+
+# The Rust version needed to build the tools in this workspace. It is not the
+# version needed to compile the code the generator emits, which lands in a
+# consumer's crate and carries its own floor. See `docs/msrv.md`.
+rust-version = "1.97"
 
 # Trap silent integer wraparound on spec-derived arithmetic in release builds.
 [profile.release]

@@ -10,6 +10,7 @@ $ oapi-codegen --config-file oapi-codegen-common.yaml schemas/common.yaml
       serde = { version = "1.0.229", features = ["derive"] }
       # or:
       cargo add serde@1.0.229 --features derive
+  note: the generated code needs Rust 1.88 or newer.
 
 $ oapi-codegen --config-file oapi-codegen-catalog.yaml schemas/catalog.yaml
 ✓ wrote generated/apimodel/catalog.rs
@@ -17,6 +18,7 @@ $ oapi-codegen --config-file oapi-codegen-catalog.yaml schemas/catalog.yaml
       serde = { version = "1.0.229", features = ["derive"] }
       # or:
       cargo add serde@1.0.229 --features derive
+  note: the generated code needs Rust 1.88 or newer.
 
 $ oapi-codegen --config-file oapi-codegen-server.yaml openapi.yaml
 ✓ wrote generated/restapi.rs
@@ -32,6 +34,7 @@ $ oapi-codegen --config-file oapi-codegen-server.yaml openapi.yaml
       cargo add http@1.4.2
       cargo add axum@0.8.9 --features multipart
       cargo add axum-extra@0.12.6 --features query
+  note: the generated code needs Rust 1.88 or newer.
 
 $ oapi-codegen --config-file oapi-codegen-client.yaml openapi.yaml
 ✓ wrote generated/restclient.rs
@@ -45,6 +48,7 @@ $ oapi-codegen --config-file oapi-codegen-client.yaml openapi.yaml
       cargo add http@1.4.2
       cargo add reqwest@0.13.4 --no-default-features --features blocking,json,form,query,multipart
       cargo add percent-encoding@2.3.2
+  note: the generated code needs Rust 1.88 or newer.
 
 ```
 

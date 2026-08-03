@@ -4,11 +4,34 @@ description = "Generate client and server boilerplate from OpenAPI 3 specificati
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
+homepage.workspace = true
 license.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+# `keywords` is capped at five entries and `categories` at five, and both must
+# match the slugs crates.io knows. These are the terms a reader searches for the
+# tool by, and not the terms the tool uses inside itself.
+keywords = ["openapi", "codegen", "axum", "swagger", "rest"]
+categories = ["development-tools", "web-programming", "command-line-utilities"]
 
 [[bin]]
 name = "oapi-codegen"
 path = "src/main.rs"
+
+# The Rust version a consumer needs to compile the code this generator *emits*.
+# It is not `rust-version` above, which is the floor for building the generator
+# itself. The two move independently, and a consumer only ever needs this one.
+#
+# The value lives here, and not as a constant in the source, because three places
+# read it: `deps.rs` embeds this manifest already and parses it out, the CI job
+# installs this toolchain and compiles the golden files with it, and `docs/msrv.md`
+# quotes it. A number with three homes goes stale in two of them.
+#
+# The floor comes from the dependencies the emitted code needs, and not from the
+# syntax it emits. The newest construct the emitters produce is `-> impl Future`
+# in a trait, which is Rust 1.75. See `docs/msrv.md` for the measurement.
+[package.metadata.generated-code]
+rust-version = "1.88"
 
 [lints]
 workspace = true

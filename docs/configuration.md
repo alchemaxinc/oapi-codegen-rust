@@ -70,6 +70,10 @@ parameters) `axum-extra`; a `reqwest` client needs `reqwest`, `percent-encoding`
 and, for form responses, `serde_urlencoded`. `chrono`, `uuid`, and `serde_json`
 are added when the schemas use dates, UUIDs, or free-form values.
 
+The report ends with the Rust version needed to compile the generated code. Those
+crates are what set that version, so the two are reported together. See
+[Rust versions](msrv.md).
+
 ### `output-options`
 
 | Key                     | Purpose                                                                                             |

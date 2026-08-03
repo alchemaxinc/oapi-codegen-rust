@@ -1,0 +1,13 @@
+[package]
+name = "consumer"
+version = "0.1.0"
+edition = "2024"
+
+# The table exists and declares no `rust-version`. The next table declares one, so
+# a scan that reads past the header reports that neighbor's value as the
+# generated-code floor.
+[package.metadata.generated-code]
+note = "nothing here"
+
+[dependencies]
+rust-version = "1.60"
