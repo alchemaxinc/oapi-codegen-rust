@@ -176,6 +176,14 @@ pub fn report_dependencies(deps: &[Dependency]) {
     for dep in deps {
         eprintln!("      {}", dep.cargo_add().dimmed());
     }
+    // The Rust floor belongs with the dependency list, because the dependencies
+    // are what set it. A consumer who reads one and not the other adds the crates
+    // and then meets a `rustc` error from inside a crate they did not name.
+    eprintln!(
+        "  {} the generated code needs Rust {} or newer.",
+        "note:".cyan().bold(),
+        oapi_codegen::deps::generated_code_rust_version()
+    );
 }
 
 /// Ask whether to run the `cargo add` commands now. Returns `false` on EOF or a

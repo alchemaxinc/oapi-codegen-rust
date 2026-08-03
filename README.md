@@ -26,6 +26,7 @@ $ oapi-codegen --config-file examples/bookstore/oapi-codegen-server.yaml example
       cargo add http@1.4.2
       cargo add axum@0.8.9 --features multipart
       cargo add axum-extra@0.12.6 --features query
+  note: the generated code needs Rust 1.88 or newer.
 
 ```
 
@@ -86,6 +87,7 @@ against [`.github/openapi-versions.json`](.github/openapi-versions.json).
 > They have been checked and verified by humans, and can be read if interested.
 
 - [Installation](docs/installation.md)
+- [Rust versions](docs/msrv.md)
 - [Build workflow](docs/workflow.md)
 - [Configuration](docs/configuration.md)
 - [OpenAPI extensions](docs/extensions.md)

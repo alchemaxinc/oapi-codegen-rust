@@ -1,0 +1,13 @@
+[package]
+name = "consumer"
+version = "0.1.0"
+edition = "2024"
+# The floor for building the generator itself. The generated-code parse must not
+# return this one: the two answer different questions, and this value is the
+# larger of the two, so a fallback to it would report a floor no measurement
+# backs.
+rust-version = "1.97"
+
+[package.metadata.generated-code]
+# The floor for compiling the emitted code in a consumer's crate.
+rust-version = "1.88"

@@ -183,6 +183,38 @@ jobs:
       - name: Check generated code is up to date
         run: make verify-generated
 
+  # The generator reports a Rust version to every consumer after a write, as the
+  # version needed to compile the emitted code. This job compiles every committed
+  # generated file on exactly that toolchain, so the reported number is measured
+  # rather than claimed.
+  #
+  # The floor is set by the crates the output depends on, and not by the syntax the
+  # emitters produce, so it moves on a dependency bump and not on a generator
+  # change. That makes it exactly the kind of claim that rots without a check. See
+  # docs/msrv.md.
+  #
+  # This job does not use ./.github/actions/setup-rust: that action installs the
+  # pinned build toolchain, which is much newer than this floor and would defeat
+  # the measurement. `make verify-msrv` installs the right one from the manifest.
+  generated-code-msrv:
+    name: generated-code-msrv
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout-code
+
+      # Keyed separately from rust-checks because this job builds a different crate
+      # on a different toolchain. Sharing the key would thrash both caches.
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: generated-code-msrv
+          cache-targets: "true"
+          cache-all-crates: "true"
+          workspaces: crates/oapi-codegen/tests/msrv-check
+
+      - name: Compile generated code on the consumer Rust floor
+        run: make verify-msrv
+
   lint-prettier:
     runs-on: ubuntu-latest
     needs: install-prettier
@@ -233,12 +265,13 @@ jobs:
     name: CI Passed
     runs-on: ubuntu-latest
     if: always()
-    needs: [rust-checks, lint-prettier, cargo-deny]
+    needs: [rust-checks, generated-code-msrv, lint-prettier, cargo-deny]
     steps:
       - name: Verify all jobs passed or were skipped
         run: |
           results=(
             "${{ needs.rust-checks.result }}"
+            "${{ needs.generated-code-msrv.result }}"
             "${{ needs.lint-prettier.result }}"
             "${{ needs.cargo-deny.result }}"
           )
