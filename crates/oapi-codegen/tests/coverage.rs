@@ -274,6 +274,11 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("ext_x_rust_type"),
     },
     Feature {
+        element: "ext.x-rust-derive",
+        status: Status::Supported,
+        fixture: Some("ext_x_rust_derive"),
+    },
+    Feature {
         element: "ext.x-rust-name",
         status: Status::Supported,
         fixture: Some("ext_vendor_extensions"),
@@ -475,7 +480,11 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// Fixtures generated with both the server and client enabled, exercising the
 /// flat crate-root layout in which the server and client share one file and the
 /// same per-operation types alongside the component models.
-const COMBINED_FIXTURES: &[&str] = &["combined_server_client", "combined_response_name_collision"];
+const COMBINED_FIXTURES: &[&str] = &[
+    "combined_server_client",
+    "combined_response_name_collision",
+    "combined_x_rust_derive",
+];
 
 /// Combined fixtures whose generation must fail because a component schema is
 /// named like a crate-root interface type the flat layout emits (`Api`,
@@ -591,6 +600,7 @@ generated_tests!(
     anyof_untagged,
     array_types,
     ext_vendor_extensions,
+    ext_x_rust_derive,
     ext_x_rust_type,
     freeform_any,
     integer_formats,
@@ -1123,7 +1133,11 @@ macro_rules! combined_generated_tests {
     };
 }
 
-combined_generated_tests!(combined_server_client, combined_response_name_collision);
+combined_generated_tests!(
+    combined_server_client,
+    combined_response_name_collision,
+    combined_x_rust_derive,
+);
 
 /// Without `response-type-suffix`, a schema named like an operation's response
 /// enum must fail generation rather than silently rename either item. The hint
@@ -1937,9 +1951,11 @@ fn combined_generated_tests_cover_combined_fixtures() {
     );
 }
 
-/// Every supported generated file must be `include!`d by
-/// `tests/generated.rs` so its emitted code is type-checked against
-/// real serde/chrono/uuid.
+/// Every supported generated file must be a module of `tests/generated.rs` so its
+/// emitted code is type-checked against real serde/chrono/uuid.
+///
+/// `#[path]` and not `include!`, because a generated file opens with an inner
+/// attribute and `include!` cannot carry one.
 #[test]
 fn generated_outputs_are_compile_checked() {
     let source = include_str!("generated.rs");
@@ -1949,11 +1965,11 @@ fn generated_outputs_are_compile_checked() {
         .chain(CLIENT_FIXTURES.iter().copied())
         .chain(COMBINED_FIXTURES.iter().copied());
     for stem in stems {
-        let needle = format!("include!(\"generated/{stem}.rs\")");
+        let needle = format!("#[path = \"{stem}.rs\"]");
         assert!(
             source.contains(&needle),
             "tests/generated.rs does not compile-check `{stem}`; \
-             add a `pub mod {stem} {{ {needle}; }}`",
+             add a `{needle} pub mod {stem};`",
         );
     }
 }

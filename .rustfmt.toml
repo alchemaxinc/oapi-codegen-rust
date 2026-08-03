@@ -5,3 +5,12 @@ edition = "2024"
 max_width = 120
 imports_granularity = "Item"
 group_imports = "StdExternalCrate"
+
+# Generated output is formatted by prettyplease inside the generator, and the
+# fixture tests compare against that exact text. A `#[path]` module makes rustfmt
+# walk these files, so it must leave them alone or every fixture drifts.
+#
+# The patterns match the path rustfmt reaches a file by, and not the path on disk.
+# A `#[path]` that climbs out of the module directory keeps the `..` hop, so the
+# glob has to allow one.
+ignore = ["**/generated/**", "**/generated"]

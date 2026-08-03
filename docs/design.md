@@ -46,6 +46,22 @@ When both directions are needed, models derive both.
 
 This avoids impossible trait bounds on reused `x-rust-type` targets.
 
+## Non-serde derives follow the foreign types a model reaches
+
+Generated models also derive `Debug`, `Clone`, and `PartialEq`. Direction does not
+narrow these three. A bound on an `x-rust-type` target is forced
+whichever way the data flows. The trait is for the consumer of the model, and not
+for serde.
+
+So the specification declares it, with `x-rust-derive` on the target schema. The generator then drops a trait the target lacks from every
+model that reaches the target. It drops the same trait from every per-operation type
+that holds one of those models. An absent key claims all three traits, so a
+specification written before this key emits the same output as before.
+
+The constraint travels up the reference graph, and the direction walk travels down
+it. A reference points from a model to the model it holds, and a trait bound points
+the other way. Both walks read the same graph.
+
 ## Vendor extensions
 
 Supported keys:
@@ -53,6 +69,7 @@ Supported keys:
 - `x-rust-type`
 - `x-rust-name`
 - `x-rust-serde-skip`
+- `x-rust-derive`
 - Compatibility keys: `x-omitempty`, `x-order`, `x-deprecated-reason`,
   `x-enum-varnames`, `x-enumNames`
 

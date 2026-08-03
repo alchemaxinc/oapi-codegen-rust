@@ -15,8 +15,13 @@ use crate::emit::doc_attr;
 use crate::emit::emit_multipart_struct;
 use crate::emit::emit_negotiated_body_enum;
 use crate::emit::emit_type;
+use crate::emit::models::DEBUG_AND_CLONE;
+use crate::emit::models::DEBUG_CLONE_AND_EQ;
+use crate::emit::models::ModelDerives;
 use crate::emit::models::SerdeDerives;
 use crate::emit::models::emit_struct;
+use crate::emit::models::plain_derive_attr;
+use crate::emit::usage::ForeignResolver;
 use crate::error::Result;
 use crate::ir::Cookies;
 use crate::ir::Headers;
@@ -25,11 +30,16 @@ use crate::ir::RequestPayload;
 use crate::ir::ResponseBody;
 use crate::ir::ResponseCase;
 use crate::ir::ResponseStatus;
+use crate::ir::RustType;
 
 /// Emit every type an operation contributes to the crate root: its query,
 /// header, and cookie input structs, any multipart or negotiated request body,
 /// the negotiated response bodies, and the response enum.
-pub fn emit_operation_types(operation: &Operation, targets: Targets) -> Result<Vec<TokenStream>> {
+pub fn emit_operation_types(
+    operation: &Operation,
+    targets: Targets,
+    foreign: &ForeignResolver,
+) -> Result<Vec<TokenStream>> {
     let mut items = Vec::new();
     if let Some(query) = &operation.query {
         // The query struct is deserialized by the server's `Query` extractor.
@@ -39,33 +49,42 @@ pub fn emit_operation_types(operation: &Operation, targets: Targets) -> Result<V
             serialize: false,
             deserialize: targets.server,
         };
-        items.push(emit_struct(query, serde)?);
+        let field_types = query.fields.iter().map(|field| return &field.ty);
+        let derives = ModelDerives {
+            serde,
+            foreign: foreign.of_types(field_types),
+        };
+        items.push(emit_struct(query, derives)?);
     }
     if let Some(headers) = &operation.headers {
-        items.push(emit_headers_struct(headers)?);
+        items.push(emit_headers_struct(headers, foreign)?);
     }
     if let Some(cookies) = &operation.cookies {
-        items.push(emit_cookies_struct(cookies)?);
+        items.push(emit_cookies_struct(cookies, foreign)?);
     }
     match &operation.request {
-        Some(RequestPayload::Multipart(multipart)) => items.push(emit_multipart_struct(multipart)?),
-        Some(RequestPayload::Negotiated(request)) => items.push(emit_negotiated_body_enum(request)?),
+        Some(RequestPayload::Multipart(multipart)) => items.push(emit_multipart_struct(multipart, foreign)?),
+        Some(RequestPayload::Negotiated(request)) => items.push(emit_negotiated_body_enum(request, foreign)?),
         Some(RequestPayload::Single(_)) | None => {}
     }
     for case in &operation.responses {
         if let Some(ResponseBody::Negotiated(body)) = &case.body {
-            items.push(emit_negotiated_body_enum(body)?);
+            items.push(emit_negotiated_body_enum(body, foreign)?);
         }
     }
-    items.push(emit_response_enum(operation)?);
+    items.push(emit_response_enum(operation, foreign)?);
     return Ok(items);
 }
 
 /// Emit the plain input struct for an operation's header parameters. Header
 /// values are read and set field by field, so the struct carries only `Debug`
 /// and `Clone` rather than serde derives.
-fn emit_headers_struct(headers: &Headers) -> Result<TokenStream> {
+fn emit_headers_struct(headers: &Headers, foreign: &ForeignResolver) -> Result<TokenStream> {
     let name = headers.name.to_token();
+    let derive_attr = plain_derive_attr(
+        DEBUG_AND_CLONE,
+        foreign.of_types(headers.params.iter().map(|param| return &param.ty)),
+    );
     let mut fields = Vec::with_capacity(headers.params.len());
     for param in &headers.params {
         let field = param.name.to_token();
@@ -77,7 +96,7 @@ fn emit_headers_struct(headers: &Headers) -> Result<TokenStream> {
         fields.push(quote! { #doc pub #field: #ty });
     }
     return Ok(quote! {
-        #[derive(Debug, Clone)]
+        #derive_attr
         pub struct #name {
             #(#fields),*
         }
@@ -86,8 +105,12 @@ fn emit_headers_struct(headers: &Headers) -> Result<TokenStream> {
 
 /// Emit the plain input struct for an operation's cookie parameters, mirroring
 /// [`emit_headers_struct`].
-fn emit_cookies_struct(cookies: &Cookies) -> Result<TokenStream> {
+fn emit_cookies_struct(cookies: &Cookies, foreign: &ForeignResolver) -> Result<TokenStream> {
     let name = cookies.name.to_token();
+    let derive_attr = plain_derive_attr(
+        DEBUG_AND_CLONE,
+        foreign.of_types(cookies.params.iter().map(|param| return &param.ty)),
+    );
     let mut fields = Vec::with_capacity(cookies.params.len());
     for param in &cookies.params {
         let field = param.name.to_token();
@@ -99,7 +122,7 @@ fn emit_cookies_struct(cookies: &Cookies) -> Result<TokenStream> {
         fields.push(quote! { #doc pub #field: #ty });
     }
     return Ok(quote! {
-        #[derive(Debug, Clone)]
+        #derive_attr
         pub struct #name {
             #(#fields),*
         }
@@ -112,9 +135,13 @@ fn emit_cookies_struct(cookies: &Cookies) -> Result<TokenStream> {
 /// server chose. A declared response header is carried as `T` when the spec
 /// marks it required and `Option<T>` when optional. The client decoder treats a
 /// required header as mandatory, erroring when it is missing or unparsable.
-fn emit_response_enum(operation: &Operation) -> Result<TokenStream> {
+fn emit_response_enum(operation: &Operation, foreign: &ForeignResolver) -> Result<TokenStream> {
     let name = operation.response_enum.to_token();
     let doc = doc_attr(&operation.doc);
+    let derive_attr = plain_derive_attr(
+        DEBUG_CLONE_AND_EQ,
+        foreign.of_types(response_enum_types(operation).iter()),
+    );
     let mut variants = Vec::with_capacity(operation.responses.len());
     for case in &operation.responses {
         let case_doc = doc_attr(&case.doc);
@@ -123,11 +150,38 @@ fn emit_response_enum(operation: &Operation) -> Result<TokenStream> {
     }
     return Ok(quote! {
         #doc
-        #[derive(Debug, Clone, PartialEq)]
+        #derive_attr
         pub enum #name {
             #(#variants),*
         }
     });
+}
+
+/// Every type a response enum's variants carry: each case's body and each declared
+/// response header.
+///
+/// A negotiated body contributes the types of its own variants and not its enum
+/// name. The name would resolve to nothing, because a per-operation enum is not a
+/// component model and so has no entry in the model map. Naming it would leave the
+/// response enum unconstrained while the negotiated enum below it narrowed, and the
+/// pair would not compile.
+fn response_enum_types(operation: &Operation) -> Vec<RustType> {
+    let mut types = Vec::new();
+    for case in &operation.responses {
+        match &case.body {
+            Some(ResponseBody::Single(body)) => types.push(body.ty.clone()),
+            Some(ResponseBody::Negotiated(negotiated)) => {
+                for variant in &negotiated.variants {
+                    types.push(variant.body.ty.clone());
+                }
+            }
+            None => {}
+        }
+        for header in &case.headers {
+            types.push(header.ty.clone());
+        }
+    }
+    return types;
 }
 
 /// Emit the variant definition for one response case: a tuple variant carrying

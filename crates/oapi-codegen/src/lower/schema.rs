@@ -19,6 +19,7 @@ use crate::ir::Deprecation;
 use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
+use crate::ir::ForeignDerives;
 use crate::ir::Item;
 use crate::ir::Module;
 use crate::ir::RustType;
@@ -33,6 +34,9 @@ use crate::naming::to_ident;
 
 /// The `x-rust-type` extension: emit a verbatim Rust type expression.
 const X_RUST_TYPE: &str = "x-rust-type";
+/// The `x-rust-derive` extension: which of `Debug`, `Clone`, `PartialEq` an
+/// `x-rust-type` target implements.
+const X_RUST_DERIVE: &str = "x-rust-derive";
 /// The `x-rust-serde-skip` extension: drop a field via `#[serde(skip)]`.
 const X_RUST_SERDE_SKIP: &str = "x-rust-serde-skip";
 /// The `x-omitempty` extension: force `skip_serializing_if` on/off for a field.
@@ -122,7 +126,7 @@ impl Mapper<'_> {
                 name: self.type_name_ident(name),
                 doc: doc_of(data),
                 deprecated: deprecation_of(data),
-                ty: RustType::Verbatim(verbatim.to_owned()),
+                ty: verbatim_type(data, verbatim, name)?,
             }));
         }
 
@@ -549,7 +553,7 @@ impl Mapper<'_> {
     fn type_from_schema_inner(&mut self, hint: &str, schema: &Schema) -> Result<RustType> {
         let data = &schema.schema_data;
         if let Some(verbatim) = extension_str(data, X_RUST_TYPE) {
-            return Ok(RustType::Verbatim(verbatim.to_owned()));
+            return verbatim_type(data, verbatim, hint);
         }
 
         let ty = match &schema.schema_kind {
@@ -709,6 +713,73 @@ fn extension_str_array<'a>(data: &'a SchemaData, key: &str) -> Option<Vec<&'a st
     return array.iter().map(|value| return value.as_str()).collect();
 }
 
+/// The trait names `x-rust-derive` accepts, in the order the derive list emits
+/// them. Only these three, because they are the only traits the generator derives
+/// on a model without being asked. A serde trait is decided by the direction the
+/// API uses the model in, which [`crate::emit::usage`] computes and no
+/// specification overrides.
+const FOREIGN_DERIVE_NAMES: [&str; 3] = ["Debug", "Clone", "PartialEq"];
+
+/// Read `x-rust-derive` into a [`ForeignDerives`].
+///
+/// The value lists the traits the target **does** implement, so an absent key
+/// means all three and an empty list means none. Listing what is present rather
+/// than what is missing keeps the specification readable: a reader sees the
+/// target's capability and not a double negative.
+///
+/// An unknown trait name is an error and not an ignored key. The whole point of
+/// the extension is to stop a bound the author cannot satisfy, so a misspelled
+/// `Parialeq` that silently claims nothing would give exactly the compile error
+/// the author wrote the key to avoid, with nothing pointing at the typo.
+fn foreign_derives_of(data: &SchemaData, path: &str) -> Result<ForeignDerives> {
+    let Some(value) = data.extensions.get(X_RUST_DERIVE) else {
+        return Ok(ForeignDerives::default());
+    };
+    let Some(array) = value.as_array() else {
+        return Err(Error::UnsupportedSchema {
+            path: path.to_owned(),
+            reason: format!("`{X_RUST_DERIVE}` must be a list of trait names, for example `[Debug, Clone]`"),
+        });
+    };
+
+    let mut derives = ForeignDerives {
+        debug: false,
+        clone: false,
+        partial_eq: false,
+    };
+    for entry in array {
+        let Some(name) = entry.as_str() else {
+            return Err(Error::UnsupportedSchema {
+                path: path.to_owned(),
+                reason: format!("every `{X_RUST_DERIVE}` entry must be a trait name written as a string"),
+            });
+        };
+        match name {
+            "Debug" => derives.debug = true,
+            "Clone" => derives.clone = true,
+            "PartialEq" => derives.partial_eq = true,
+            other => {
+                let known = FOREIGN_DERIVE_NAMES.join(", ");
+                return Err(Error::UnsupportedSchema {
+                    path: path.to_owned(),
+                    reason: format!("`{X_RUST_DERIVE}` does not accept `{other}`. It accepts only {known}"),
+                });
+            }
+        }
+    }
+    return Ok(derives);
+}
+
+/// Lower an `x-rust-type` target into a [`RustType::Verbatim`], reading its
+/// `x-rust-derive` alongside. Both keys sit on one schema, so they are read
+/// together and neither site has to remember the other exists.
+fn verbatim_type(data: &SchemaData, verbatim: &str, path: &str) -> Result<RustType> {
+    return Ok(RustType::Verbatim {
+        text: verbatim.to_owned(),
+        derives: foreign_derives_of(data, path)?,
+    });
+}
+
 /// Derive a `#[deprecated]` annotation from `deprecated: true` and an optional
 /// `x-deprecated-reason` note. Returns `None` unless the schema is deprecated,
 /// so a lone `x-deprecated-reason` is a no-op (matching `oapi-codegen`).
@@ -803,6 +874,82 @@ mod tests {
     fn schema_just_under_the_depth_limit_still_lowers() {
         let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH - 1));
         lower_models(&spec).expect("just under the limit should lower cleanly");
+    }
+
+    /// Lower a spec whose one schema carries an `x-rust-derive` and return the
+    /// error, for the shapes the extension rejects.
+    fn derive_error(value: &str) -> Error {
+        let yaml = format!(
+            "{PREAMBLE}    Target:\n      type: string\n      x-rust-type: crate::Foreign\n      x-rust-derive: {value}\n"
+        );
+        let doc: openapiv3::OpenAPI = serde_yaml::from_str(&yaml).expect("parse spec");
+        let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
+        return lower_models(&spec).expect_err("the extension should reject this value");
+    }
+
+    #[test]
+    fn absent_x_rust_derive_claims_every_trait() {
+        // The default every specification written before the extension existed
+        // relies on. A model reaching the target keeps all three traits.
+        let out = emit_yaml(&format!(
+            "{PREAMBLE}    Holder:\n      type: object\n      required: [value]\n      properties:\n        value:\n          type: string\n          x-rust-type: crate::Foreign\n"
+        ));
+        assert!(
+            out.contains("#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]"),
+            "absent key should change nothing:\n{out}"
+        );
+    }
+
+    #[test]
+    fn empty_x_rust_derive_drops_every_trait() {
+        let out = emit_yaml(&format!(
+            "{PREAMBLE}    Holder:\n      type: object\n      required: [value]\n      properties:\n        value:\n          type: string\n          x-rust-type: crate::Foreign\n          x-rust-derive: []\n"
+        ));
+        assert!(
+            out.contains("#[derive(serde::Serialize, serde::Deserialize)]"),
+            "an empty list claims nothing, so only the serde derives remain:\n{out}"
+        );
+    }
+
+    #[test]
+    fn partial_x_rust_derive_keeps_only_the_listed_traits() {
+        let out = emit_yaml(&format!(
+            "{PREAMBLE}    Holder:\n      type: object\n      required: [value]\n      properties:\n        value:\n          type: string\n          x-rust-type: crate::Foreign\n          x-rust-derive: [Debug, PartialEq]\n"
+        ));
+        assert!(
+            out.contains("#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]"),
+            "Clone was not listed, so it is dropped:\n{out}"
+        );
+    }
+
+    #[test]
+    fn x_rust_derive_that_is_not_a_list_is_rejected() {
+        let err = derive_error("Debug");
+        assert!(
+            matches!(&err, Error::UnsupportedSchema { reason, .. } if reason.contains("must be a list")),
+            "expected a list-shape error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn x_rust_derive_entry_that_is_not_a_string_is_rejected() {
+        let err = derive_error("[7]");
+        assert!(
+            matches!(&err, Error::UnsupportedSchema { reason, .. } if reason.contains("written as a string")),
+            "expected a string-entry error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn misspelled_trait_name_is_an_error_and_not_an_ignored_key() {
+        // Silently accepting `Parialeq` would claim nothing and produce exactly the
+        // compile error the author wrote the key to prevent, with nothing pointing
+        // at the typo.
+        let err = derive_error("[Parialeq]");
+        assert!(
+            matches!(&err, Error::UnsupportedSchema { reason, .. } if reason.contains("Parialeq")),
+            "expected the unknown name in the error, got {err:?}"
+        );
     }
 
     #[test]
