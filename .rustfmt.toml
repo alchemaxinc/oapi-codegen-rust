@@ -3,6 +3,10 @@
 
 edition = "2024"
 max_width = 120
+
+# The three options below are nightly-only, so run rustfmt as `cargo +nightly
+# fmt`. Stable rustfmt drops an unstable option with a warning and then exits 0,
+# so it silently formats to different rules.
 imports_granularity = "Item"
 group_imports = "StdExternalCrate"
 

@@ -22,6 +22,14 @@ env:
   NEXTEST_VERSION: "0.9.133"
   CARGO_DENY_VERSION: "0.20.2"
 
+  # `.rustfmt.toml` sets three nightly-only options: `ignore`, which keeps
+  # rustfmt away from the generated files, plus `imports_granularity` and
+  # `group_imports`. Stable rustfmt drops an unstable option with a warning and
+  # a zero exit code, so it reformats what nightly skips and disagrees on
+  # imports. `make lint` and `make format` both use `+nightly`, so this uses the
+  # same channel and the two cannot drift apart.
+  RUSTFMT_NIGHTLY: "nightly"
+
   # Force ANSI colour in cargo/rustc output so GitHub Actions renders the
   # terminal output in colour rather than as a wall of plain text.
   CARGO_TERM_COLOR: always
@@ -157,8 +165,17 @@ jobs:
       - name: Verify cargo-nextest
         run: cargo nextest --version
 
+      # The `rustfmt` component of the pinned stable toolchain cannot read
+      # `.rustfmt.toml`, so this installs the nightly one beside it. The stable
+      # toolchain stays the default, so every other step is unaffected.
+      - name: Install nightly rustfmt
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # v-nobody-knows until https://github.com/dtolnay/rust-toolchain/issues/180 is fixed
+        with:
+          toolchain: ${{ env.RUSTFMT_NIGHTLY }}
+          components: rustfmt
+
       - name: Check formatting
-        run: cargo fmt -- --check
+        run: cargo "+${RUSTFMT_NIGHTLY}" fmt -- --check
 
       - name: Run clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
