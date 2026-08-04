@@ -7,6 +7,7 @@
 
 pub mod paths;
 pub mod prune;
+pub mod recurse;
 pub mod rename;
 pub mod schema;
 pub mod security;
@@ -15,6 +16,7 @@ pub mod validate;
 
 pub use crate::lower::paths::generate_service;
 pub use crate::lower::prune::prune_unused_models;
+pub use crate::lower::recurse::box_recursive_types;
 pub use crate::lower::rename::TypeNames;
 pub use crate::lower::rename::check_duplicate_models;
 pub use crate::lower::rename::check_type_name_collisions;

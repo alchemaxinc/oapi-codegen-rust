@@ -1,0 +1,74 @@
+openapi: 3.0.3
+info:
+  title: Recursive schemas
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # A required self-reference. The field holds the struct itself, so it needs a
+    # box.
+    Node:
+      type: object
+      required: [id, child]
+      properties:
+        id:
+          type: string
+        child:
+          $ref: "#/components/schemas/Node"
+    # An optional self-reference. `Option<T>` stores its `T` inline, so this
+    # needs a box just as much as the required case does.
+    Comment:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+        reply:
+          $ref: "#/components/schemas/Comment"
+    # A self-reference through an array. `Vec` keeps its elements on the heap, so
+    # this already has a size and must stay unboxed.
+    Tree:
+      type: object
+      properties:
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tree"
+    # A self-reference through a map, unboxed for the same reason.
+    Registry:
+      type: object
+      properties:
+        entries:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Registry"
+    # Two schemas that hold each other. Neither is reachable from the other
+    # without a box, so both sides get one.
+    Parent:
+      type: object
+      required: [child]
+      properties:
+        child:
+          $ref: "#/components/schemas/Kid"
+    Kid:
+      type: object
+      required: [parent]
+      properties:
+        parent:
+          $ref: "#/components/schemas/Parent"
+    # A union variant that holds the union. The variant is a field in all but
+    # name, so it takes a box too.
+    Expression:
+      oneOf:
+        - type: string
+        - $ref: "#/components/schemas/Expression"
+    # A cycle that runs through an alias. The alias offers nothing to box, so the
+    # struct field on the cycle takes the box instead.
+    Wrapper:
+      $ref: "#/components/schemas/Holder"
+    Holder:
+      type: object
+      required: [wrapped]
+      properties:
+        wrapped:
+          $ref: "#/components/schemas/Wrapper"

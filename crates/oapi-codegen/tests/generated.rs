@@ -68,6 +68,8 @@ mod generated {
     pub mod oneof_untagged;
     #[path = "primitive_scalars.rs"]
     pub mod primitive_scalars;
+    #[path = "recursive_schema.rs"]
+    pub mod recursive_schema;
     #[path = "ref_local.rs"]
     pub mod ref_local;
     #[path = "server_component_body_ref.rs"]

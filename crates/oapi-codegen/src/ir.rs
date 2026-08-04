@@ -238,6 +238,11 @@ pub enum RustType {
     Map(Box<RustType>),
     /// `Option<T>`.
     Option(Box<RustType>),
+    /// `Box<T>`, added by the recursion pass to give a cyclic type a size.
+    ///
+    /// Nothing in a schema asks for this. `lower::recurse` inserts it where a
+    /// type would otherwise hold itself, directly or through other types.
+    Boxed(Box<RustType>),
     /// A reference to a named (generated or external) type.
     Named(String),
     /// A reference to a type from an import-mapped module: `module::Name`.

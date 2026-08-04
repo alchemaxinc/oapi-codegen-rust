@@ -280,6 +280,7 @@ fn hints_for(err: &Error) -> Vec<String> {
         | Error::DuplicateTypeName { hint, .. }
         | Error::OperationTypeCollision { hint, .. }
         | Error::SchemaNameCollision { hint, .. }
+        | Error::RecursiveAlias { hint, .. }
         | Error::OperationNameCollision { hint, .. }
         | Error::InvalidTypeNameSuffix { hint, .. } => {
             return vec![hint.clone()];

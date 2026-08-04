@@ -1,0 +1,15 @@
+openapi: 3.0.3
+info:
+  title: A cycle of type aliases
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # Two schemas that are nothing but a `$ref` to each other. Each lowers to a
+    # type alias, so the output is `type Loop = Ring; type Ring = Loop;`, which
+    # rustc rejects with `E0391`. A `Box` does not help: `type Loop = Box<Ring>`
+    # with `type Ring = Box<Loop>` still expands forever.
+    Loop:
+      $ref: "#/components/schemas/Ring"
+    Ring:
+      $ref: "#/components/schemas/Loop"
