@@ -248,6 +248,20 @@ pub enum Error {
         hint: String,
     },
 
+    /// Two or more type aliases refer to each other in a cycle.
+    ///
+    /// `type A = B; type B = A;` is a cycle rustc rejects with `E0391`, and no
+    /// amount of indirection fixes it: a `Box` around either side still expands
+    /// forever. The recursion pass boxes a struct field or a union variant, and
+    /// a cycle made only of aliases offers neither.
+    RecursiveAlias {
+        /// The alias names on the cycle, in the order the walk met them.
+        cycle: Vec<String>,
+        /// How to break the cycle. Rendered by the console as a hint, and not by
+        /// `Display`, so the console does not print it twice.
+        hint: String,
+    },
+
     /// Two component schema names collapsed onto one Rust identifier.
     ///
     /// The generator will not choose which schema keeps the plain name, because
@@ -408,6 +422,9 @@ impl std::fmt::Display for Error {
             } => {
                 return write!(f, "{first} and {second} both take the Rust type name `{name}`");
             }
+            Error::RecursiveAlias { cycle, .. } => {
+                return write!(f, "type aliases refer to each other in a cycle: {}", cycle.join(" -> "));
+            }
             Error::SchemaNameCollision {
                 ident, first, second, ..
             } => {
@@ -471,6 +488,7 @@ impl std::error::Error for Error {
             | Error::DuplicateTypeName { .. }
             | Error::OperationTypeCollision { .. }
             | Error::SchemaNameCollision { .. }
+            | Error::RecursiveAlias { .. }
             | Error::OperationNameCollision { .. }
             | Error::InvalidTypeNameSuffix { .. }
             | Error::InvalidPathParameter { .. }

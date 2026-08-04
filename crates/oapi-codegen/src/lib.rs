@@ -80,6 +80,8 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         // A hoisted inline type carries no component name, so the resolution pass
         // above cannot see it. The final item names can still hold a duplicate.
         lower::check_duplicate_models(&module)?;
+        // After pruning, so a cycle among dropped models is not reported.
+        lower::box_recursive_types(&mut module)?;
         let targets = emit::Targets {
             server: want_server,
             client: want_client,
@@ -91,6 +93,7 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     // every collision reports.
     names.check_emitted(&module)?;
     lower::check_duplicate_models(&module)?;
+    lower::box_recursive_types(&mut module)?;
     return emit::emit_module(&module, server_urls.as_ref());
 }
 
@@ -110,10 +113,11 @@ pub fn generate_to_file(spec_path: &Path, config: &Config, output_path: &Path) -
 pub fn generate_models_string(spec_path: &Path) -> Result<String> {
     let spec = Spec::load(spec_path)?;
     let names = lower::type_renames(&spec, None)?;
-    let module = lower::generate_models(&spec, &names)?;
+    let mut module = lower::generate_models(&spec, &names)?;
     // Every schema becomes an item here, so every collision reaches the file.
     names.check_emitted(&module)?;
     lower::check_duplicate_models(&module)?;
+    lower::box_recursive_types(&mut module)?;
     let code = emit::emit_module(&module, None)?;
     return Ok(code);
 }

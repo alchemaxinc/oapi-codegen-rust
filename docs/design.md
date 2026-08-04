@@ -238,6 +238,35 @@ parameter that the document does not declare, such as one that a proxy or an
 analytics tool adds. A denial there rejects a whole request that the document
 permits.
 
+## A recursive type gets a `Box`
+
+A schema may refer to itself, directly or through other schemas. Written out as
+it stands, `Node { child: Node }` is a type that holds itself, and rustc rejects
+it with `E0072`. The generator inserts a `Box` on the field that closes the
+cycle, which is the fix rustc itself suggests.
+
+A field holds its type when the size of that type counts towards the size of the
+struct:
+
+- `Vec<T>` and `HashMap<String, T>` keep their elements on the heap. They hold
+  nothing, so a cycle through an array or a map already has a size and gets no
+  box.
+- `Option<T>` stores its `T` inline. `Option<Node>` inside `Node` is just as
+  infinite as `Node`, so it becomes `Option<Box<Node>>`. Making a recursive
+  property optional does not fix anything on its own.
+
+Every edge on a cycle gets a box, and not one chosen edge. One box is enough for
+rustc, but the choice would fall out of the order the items sit in, so two
+schemas that refer to each other would get a box on whichever came first. Boxing
+both states the same fact about both.
+
+`Box` is invisible to serde, so the wire format does not change.
+
+The one cycle this cannot fix is a cycle of `$ref`s that declare nothing else.
+Each such schema becomes a type alias, and `type A = B; type B = A;` is an error
+(`E0391`) that no indirection removes. The generator reports it and names the
+schemas on the cycle.
+
 ## Config compatibility
 
 YAML config keys mirror `oapi-codegen`.

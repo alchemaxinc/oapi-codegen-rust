@@ -249,6 +249,10 @@ pub(crate) fn emit_type(ty: &RustType) -> Result<TokenStream> {
             let inner = emit_type(inner)?;
             quote! { Option<#inner> }
         }
+        RustType::Boxed(inner) => {
+            let inner = emit_type(inner)?;
+            quote! { Box<#inner> }
+        }
         RustType::Named(name) => {
             let ident = to_ident(name, Case::Pascal).to_token();
             quote! { #ident }

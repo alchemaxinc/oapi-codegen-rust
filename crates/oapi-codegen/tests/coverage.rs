@@ -221,6 +221,20 @@ const TEST_TABLE: &[Feature] = &[
         status: Status::Supported,
         fixture: Some("ref_local"),
     },
+    // A `$ref` that leads back to the schema it started from. The generator adds
+    // a `Box` so the type has a size.
+    Feature {
+        element: "schema.$ref.recursive",
+        status: Status::Supported,
+        fixture: Some("recursive_schema"),
+    },
+    // The one cycle a `Box` cannot fix, because it holds no struct field and no
+    // union variant to put the box on.
+    Feature {
+        element: "schema.$ref.recursive.alias-only",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_recursive_alias"),
+    },
     // Schema metadata
     Feature {
         element: "meta.description",
@@ -615,6 +629,7 @@ generated_tests!(
     oneof_discriminator,
     oneof_untagged,
     primitive_scalars,
+    recursive_schema,
     ref_local,
     string_enum,
     string_formats,
@@ -2013,6 +2028,27 @@ fn a_3_1_document_is_rejected_for_its_version_and_not_by_the_parser() {
             "`{stem}` must be rejected as UnsupportedSpecVersion, and reported as: {error}",
         );
     }
+}
+
+/// A cycle of aliases is rejected **as a cycle**, and not as some other problem
+/// the walk trips over first.
+///
+/// `unsupported_features_are_rejected` asserts `is_err()` only, which is too
+/// weak here: the author needs to be told that two `$ref`s point at each other,
+/// because nothing else in the document looks wrong.
+#[test]
+fn an_alias_cycle_is_rejected_as_a_cycle() {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join("unsupported_recursive_alias.yaml");
+    // No `return` on this arm: `panic!` diverges, so `implicit_return` does not
+    // apply and `diverging_sub_expression` rejects the `return`.
+    let error = oapi_codegen::generate_models_string(&fixture).err().unwrap_or_else(|| {
+        panic!("`unsupported_recursive_alias` holds a cycle of aliases and generation succeeded");
+    });
+    assert!(
+        matches!(error, oapi_codegen::Error::RecursiveAlias { .. }),
+        "the fixture must be rejected as RecursiveAlias, and reported as: {error}",
+    );
 }
 
 /// Every fixture on disk must be catalogued, and every catalogued fixture must
