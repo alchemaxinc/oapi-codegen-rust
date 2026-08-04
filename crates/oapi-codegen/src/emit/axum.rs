@@ -147,12 +147,12 @@ fn emit_trait(service: &Service) -> Result<TokenStream> {
 }
 
 /// The doc comment of a trait method: the operation's own description, then the
-/// security the document requires of it.
+/// security the document names for it.
 ///
 /// The generator emits no check for that security, because verifying a
 /// credential needs application knowledge it does not have: which key, which
-/// issuer, and which claim names which user. Naming the requirement is what it
-/// can do, so an implementer does not have to read the document to tell a public
+/// issuer, and which claim names which user. Naming the schemes is what it can
+/// do, so an implementer does not have to read the document to tell a public
 /// operation from a protected one.
 fn method_doc(operation: &Operation, schemes: &[SecurityScheme]) -> TokenStream {
     if operation.security.is_empty() {
@@ -166,20 +166,32 @@ fn method_doc(operation: &Operation, schemes: &[SecurityScheme]) -> TokenStream 
     }
     lines.push("# Security".to_owned());
     lines.push(String::new());
-    lines.push("The document requires this operation to authenticate with:".to_owned());
+    lines.push("The document names these security schemes for this operation:".to_owned());
     lines.push(String::new());
     for key in &operation.security {
         lines.push(format!("- {}", requirement_line(key, schemes)));
     }
     lines.push(String::new());
-    lines.push("This generator emits no check. Read the credential from the request and verify it here.".to_owned());
+    if operation.security.len() > 1 {
+        // `security::required_keys` unions the alternatives and the
+        // conjunctions, so past one key the list no longer says which it was.
+        lines.push(
+            "This list is the union of every alternative the document gives, so it may be a choice between schemes rather than all of them. Read `security` in the document for the exact rule."
+                .to_owned(),
+        );
+        lines.push(String::new());
+    }
+    lines.push(
+        "This generator emits no check. Enforce it in a layer around the router: this method receives only the parameters the operation declares, not the credential."
+            .to_owned(),
+    );
     return doc_lines(&lines);
 }
 
-/// One security requirement, named and located.
+/// One security scheme, named and located.
 ///
-/// Where the credential sits is the part a server implementation needs, because
-/// it has to read the credential itself.
+/// Where the credential sits is the part a server needs, because it has to read
+/// the credential itself.
 fn requirement_line(key: &str, schemes: &[SecurityScheme]) -> String {
     let Some(scheme) = schemes.iter().find(|scheme| return scheme.key == key) else {
         // The document names a scheme it never declares. The client rejects

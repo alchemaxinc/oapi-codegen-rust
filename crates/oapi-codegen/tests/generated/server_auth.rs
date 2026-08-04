@@ -60,11 +60,11 @@ pub trait Api: Clone + Send + Sync + 'static {
     ///
     /// # Security
     ///
-    /// The document requires this operation to authenticate with:
+    /// The document names these security schemes for this operation:
     ///
     /// - `bearerAuth`: a bearer token in the `Authorization` header
     ///
-    /// This generator emits no check. Read the credential from the request and verify it here.
+    /// This generator emits no check. Enforce it in a layer around the router: this method receives only the parameters the operation declares, not the credential.
     fn get_profile(
         &self,
     ) -> impl std::future::Future<Output = GetProfileResponse> + Send;
@@ -72,12 +72,14 @@ pub trait Api: Clone + Send + Sync + 'static {
     fn get_public(&self) -> impl std::future::Future<Output = GetPublicResponse> + Send;
     /// # Security
     ///
-    /// The document requires this operation to authenticate with:
+    /// The document names these security schemes for this operation:
     ///
     /// - `apiKeyHeader`: an API key in the `X-API-Key` header
     /// - `basicAuth`: basic credentials in the `Authorization` header
     ///
-    /// This generator emits no check. Read the credential from the request and verify it here.
+    /// This list is the union of every alternative the document gives, so it may be a choice between schemes rather than all of them. Read `security` in the document for the exact rule.
+    ///
+    /// This generator emits no check. Enforce it in a layer around the router: this method receives only the parameters the operation declares, not the credential.
     fn get_reports(
         &self,
     ) -> impl std::future::Future<Output = GetReportsResponse> + Send;
@@ -85,11 +87,11 @@ pub trait Api: Clone + Send + Sync + 'static {
     ///
     /// # Security
     ///
-    /// The document requires this operation to authenticate with:
+    /// The document names these security schemes for this operation:
     ///
     /// - `apiKeyCookie`: an API key in the `SESSION` cookie
     ///
-    /// This generator emits no check. Read the credential from the request and verify it here.
+    /// This generator emits no check. Enforce it in a layer around the router: this method receives only the parameters the operation declares, not the credential.
     fn get_session(
         &self,
     ) -> impl std::future::Future<Output = GetSessionResponse> + Send;
@@ -97,21 +99,21 @@ pub trait Api: Clone + Send + Sync + 'static {
     ///
     /// # Security
     ///
-    /// The document requires this operation to authenticate with:
+    /// The document names these security schemes for this operation:
     ///
     /// - `apiKeyQuery`: an API key in the `api_key` query parameter
     ///
-    /// This generator emits no check. Read the credential from the request and verify it here.
+    /// This generator emits no check. Enforce it in a layer around the router: this method receives only the parameters the operation declares, not the credential.
     fn search(&self) -> impl std::future::Future<Output = SearchResponse> + Send;
     /// Fetch the audit log, which OAuth2 protects.
     ///
     /// # Security
     ///
-    /// The document requires this operation to authenticate with:
+    /// The document names these security schemes for this operation:
     ///
     /// - `oauth2`, a scheme this generator has no built-in support for
     ///
-    /// This generator emits no check. Read the credential from the request and verify it here.
+    /// This generator emits no check. Enforce it in a layer around the router: this method receives only the parameters the operation declares, not the credential.
     fn get_audit(&self) -> impl std::future::Future<Output = GetAuditResponse> + Send;
 }
 
