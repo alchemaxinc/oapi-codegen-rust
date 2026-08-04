@@ -67,22 +67,41 @@ pub fn box_recursive_types(module: &mut Module) -> Result<()> {
     return Ok(());
 }
 
-/// Which named types each item holds, keyed by canonical name.
+/// Which items hold which, plus the strongly connected components of that
+/// relation.
+///
+/// An edge `a -> b` means an item `a` holds an item `b` in a position that
+/// counts towards its size. Two items sit in one component exactly when each
+/// holds the other, so an edge needs a box exactly when its two ends share a
+/// component. Reading the components one time keeps the pass linear in the
+/// number of edges; asking "does `b` reach `a`" per edge walks the whole graph
+/// per edge instead.
 struct Graph {
-    /// Held types per item. An alias entry is kept apart so a cycle can be told
-    /// to run through aliases alone.
-    held: BTreeMap<String, BTreeSet<String>>,
-    /// The items that are aliases.
-    aliases: BTreeSet<String>,
+    /// Item names, in module order, indexed by node.
+    names: Vec<String>,
+    /// Node per item name.
+    nodes: BTreeMap<String, usize>,
+    /// Held items per node.
+    edges: Vec<Vec<usize>>,
+    /// Whether each node is an alias, which offers nothing to box.
+    is_alias: Vec<bool>,
+    /// Component per node.
+    component: Vec<usize>,
 }
 
 impl Graph {
-    /// Build the holding graph of `module`.
+    /// Build the holding graph of `module` and its components.
     fn of(module: &Module) -> Self {
-        let mut held = BTreeMap::new();
-        let mut aliases = BTreeSet::new();
+        let names: Vec<String> = module.items.iter().map(|item| return canonical(item.name())).collect();
+        let nodes: BTreeMap<String, usize> = names
+            .iter()
+            .enumerate()
+            .map(|(node, name)| return (name.clone(), node))
+            .collect();
+
+        let mut edges = Vec::with_capacity(module.items.len());
+        let mut is_alias = Vec::with_capacity(module.items.len());
         for item in &module.items {
-            let name = canonical(item.name());
             let mut targets = BTreeSet::new();
             match item {
                 Item::Struct(strukt) => {
@@ -97,34 +116,41 @@ impl Graph {
                         }
                     }
                 }
-                Item::Alias(alias) => {
-                    aliases.insert(name.clone());
-                    collect_held(&alias.ty, &mut targets);
-                }
+                Item::Alias(alias) => collect_held(&alias.ty, &mut targets),
             }
-            held.insert(name, targets);
+            is_alias.push(matches!(item, Item::Alias(_)));
+            // A name the module does not declare cannot close a cycle inside it,
+            // so it gets no node and no edge.
+            edges.push(
+                targets
+                    .iter()
+                    .filter_map(|target| return nodes.get(target).copied())
+                    .collect(),
+            );
         }
-        return Self { held, aliases };
+
+        let component = components(&edges);
+        return Self {
+            names,
+            nodes,
+            edges,
+            is_alias,
+            component,
+        };
     }
 
-    /// Whether `from` holds `to`, directly or through other items.
-    fn reaches(&self, from: &str, to: &str) -> bool {
-        let mut seen = BTreeSet::new();
-        let mut worklist = vec![from.to_owned()];
-        while let Some(current) = worklist.pop() {
-            let Some(targets) = self.held.get(&current) else {
-                continue;
-            };
-            for target in targets {
-                if target == to {
-                    return true;
-                }
-                if seen.insert(target.clone()) {
-                    worklist.push(target.clone());
-                }
-            }
-        }
-        return false;
+    /// Whether an edge between `from` and `to` closes a cycle.
+    ///
+    /// The caller only asks about a pair it holds an edge for, so one shared
+    /// component is the same statement as "each reaches the other".
+    fn on_a_cycle(&self, from: &str, to: &str) -> bool {
+        let (Some(from), Some(to)) = (self.nodes.get(from), self.nodes.get(to)) else {
+            return false;
+        };
+        let (Some(from), Some(to)) = (self.component.get(*from), self.component.get(*to)) else {
+            return false;
+        };
+        return from == to;
     }
 
     /// Reject a cycle whose every member is an alias.
@@ -132,12 +158,16 @@ impl Graph {
     /// Such a cycle has no field and no variant to box, and `type A = Box<B>`
     /// with `type B = Box<A>` still expands forever.
     fn check_alias_cycles(&self) -> Result<()> {
-        for name in &self.aliases {
-            let Some(cycle) = self.alias_cycle_from(name) else {
+        let mut members: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for (node, component) in self.component.iter().enumerate() {
+            members.entry(*component).or_default().push(node);
+        }
+        for group in members.values() {
+            if !self.is_cyclic(group) || !group.iter().all(|node| return self.is_alias(*node)) {
                 continue;
-            };
+            }
             return Err(Error::RecursiveAlias {
-                cycle,
+                cycle: self.cycle_through(group),
                 hint: "Give one of these schemas `type: object` with properties, so the generator emits a struct it \
                        can box, or break the chain of `$ref`s."
                     .to_owned(),
@@ -146,31 +176,211 @@ impl Graph {
         return Ok(());
     }
 
-    /// The cycle of aliases starting at `start`, when one exists.
+    /// Whether the items of one component refer to each other in a cycle.
     ///
-    /// The walk only steps through aliases, so a chain that leaves the aliases
-    /// and comes back through a struct is not reported here. The struct on that
-    /// chain gets a box instead.
-    fn alias_cycle_from(&self, start: &str) -> Option<Vec<String>> {
-        let mut path = vec![start.to_owned()];
-        let mut current = start.to_owned();
-        // Each alias holds at most one named type, so the walk never branches
-        // and stops after it has seen every alias once.
-        for _ in 0..=self.aliases.len() {
-            let next = self
-                .held
-                .get(&current)
-                .and_then(|targets| return targets.iter().next())
-                .filter(|target| return self.aliases.contains(*target))
-                .cloned()?;
+    /// Every node is its own component, so a lone node is only cyclic when it
+    /// holds itself.
+    fn is_cyclic(&self, group: &[usize]) -> bool {
+        if group.len() > 1 {
+            return true;
+        }
+        return group
+            .first()
+            .is_some_and(|node| return self.edges_of(*node).contains(node));
+    }
+
+    /// The items `node` holds. An unknown node holds nothing.
+    fn edges_of(&self, node: usize) -> &[usize] {
+        return self.edges.get(node).map_or(&[], Vec::as_slice);
+    }
+
+    /// Whether `node` is an alias. An unknown node is not.
+    fn is_alias(&self, node: usize) -> bool {
+        return self.is_alias.get(node).copied().unwrap_or(false);
+    }
+
+    /// The name of `node`, empty for an unknown one.
+    fn name_of(&self, node: usize) -> String {
+        return self.names.get(node).cloned().unwrap_or_default();
+    }
+
+    /// Name the members of `group` in the order they refer to each other,
+    /// closing on the name the walk started from.
+    ///
+    /// An alias holds at most one item, so the walk never branches.
+    fn cycle_through(&self, group: &[usize]) -> Vec<String> {
+        let Some(start) = group.first().copied() else {
+            return Vec::new();
+        };
+        let mut path = vec![self.name_of(start)];
+        let mut current = start;
+        for _ in 0..group.len() {
+            let Some(next) = self.edges_of(current).first().copied() else {
+                break;
+            };
+            path.push(self.name_of(next));
             if next == start {
-                path.push(next);
-                return Some(path);
+                break;
             }
-            path.push(next.clone());
             current = next;
         }
-        return None;
+        return path;
+    }
+}
+
+/// The strongly connected component of each node, by Tarjan's algorithm.
+///
+/// The walk carries its own stack, so a long chain of items cannot overflow the
+/// real one. It reads each node and each edge one time.
+fn components(edges: &[Vec<usize>]) -> Vec<usize> {
+    let mut walk = Walk::over(edges.len());
+    // Each entry is a node and how many of its edges the walk has taken.
+    let mut work: Vec<(usize, usize)> = Vec::new();
+
+    for root in 0..edges.len() {
+        if walk.is_open_or_done(root) {
+            continue;
+        }
+        walk.open(root);
+        work.push((root, 0));
+
+        while let Some(&(node, taken)) = work.last() {
+            let next = edges.get(node).and_then(|held| return held.get(taken)).copied();
+            if let Some(next) = next {
+                if let Some(entry) = work.last_mut() {
+                    entry.1 += 1;
+                }
+                walk.step(node, next, &mut work);
+                continue;
+            }
+
+            work.pop();
+            if let Some(&(parent, _)) = work.last() {
+                walk.carry_up(parent, node);
+            }
+            walk.close(node);
+        }
+    }
+    return walk.component;
+}
+
+/// The per-node bookkeeping of [`components`].
+///
+/// Every method reads a node through `get`, because the workspace denies
+/// `indexing_slicing`. A node outside the graph cannot arise: each one comes
+/// from `0..edges.len()` or from an edge, and an edge is built from a node that
+/// the module declares.
+struct Walk {
+    /// The order the walk reached each node in, or [`Walk::UNREACHED`].
+    order: Vec<usize>,
+    /// The oldest order each node can reach while the walk holds it open.
+    lowest: Vec<usize>,
+    /// Whether each node is on [`Walk::path`].
+    open: Vec<bool>,
+    /// The component of each node, filled in as each component closes.
+    component: Vec<usize>,
+    /// The nodes the walk holds open, oldest first.
+    path: Vec<usize>,
+    /// The order to give the next node the walk reaches.
+    next_order: usize,
+    /// The number to give the next component that closes.
+    next_component: usize,
+}
+
+impl Walk {
+    /// The order of a node the walk has not reached.
+    const UNREACHED: usize = usize::MAX;
+
+    /// Bookkeeping for a graph of `count` nodes.
+    fn over(count: usize) -> Self {
+        return Self {
+            order: vec![Self::UNREACHED; count],
+            lowest: vec![0; count],
+            open: vec![false; count],
+            component: vec![0; count],
+            path: Vec::new(),
+            next_order: 0,
+            next_component: 0,
+        };
+    }
+
+    /// Whether the walk has already reached `node`.
+    fn is_open_or_done(&self, node: usize) -> bool {
+        return self.order_of(node) != Self::UNREACHED;
+    }
+
+    /// The order the walk reached `node` in.
+    fn order_of(&self, node: usize) -> usize {
+        return self.order.get(node).copied().unwrap_or(Self::UNREACHED);
+    }
+
+    /// The oldest order `node` can reach.
+    fn lowest_of(&self, node: usize) -> usize {
+        return self.lowest.get(node).copied().unwrap_or(Self::UNREACHED);
+    }
+
+    /// Give `node` its order and hold it open.
+    fn open(&mut self, node: usize) {
+        if let Some(order) = self.order.get_mut(node) {
+            *order = self.next_order;
+        }
+        if let Some(lowest) = self.lowest.get_mut(node) {
+            *lowest = self.next_order;
+        }
+        if let Some(open) = self.open.get_mut(node) {
+            *open = true;
+        }
+        self.next_order += 1;
+        self.path.push(node);
+    }
+
+    /// Take the edge from `node` to `next`.
+    ///
+    /// An unreached `next` is opened and queued on `work`. A `next` the walk
+    /// still holds open closes a loop, so `node` inherits its order.
+    fn step(&mut self, node: usize, next: usize, work: &mut Vec<(usize, usize)>) {
+        if !self.is_open_or_done(next) {
+            self.open(next);
+            work.push((next, 0));
+            return;
+        }
+        if self.open.get(next).copied().unwrap_or(false) {
+            self.lower(node, self.order_of(next));
+        }
+    }
+
+    /// Carry what `node` reached up to the `parent` the walk came from.
+    fn carry_up(&mut self, parent: usize, node: usize) {
+        self.lower(parent, self.lowest_of(node));
+    }
+
+    /// Lower the oldest order `node` can reach to `order`, when that is older.
+    fn lower(&mut self, node: usize, order: usize) {
+        if let Some(lowest) = self.lowest.get_mut(node) {
+            *lowest = (*lowest).min(order);
+        }
+    }
+
+    /// Close the component `node` roots, when it roots one.
+    ///
+    /// A node that reaches nothing older than itself roots a component holding
+    /// every node opened since.
+    fn close(&mut self, node: usize) {
+        if self.lowest_of(node) != self.order_of(node) {
+            return;
+        }
+        while let Some(member) = self.path.pop() {
+            if let Some(open) = self.open.get_mut(member) {
+                *open = false;
+            }
+            if let Some(component) = self.component.get_mut(member) {
+                *component = self.next_component;
+            }
+            if member == node {
+                break;
+            }
+        }
+        self.next_component += 1;
     }
 }
 
@@ -191,11 +401,14 @@ fn collect_held(ty: &RustType, out: &mut BTreeSet<String>) {
 }
 
 /// Box the named types inside `ty` that hold `owner` back.
+///
+/// A type that holds itself is one node and one component, so it needs no case
+/// of its own.
 fn box_held(ty: &mut RustType, owner: &str, graph: &Graph) {
     match ty {
         RustType::Named(name) => {
             let target = canonical(name);
-            if target == owner || graph.reaches(&target, owner) {
+            if graph.on_a_cycle(&target, owner) {
                 let inner = std::mem::replace(ty, RustType::Bool);
                 *ty = RustType::Boxed(Box::new(inner));
             }
