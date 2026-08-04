@@ -45,7 +45,12 @@ paths:
   /session:
     get:
       operationId: getSession
-      summary: Fetch session data, which an API key cookie protects.
+      # A description over several lines, so the doc renders as `///` lines and
+      # not as one `/** */` block wedged between them.
+      description: |
+        Fetch session data, which an API key cookie protects.
+
+        The cookie is set at login and expires with the session.
       security:
         - apiKeyCookie: []
       responses:

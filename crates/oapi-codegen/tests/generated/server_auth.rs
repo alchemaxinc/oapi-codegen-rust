@@ -33,7 +33,9 @@ pub enum GetReportsResponse {
     Ok(Message),
 }
 
-/// Fetch session data, which an API key cookie protects.
+/** Fetch session data, which an API key cookie protects.
+
+The cookie is set at login and expires with the session.*/
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetSessionResponse {
     /// The session data.
@@ -84,6 +86,8 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
     ) -> impl std::future::Future<Output = GetReportsResponse> + Send;
     /// Fetch session data, which an API key cookie protects.
+    ///
+    /// The cookie is set at login and expires with the session.
     ///
     /// # Security
     ///
