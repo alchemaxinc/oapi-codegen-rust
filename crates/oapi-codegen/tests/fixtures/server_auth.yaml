@@ -1,0 +1,125 @@
+openapi: 3.0.3
+info:
+  title: Authenticated server
+  version: 1.0.0
+security:
+  - bearerAuth: []
+paths:
+  /profile:
+    get:
+      operationId: getProfile
+      summary: Fetch the caller's profile, which the global bearer scheme protects.
+      responses:
+        "200":
+          description: The caller's profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /public:
+    get:
+      operationId: getPublic
+      summary: Fetch a public resource, which needs no credential.
+      security: []
+      responses:
+        "200":
+          description: The public resource.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /reports:
+    get:
+      operationId: getReports
+      # Two schemes at once, so the note lists both.
+      security:
+        - apiKeyHeader: []
+          basicAuth: []
+      responses:
+        "200":
+          description: The reports.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /session:
+    get:
+      operationId: getSession
+      summary: Fetch session data, which an API key cookie protects.
+      security:
+        - apiKeyCookie: []
+      responses:
+        "200":
+          description: The session data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /search:
+    get:
+      operationId: search
+      summary: Search, which an API key query parameter protects.
+      security:
+        - apiKeyQuery: []
+      responses:
+        "200":
+          description: The search results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /audit:
+    get:
+      operationId: getAudit
+      summary: Fetch the audit log, which OAuth2 protects.
+      # The client refuses to send an OAuth2 credential. A server reads
+      # credentials instead of sending them, so this only names the scheme.
+      security:
+        - oauth2: []
+      responses:
+        "200":
+          description: The audit log.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: A JSON Web Token passed as a bearer credential.
+    basicAuth:
+      type: http
+      scheme: basic
+      description: HTTP basic username and password.
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key sent in a request header.
+    apiKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
+      description: API key sent as a query parameter.
+    apiKeyCookie:
+      type: apiKey
+      in: cookie
+      name: SESSION
+      description: API key sent as a cookie.
+    oauth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://example.com/token
+          scopes: {}
+  schemas:
+    Message:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string

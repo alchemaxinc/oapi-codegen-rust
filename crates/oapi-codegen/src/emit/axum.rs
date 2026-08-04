@@ -5,6 +5,7 @@ use quote::format_ident;
 use quote::quote;
 
 use crate::emit::doc_attr;
+use crate::emit::doc_lines;
 use crate::emit::emit_type;
 use crate::error::Result;
 use crate::ir::BodyKind;
@@ -23,6 +24,8 @@ use crate::ir::ResponseCase;
 use crate::ir::ResponseHeader;
 use crate::ir::ResponseStatus;
 use crate::ir::RustType;
+use crate::ir::SecurityScheme;
+use crate::ir::SecuritySchemeKind;
 use crate::ir::Service;
 use crate::naming::operations::axum_handler_name;
 
@@ -127,7 +130,7 @@ fn emit_trait(service: &Service) -> Result<TokenStream> {
     let mut methods = Vec::with_capacity(service.operations.len());
     for operation in &service.operations {
         let name = operation.name.to_token();
-        let doc = doc_attr(&operation.doc);
+        let doc = method_doc(operation, &service.security_schemes);
         let response = operation.response_enum.to_token();
         let args = emit_method_args(operation)?;
         methods.push(quote! {
@@ -141,6 +144,62 @@ fn emit_trait(service: &Service) -> Result<TokenStream> {
             #(#methods)*
         }
     });
+}
+
+/// The doc comment of a trait method: the operation's own description, then the
+/// security the document requires of it.
+///
+/// The generator emits no check for that security, because verifying a
+/// credential needs application knowledge it does not have: which key, which
+/// issuer, and which claim names which user. Naming the requirement is what it
+/// can do, so an implementer does not have to read the document to tell a public
+/// operation from a protected one.
+fn method_doc(operation: &Operation, schemes: &[SecurityScheme]) -> TokenStream {
+    if operation.security.is_empty() {
+        return doc_attr(&operation.doc);
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(text) = &operation.doc {
+        lines.push(text.clone());
+        lines.push(String::new());
+    }
+    lines.push("# Security".to_owned());
+    lines.push(String::new());
+    lines.push("The document requires this operation to authenticate with:".to_owned());
+    lines.push(String::new());
+    for key in &operation.security {
+        lines.push(format!("- {}", requirement_line(key, schemes)));
+    }
+    lines.push(String::new());
+    lines.push("This generator emits no check. Read the credential from the request and verify it here.".to_owned());
+    return doc_lines(&lines);
+}
+
+/// One security requirement, named and located.
+///
+/// Where the credential sits is the part a server implementation needs, because
+/// it has to read the credential itself.
+fn requirement_line(key: &str, schemes: &[SecurityScheme]) -> String {
+    let Some(scheme) = schemes.iter().find(|scheme| return scheme.key == key) else {
+        // The document names a scheme it never declares. The client rejects
+        // that; a server has nothing to reject, so the doc says what it knows.
+        return format!("`{key}`, which `components.securitySchemes` does not declare");
+    };
+    let location = match &scheme.kind {
+        SecuritySchemeKind::HttpBearer => "a bearer token in the `Authorization` header".to_owned(),
+        SecuritySchemeKind::HttpBasic => "basic credentials in the `Authorization` header".to_owned(),
+        SecuritySchemeKind::ApiKeyHeader(name) => format!("an API key in the `{name}` header"),
+        SecuritySchemeKind::ApiKeyQuery(name) => format!("an API key in the `{name}` query parameter"),
+        SecuritySchemeKind::ApiKeyCookie(name) => format!("an API key in the `{name}` cookie"),
+        // The reason held here is written for the client, which refuses to send
+        // such a credential. A server reads credentials rather than sending
+        // them, so the key alone is what this can honestly state.
+        SecuritySchemeKind::Unsupported(_) => {
+            return format!("`{key}`, a scheme this generator has no built-in support for");
+        }
+    };
+    return format!("`{key}`: {location}");
 }
 
 /// The typed arguments (path parameters, query struct, header struct, then JSON
@@ -891,4 +950,65 @@ fn request_content_type_test(kind: BodyKind) -> TokenStream {
             unreachable!("multipart never participates in content-type negotiation")
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::naming::Case;
+    use crate::naming::to_ident;
+
+    fn scheme(key: &str, kind: SecuritySchemeKind) -> SecurityScheme {
+        return SecurityScheme {
+            key: key.to_owned(),
+            field: to_ident(key, Case::Snake),
+            kind,
+            doc: None,
+        };
+    }
+
+    #[test]
+    fn every_scheme_kind_says_where_the_credential_sits() {
+        let schemes = vec![
+            scheme("bearerAuth", SecuritySchemeKind::HttpBearer),
+            scheme("basicAuth", SecuritySchemeKind::HttpBasic),
+            scheme("headerKey", SecuritySchemeKind::ApiKeyHeader("X-API-Key".to_owned())),
+            scheme("queryKey", SecuritySchemeKind::ApiKeyQuery("api_key".to_owned())),
+            scheme("cookieKey", SecuritySchemeKind::ApiKeyCookie("SESSION".to_owned())),
+        ];
+        let cases = [
+            (
+                "bearerAuth",
+                "`bearerAuth`: a bearer token in the `Authorization` header",
+            ),
+            (
+                "basicAuth",
+                "`basicAuth`: basic credentials in the `Authorization` header",
+            ),
+            ("headerKey", "`headerKey`: an API key in the `X-API-Key` header"),
+            ("queryKey", "`queryKey`: an API key in the `api_key` query parameter"),
+            ("cookieKey", "`cookieKey`: an API key in the `SESSION` cookie"),
+        ];
+        for (key, expected) in cases {
+            assert_eq!(requirement_line(key, &schemes), expected);
+        }
+    }
+
+    /// The client rejects a scheme the document never declares. A server has
+    /// nothing to reject, so the note has to stand on the key alone.
+    #[test]
+    fn an_undeclared_scheme_is_still_named() {
+        let line = requirement_line("ghost", &[]);
+        assert_eq!(line, "`ghost`, which `components.securitySchemes` does not declare");
+    }
+
+    #[test]
+    fn an_unsupported_scheme_drops_the_client_side_reason() {
+        let schemes = vec![scheme(
+            "oauth2",
+            SecuritySchemeKind::Unsupported("the client cannot send this".to_owned()),
+        )];
+        let line = requirement_line("oauth2", &schemes);
+        assert_eq!(line, "`oauth2`, a scheme this generator has no built-in support for");
+    }
 }

@@ -224,6 +224,23 @@ pub(crate) fn doc_attr(doc: &Option<String>) -> TokenStream {
     return tokens;
 }
 
+/// Render one doc attribute per line, which rustdoc reads as one comment.
+///
+/// A blank line stays blank, so a caller can separate paragraphs with one.
+pub(crate) fn doc_lines(lines: &[String]) -> TokenStream {
+    let attrs = lines.iter().map(|line| {
+        // Leading space matches the `/// text` desugaring rustfmt produces. A
+        // blank line takes none, so no trailing space reaches the output.
+        let spaced = if line.is_empty() {
+            String::new()
+        } else {
+            format!(" {line}")
+        };
+        return quote! { #[doc = #spaced] };
+    });
+    return quote! { #(#attrs)* };
+}
+
 /// Render a Rust type expression.
 pub(crate) fn emit_type(ty: &RustType) -> Result<TokenStream> {
     let tokens = match ty {

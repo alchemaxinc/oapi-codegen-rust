@@ -110,6 +110,9 @@ mod generated {
     pub mod server_text_body;
     #[path = "server_urls.rs"]
     pub mod server_urls;
+
+    #[path = "server_auth.rs"]
+    pub mod server_auth;
     #[path = "server_xfile_refs.rs"]
     pub mod server_xfile_refs;
     #[path = "string_enum.rs"]
