@@ -8,11 +8,11 @@
 //! # What counts as holding a type
 //!
 //! A field holds its type when the size of that type counts towards the size of
-//! the struct. `Vec<T>` and `HashMap<String, T>` keep their elements on the
-//! heap, so they hold nothing and already break a cycle. `Option<T>` stores its
-//! `T` inline, so `Option<Node>` inside `Node` is just as infinite as `Node`.
-//! That last point is easy to get wrong: making a recursive property optional
-//! does not fix anything.
+//! the struct. `Vec<T>`, `HashMap<String, T>` and `Box<T>` keep what they hold
+//! on the heap, so they hold nothing and already break a cycle. `Option<T>`
+//! stores its `T` inline, so `Option<Node>` inside `Node` is just as infinite as
+//! `Node`. That last point is easy to get wrong: making a recursive property
+//! optional does not fix anything.
 //!
 //! # Which edge gets the box
 //!
@@ -176,13 +176,16 @@ impl Graph {
 
 /// Add every named type that `ty` holds to `out`.
 ///
-/// `Vec` and `Map` put their element on the heap, so the walk stops there.
+/// `Vec`, `Map` and `Box` put what they hold on the heap, so the walk stops at
+/// each of them. `Box` counts here as well as the other two, so a run over a
+/// module this pass has already boxed sees the cycle as broken and changes
+/// nothing.
 fn collect_held(ty: &RustType, out: &mut BTreeSet<String>) {
     match ty {
         RustType::Named(name) => {
             out.insert(canonical(name));
         }
-        RustType::Option(inner) | RustType::Boxed(inner) => collect_held(inner, out),
+        RustType::Option(inner) => collect_held(inner, out),
         _ => {}
     }
 }
@@ -419,5 +422,24 @@ mod tests {
         let before = module.clone();
         box_recursive_types(&mut module).expect("no alias cycle in this module");
         assert_eq!(module, before);
+    }
+
+    /// An edge that is already boxed breaks the cycle, so nothing else on it is
+    /// boxed.
+    ///
+    /// A `Box` is heap indirection, so a boxed field holds nothing. A walk that
+    /// stepped through a `Box` would still see the old cycle and would box a
+    /// second edge that needs no box.
+    #[test]
+    fn an_existing_box_breaks_the_cycle_for_every_other_edge() {
+        let mut module = Module {
+            items: vec![
+                one_field("Parent", "child", boxed(named("Kid"))),
+                one_field("Kid", "parent", named("Parent")),
+            ],
+        };
+        box_recursive_types(&mut module).expect("no alias cycle in this module");
+        assert_eq!(field_type(&module, "Parent"), boxed(named("Kid")));
+        assert_eq!(field_type(&module, "Kid"), named("Parent"));
     }
 }
