@@ -1,175 +1,145 @@
 //! Compile-checks every *supported* generated output and exercises a few
 //! representative types at runtime.
 //!
-//! Each module `include!`s a generated file so the test crate fails to build if
-//! any emitted code stops compiling against its real dependencies (serde,
-//! chrono, uuid, serde_json, axum). The module set is kept in lock-step with the
-//! coverage matrix by `generated_outputs_are_compile_checked` in
+//! Each module reads a generated file with `#[path]` so the test crate fails to
+//! build if any emitted code stops compiling against its real dependencies
+//! (serde, chrono, uuid, serde_json, axum). The module set is kept in lock-step
+//! with the coverage matrix by `generated_outputs_are_compile_checked` in
 //! `tests/coverage.rs`.
 //!
-//! The generated modules live under `mod generated`, which carries the only lint
-//! exceptions in this file: emitted code is ordinary idiomatic Rust (tail
-//! expressions, plus types these tests never construct), and the workspace's
-//! `implicit_return`/`dead_code` rules are about first-party source, not
-//! generated output. The handwritten tests below are linted normally.
+//! `#[path]` and not `include!`, because each generated file opens with an inner
+//! attribute that turns off every lint that is about first-party source, and
+//! `include!` cannot carry one. So this file needs no lint exceptions of its own.
 
+mod generated {
+    #[path = "allof_merge.rs"]
+    pub mod allof_merge;
+    #[path = "anyof_untagged.rs"]
+    pub mod anyof_untagged;
+    #[path = "array_types.rs"]
+    pub mod array_types;
+    #[path = "client_auth.rs"]
+    pub mod client_auth;
+    #[path = "client_form_response.rs"]
+    pub mod client_form_response;
+    #[path = "client_multipart_request.rs"]
+    pub mod client_multipart_request;
+    #[path = "client_negotiated_request.rs"]
+    pub mod client_negotiated_request;
+    #[path = "client_negotiated_response.rs"]
+    pub mod client_negotiated_response;
+    #[path = "client_widgets.rs"]
+    pub mod client_widgets;
+    #[path = "combined_response_name_collision.rs"]
+    pub mod combined_response_name_collision;
+    #[path = "combined_server_client.rs"]
+    pub mod combined_server_client;
+    #[path = "combined_x_rust_derive.rs"]
+    pub mod combined_x_rust_derive;
+    #[path = "ext_vendor_extensions.rs"]
+    pub mod ext_vendor_extensions;
+    #[path = "ext_x_rust_derive.rs"]
+    pub mod ext_x_rust_derive;
+    #[path = "ext_x_rust_type.rs"]
+    pub mod ext_x_rust_type;
+    #[path = "freeform_any.rs"]
+    pub mod freeform_any;
+    #[path = "integer_formats.rs"]
+    pub mod integer_formats;
+    #[path = "map_alias.rs"]
+    pub mod map_alias;
+    #[path = "metadata_docs.rs"]
+    pub mod metadata_docs;
+    #[path = "nullable.rs"]
+    pub mod nullable;
+    #[path = "number_formats.rs"]
+    pub mod number_formats;
+    #[path = "object_additional_properties.rs"]
+    pub mod object_additional_properties;
+    #[path = "object_deny_unknown_fields.rs"]
+    pub mod object_deny_unknown_fields;
+    #[path = "object_nested_inline.rs"]
+    pub mod object_nested_inline;
+    #[path = "object_optional_required.rs"]
+    pub mod object_optional_required;
+    #[path = "oneof_discriminator.rs"]
+    pub mod oneof_discriminator;
+    #[path = "oneof_untagged.rs"]
+    pub mod oneof_untagged;
+    #[path = "primitive_scalars.rs"]
+    pub mod primitive_scalars;
+    #[path = "ref_local.rs"]
+    pub mod ref_local;
+    #[path = "server_component_body_ref.rs"]
+    pub mod server_component_body_ref;
+    #[path = "server_component_param_ref.rs"]
+    pub mod server_component_param_ref;
+    #[path = "server_component_param_ref_pet.rs"]
+    pub mod server_component_param_ref_pet;
+    #[path = "server_cookie_params.rs"]
+    pub mod server_cookie_params;
+    #[path = "server_default_range_responses.rs"]
+    pub mod server_default_range_responses;
+    #[path = "server_filtering.rs"]
+    pub mod server_filtering;
+    #[path = "server_form_body.rs"]
+    pub mod server_form_body;
+    #[path = "server_header_params.rs"]
+    pub mod server_header_params;
+    #[path = "server_json_charset.rs"]
+    pub mod server_json_charset;
+    #[path = "server_multi_content_request.rs"]
+    pub mod server_multi_content_request;
+    #[path = "server_multi_content_response.rs"]
+    pub mod server_multi_content_response;
+    #[path = "server_multipart_body.rs"]
+    pub mod server_multipart_body;
+    #[path = "server_petstore.rs"]
+    pub mod server_petstore;
+    #[path = "server_prune.rs"]
+    pub mod server_prune;
+    #[path = "server_query_params.rs"]
+    pub mod server_query_params;
+    #[path = "server_refs.rs"]
+    pub mod server_refs;
+    #[path = "server_response_headers.rs"]
+    pub mod server_response_headers;
+    #[path = "server_text_body.rs"]
+    pub mod server_text_body;
+    #[path = "server_urls.rs"]
+    pub mod server_urls;
+    #[path = "server_xfile_refs.rs"]
+    pub mod server_xfile_refs;
+    #[path = "string_enum.rs"]
+    pub mod string_enum;
+    #[path = "string_formats.rs"]
+    pub mod string_formats;
+    #[path = "type_name_collisions.rs"]
+    pub mod type_name_collisions;
+}
+
+/// Stand-in for the foreign types the `ext_x_rust_derive` fixture points its
+/// `x-rust-type` targets at (`crate::restricted`).
+///
+/// Each type here really does lack the traits its `x-rust-derive` key leaves out.
+/// That makes the fixture a proof and not a snapshot: if the generator emits a
+/// derive a target cannot satisfy, this test crate stops building.
 #[allow(
     dead_code,
-    clippy::implicit_return,
-    clippy::collapsible_if,
-    reason = "generated output: ordinary idiomatic Rust the workspace's implicit_return/dead_code rules don't target, and collapsible_if is emitted control flow this test doesn't need collapsed"
+    reason = "test-only stand-in for the x-rust-derive fixture's foreign targets; nothing here is constructed"
 )]
-mod generated {
-    pub mod allof_merge {
-        include!("generated/allof_merge.rs");
-    }
-    pub mod anyof_untagged {
-        include!("generated/anyof_untagged.rs");
-    }
-    pub mod array_types {
-        include!("generated/array_types.rs");
-    }
-    pub mod ext_vendor_extensions {
-        include!("generated/ext_vendor_extensions.rs");
-    }
-    pub mod ext_x_rust_type {
-        include!("generated/ext_x_rust_type.rs");
-    }
-    pub mod freeform_any {
-        include!("generated/freeform_any.rs");
-    }
-    pub mod integer_formats {
-        include!("generated/integer_formats.rs");
-    }
-    pub mod map_alias {
-        include!("generated/map_alias.rs");
-    }
-    pub mod metadata_docs {
-        include!("generated/metadata_docs.rs");
-    }
-    pub mod nullable {
-        include!("generated/nullable.rs");
-    }
-    pub mod number_formats {
-        include!("generated/number_formats.rs");
-    }
-    pub mod object_additional_properties {
-        include!("generated/object_additional_properties.rs");
-    }
-    pub mod object_deny_unknown_fields {
-        include!("generated/object_deny_unknown_fields.rs");
-    }
-    pub mod object_nested_inline {
-        include!("generated/object_nested_inline.rs");
-    }
-    pub mod object_optional_required {
-        include!("generated/object_optional_required.rs");
-    }
-    pub mod oneof_discriminator {
-        include!("generated/oneof_discriminator.rs");
-    }
-    pub mod oneof_untagged {
-        include!("generated/oneof_untagged.rs");
-    }
-    pub mod primitive_scalars {
-        include!("generated/primitive_scalars.rs");
-    }
-    pub mod ref_local {
-        include!("generated/ref_local.rs");
-    }
-    pub mod string_enum {
-        include!("generated/string_enum.rs");
-    }
-    pub mod string_formats {
-        include!("generated/string_formats.rs");
-    }
-    pub mod type_name_collisions {
-        include!("generated/type_name_collisions.rs");
-    }
-    pub mod server_petstore {
-        include!("generated/server_petstore.rs");
-    }
-    pub mod server_refs {
-        include!("generated/server_refs.rs");
-    }
-    pub mod server_query_params {
-        include!("generated/server_query_params.rs");
-    }
-    pub mod server_header_params {
-        include!("generated/server_header_params.rs");
-    }
-    pub mod server_default_range_responses {
-        include!("generated/server_default_range_responses.rs");
-    }
-    pub mod server_cookie_params {
-        include!("generated/server_cookie_params.rs");
-    }
-    pub mod server_component_param_ref {
-        include!("generated/server_component_param_ref.rs");
-    }
-    pub mod server_component_body_ref {
-        include!("generated/server_component_body_ref.rs");
-    }
-    pub mod server_component_param_ref_pet {
-        include!("generated/server_component_param_ref_pet.rs");
-    }
-    pub mod server_xfile_refs {
-        include!("generated/server_xfile_refs.rs");
-    }
-    pub mod server_response_headers {
-        include!("generated/server_response_headers.rs");
-    }
-    pub mod server_text_body {
-        include!("generated/server_text_body.rs");
-    }
-    pub mod server_form_body {
-        include!("generated/server_form_body.rs");
-    }
-    pub mod server_multipart_body {
-        include!("generated/server_multipart_body.rs");
-    }
-    pub mod server_json_charset {
-        include!("generated/server_json_charset.rs");
-    }
-    pub mod server_multi_content_request {
-        include!("generated/server_multi_content_request.rs");
-    }
-    pub mod server_multi_content_response {
-        include!("generated/server_multi_content_response.rs");
-    }
-    pub mod server_prune {
-        include!("generated/server_prune.rs");
-    }
-    pub mod server_filtering {
-        include!("generated/server_filtering.rs");
-    }
-    pub mod server_urls {
-        include!("generated/server_urls.rs");
-    }
-    pub mod client_widgets {
-        include!("generated/client_widgets.rs");
-    }
-    pub mod client_auth {
-        include!("generated/client_auth.rs");
-    }
-    pub mod client_multipart_request {
-        include!("generated/client_multipart_request.rs");
-    }
-    pub mod client_negotiated_request {
-        include!("generated/client_negotiated_request.rs");
-    }
-    pub mod client_negotiated_response {
-        include!("generated/client_negotiated_response.rs");
-    }
-    pub mod client_form_response {
-        include!("generated/client_form_response.rs");
-    }
-    pub mod combined_server_client {
-        include!("generated/combined_server_client.rs");
-    }
-    pub mod combined_response_name_collision {
-        include!("generated/combined_response_name_collision.rs");
-    }
+mod restricted {
+    /// Declares `Debug` alone.
+    #[derive(serde::Serialize, serde::Deserialize, Debug)]
+    pub struct Opaque(pub String);
+
+    /// Declares `Debug` and `Clone`.
+    #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+    pub struct Handle(pub String);
+
+    /// Declares nothing. Serde only.
+    #[derive(serde::Serialize, serde::Deserialize)]
+    pub struct Nothing(pub String);
 }
 
 /// Stand-in for the models crate the `server_refs` fixture's `import-mapping`

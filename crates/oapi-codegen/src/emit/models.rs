@@ -11,13 +11,36 @@ use crate::ir::Deprecation;
 use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
+use crate::ir::ForeignDerives;
 use crate::ir::Item;
 use crate::ir::StringVariant;
 use crate::ir::Struct;
 use crate::ir::UnionVariant;
 
-/// Which serde traits a generated model derives, alongside the always-present
-/// `Debug, Clone, PartialEq`.
+/// The full derive set for one generated model: its serde traits, plus which of
+/// `Debug`, `Clone`, `PartialEq` the model can carry.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ModelDerives {
+    /// Which serde traits the model's API direction needs.
+    pub serde: SerdeDerives,
+    /// Which of the three non-serde traits every foreign type the model reaches
+    /// implements. See [`ForeignDerives`].
+    pub foreign: ForeignDerives,
+}
+
+impl ModelDerives {
+    /// Both serde traits and all three non-serde traits — the derive set the
+    /// generator emitted for every model before either narrowing existed. Used
+    /// when a model's usage direction is unknown, as in models-only generation.
+    pub(crate) fn both() -> Self {
+        return Self {
+            serde: SerdeDerives::both(),
+            foreign: ForeignDerives::default(),
+        };
+    }
+}
+
+/// Which serde traits a generated model derives.
 ///
 /// A type is only ever serialized in the direction its API position uses: a
 /// server serializes response bodies and deserializes request bodies, a client
@@ -46,33 +69,86 @@ impl SerdeDerives {
     }
 }
 
-/// Render a single top-level item with the given serde derive set.
-pub(crate) fn emit_item(item: &Item, serde: SerdeDerives) -> Result<TokenStream> {
+/// Render a single top-level item with the given derive set.
+pub(crate) fn emit_item(item: &Item, derives: ModelDerives) -> Result<TokenStream> {
     let tokens = match item {
-        Item::Struct(strukt) => emit_struct(strukt, serde)?,
-        Item::Enum(enom) => emit_enum(enom, serde)?,
+        Item::Struct(strukt) => emit_struct(strukt, derives)?,
+        Item::Enum(enom) => emit_enum(enom, derives)?,
+        // An alias derives nothing. `type X = Y;` carries no derive, so a foreign
+        // type reached through one constrains the models that name the alias and
+        // not the alias itself.
         Item::Alias(alias) => emit_alias(alias)?,
     };
     return Ok(tokens);
 }
 
 /// The derive list applied to a generated type: the requested serde traits
-/// followed by the always-present `Debug, Clone, PartialEq`.
-fn derives(serde: SerdeDerives) -> TokenStream {
+/// followed by each of `Debug`, `Clone`, `PartialEq` that every foreign type the
+/// model reaches implements.
+///
+/// A derive the model cannot satisfy is dropped rather than emitted and left to
+/// fail, because the failure lands on generated code the consumer must not edit.
+/// Dropping it costs the consumer a trait on that one model, and they can still
+/// write the impl by hand.
+fn derive_attr(derives: ModelDerives) -> TokenStream {
     let mut parts: Vec<TokenStream> = Vec::new();
-    if serde.serialize {
+    if derives.serde.serialize {
         parts.push(quote! { serde::Serialize });
     }
-    if serde.deserialize {
+    if derives.serde.deserialize {
         parts.push(quote! { serde::Deserialize });
     }
-    parts.push(quote! { Debug });
-    parts.push(quote! { Clone });
-    parts.push(quote! { PartialEq });
+    if derives.foreign.debug {
+        parts.push(quote! { Debug });
+    }
+    if derives.foreign.clone {
+        parts.push(quote! { Clone });
+    }
+    if derives.foreign.partial_eq {
+        parts.push(quote! { PartialEq });
+    }
+    // An empty `#[derive()]` is valid Rust, but it is noise in output a human
+    // reads, so emit nothing at all when every trait was dropped.
+    if parts.is_empty() {
+        return quote! {};
+    }
     return quote! {
         #[derive(#(#parts),*)]
     };
 }
+
+/// The derive attribute for a generated type that carries no serde trait: the
+/// intersection of what the emitter wants and what the type's contents allow.
+///
+/// Both masks are a [`ForeignDerives`], which reads oddly for the request side but
+/// is exactly the right shape. The two are the same three flags, and one is
+/// intersected with the other. A header struct wants `Debug` and `Clone` and never
+/// `PartialEq`, so it passes that as the request.
+pub(crate) fn plain_derive_attr(requested: ForeignDerives, allowed: ForeignDerives) -> TokenStream {
+    return derive_attr(ModelDerives {
+        serde: SerdeDerives {
+            serialize: false,
+            deserialize: false,
+        },
+        foreign: requested.intersect(allowed),
+    });
+}
+
+/// The request mask for a type deriving `Debug` and `Clone` only, such as an
+/// operation's header or cookie input struct. Those are read field by field and
+/// never compared.
+pub(crate) const DEBUG_AND_CLONE: ForeignDerives = ForeignDerives {
+    debug: true,
+    clone: true,
+    partial_eq: false,
+};
+
+/// The request mask for a type deriving all three, such as a response enum.
+pub(crate) const DEBUG_CLONE_AND_EQ: ForeignDerives = ForeignDerives {
+    debug: true,
+    clone: true,
+    partial_eq: true,
+};
 
 /// Render a `#[deprecated]` / `#[deprecated(note = "...")]` attribute, if any.
 fn deprecated_attr(deprecated: &Option<Deprecation>) -> TokenStream {
@@ -84,11 +160,12 @@ fn deprecated_attr(deprecated: &Option<Deprecation>) -> TokenStream {
 }
 
 /// Render a `struct` item with the given serde derive set.
-pub(crate) fn emit_struct(strukt: &Struct, serde: SerdeDerives) -> Result<TokenStream> {
+pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<TokenStream> {
     let name = strukt.name.to_token();
     let doc = doc_attr(&strukt.doc);
     let deprecated = deprecated_attr(&strukt.deprecated);
-    let derives = derives(serde);
+    let serde = derives.serde;
+    let derive_attr = derive_attr(derives);
     let has_serde = serde.serialize || serde.deserialize;
 
     let mut fields = Vec::with_capacity(strukt.fields.len());
@@ -126,7 +203,7 @@ pub(crate) fn emit_struct(strukt: &Struct, serde: SerdeDerives) -> Result<TokenS
 
     return Ok(quote! {
         #doc
-        #derives
+        #derive_attr
         #deny_unknown
         #deprecated
         pub struct #name {
@@ -173,11 +250,11 @@ fn emit_field(field: &Field, has_serde: bool) -> Result<TokenStream> {
 
 /// Render an `enum` item (string enum or untagged union) with the given serde
 /// derive set.
-pub(crate) fn emit_enum(enom: &Enum, serde: SerdeDerives) -> Result<TokenStream> {
+pub(crate) fn emit_enum(enom: &Enum, derives: ModelDerives) -> Result<TokenStream> {
     let name = enom.name.to_token();
     let doc = doc_attr(&enom.doc);
     let deprecated = deprecated_attr(&enom.deprecated);
-    let derives = derives(serde);
+    let derive_attr = derive_attr(derives);
 
     let tokens = match &enom.kind {
         EnumKind::Strings(variants) => {
@@ -185,7 +262,7 @@ pub(crate) fn emit_enum(enom: &Enum, serde: SerdeDerives) -> Result<TokenStream>
             let rendered: Vec<TokenStream> = rendered.collect();
             quote! {
                 #doc
-                #derives
+                #derive_attr
                 #deprecated
                 pub enum #name {
                     #(#rendered)*
@@ -199,7 +276,7 @@ pub(crate) fn emit_enum(enom: &Enum, serde: SerdeDerives) -> Result<TokenStream>
             }
             quote! {
                 #doc
-                #derives
+                #derive_attr
                 #[serde(untagged)]
                 #deprecated
                 pub enum #name {

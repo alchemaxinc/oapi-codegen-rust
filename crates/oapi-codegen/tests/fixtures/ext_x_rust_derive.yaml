@@ -1,0 +1,72 @@
+openapi: "3.0.3"
+info:
+  title: x-rust-derive extension
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # Declares Debug only, so every model that reaches it loses Clone and
+    # PartialEq. Lowered as an alias, which itself derives nothing.
+    Opaque:
+      type: string
+      x-rust-type: crate::restricted::Opaque
+      x-rust-derive: [Debug]
+    # Declares Debug and Clone, so a model that reaches only this one keeps both
+    # and loses PartialEq.
+    Handle:
+      type: string
+      x-rust-type: crate::restricted::Handle
+      x-rust-derive: [Debug, Clone]
+    # Reaches the restricted target through the alias above.
+    HoldsOpaque:
+      type: object
+      required: [value]
+      properties:
+        value:
+          $ref: "#/components/schemas/Opaque"
+    # One hop further up the reference graph. The constraint reaches here too.
+    HoldsHolder:
+      type: object
+      required: [inner]
+      properties:
+        inner:
+          $ref: "#/components/schemas/HoldsHolderInner"
+    HoldsHolderInner:
+      type: object
+      required: [held]
+      properties:
+        held:
+          $ref: "#/components/schemas/HoldsOpaque"
+    # Reaches Handle only, so it keeps Debug and Clone.
+    HoldsHandle:
+      type: object
+      required: [value]
+      properties:
+        value:
+          $ref: "#/components/schemas/Handle"
+    # Reaches both, so the two declarations intersect down to Debug alone.
+    HoldsBoth:
+      type: object
+      required: [opaque, handle]
+      properties:
+        opaque:
+          $ref: "#/components/schemas/Opaque"
+        handle:
+          $ref: "#/components/schemas/Handle"
+    # An inline target declaring nothing at all. Every trait is dropped, so the
+    # model carries the serde derives and no others.
+    HoldsNothing:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          x-rust-type: crate::restricted::Nothing
+          x-rust-derive: []
+    # Reaches no foreign type, so it is untouched by the feature.
+    Unconstrained:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string

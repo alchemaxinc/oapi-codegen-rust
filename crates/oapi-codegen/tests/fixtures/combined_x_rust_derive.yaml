@@ -1,0 +1,93 @@
+openapi: 3.0.3
+info:
+  title: Restricted foreign types across a server and a client
+  version: 1.0.0
+paths:
+  # A response body, so the response enum carrying the model must narrow the
+  # same way the model did.
+  /things:
+    get:
+      operationId: listThings
+      summary: A response body whose model drops Clone and PartialEq.
+      responses:
+        "200":
+          description: The things.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thing"
+    post:
+      operationId: createThing
+      summary: A request body of the same model.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Thing"
+      responses:
+        "201":
+          description: The created thing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thing"
+  # One response offering two content types, so the negotiated body enum must
+  # narrow as well.
+  /report:
+    get:
+      operationId: getReport
+      summary: A negotiated response holding the restricted model.
+      responses:
+        "200":
+          description: The report, as JSON or plain text.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thing"
+            text/plain:
+              schema:
+                type: string
+  # A multipart request, for the multipart struct. A part must be a scalar or a
+  # binary string, and that rule resolves a `$ref` to its underlying scalar
+  # before any `x-rust-type` on it is read, so no part can reach a foreign type
+  # today. The operation is here so the struct stays covered if that changes.
+  /upload:
+    post:
+      operationId: upload
+      summary: A multipart request beside the restricted models.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadRequest"
+      responses:
+        "204":
+          description: The upload was stored.
+components:
+  schemas:
+    # Declares Debug alone.
+    Opaque:
+      type: string
+      x-rust-type: crate::restricted::Opaque
+      x-rust-derive: [Debug]
+    # Reaches Opaque, so it keeps Debug only. Every per-operation type carrying
+    # this model must drop the same two traits, or the emitted code does not
+    # compile.
+    Thing:
+      type: object
+      required: [id, opaque]
+      properties:
+        id:
+          type: string
+        opaque:
+          $ref: "#/components/schemas/Opaque"
+    UploadRequest:
+      type: object
+      required: [opaque, note]
+      properties:
+        opaque:
+          $ref: "#/components/schemas/Opaque"
+        note:
+          type: string

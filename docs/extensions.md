@@ -8,6 +8,7 @@ The generator ignores other keys, including `x-go-type`, `x-go-name`, and
 | Extension                         | Applies to                             | Effect                                                                         |
 | --------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------ |
 | `x-rust-type`                     | schema                                 | Emit this Rust type as-is instead of a generated type.                         |
+| `x-rust-derive`                   | schema with `x-rust-type`              | Which of `Debug`, `Clone`, `PartialEq` the target type implements.             |
 | `x-rust-name`                     | schema / property / operation / server | Override the generated type name, field name, method name, or server URL name. |
 | `x-rust-serde-skip`               | property                               | Omit the field with `#[serde(skip)]`.                                          |
 | `x-omitempty`                     | property                               | Force `skip_serializing_if` on or off.                                         |
@@ -32,6 +33,41 @@ components:
         raw:
           x-rust-type: serde_json::Value
 ```
+
+## Traits of an `x-rust-type` target
+
+Every generated model derives `Debug`, `Clone`, and `PartialEq`. A model that
+holds a type the generator did not write cannot derive a trait that type lacks.
+The generator cannot look at the type either, because the specification names it
+as text and `rustc` resolves it much later. So `x-rust-derive` states it.
+
+List the traits the target does implement:
+
+```yaml
+components:
+  schemas:
+    Opaque:
+      type: string
+      x-rust-type: crate::domain::Opaque
+      x-rust-derive: [Debug]
+```
+
+The generator then drops `Clone` and `PartialEq` from every model that reaches
+`Opaque`, and from every per-operation type that holds one of those models. A
+dropped trait costs one trait on those types. An emitted trait the target cannot
+satisfy costs a build.
+
+An absent `x-rust-derive` claims all three traits. That keeps the output of every
+specification written before this key identical, and it is right most of the
+time. `uuid::Uuid`, the `chrono` types, and a typical hand-written domain type
+all derive the three. An empty list claims none of them.
+
+The key accepts only `Debug`, `Clone`, and `PartialEq`. Any other name is an
+error. A misspelled name that the generator ignored would claim nothing and give
+the build error the key exists to prevent.
+
+The key belongs beside `x-rust-type` on the same schema. It has no effect
+anywhere else.
 
 ## Server URL names
 

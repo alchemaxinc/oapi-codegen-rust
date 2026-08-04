@@ -13,6 +13,42 @@ to the API. A consumer of the crate builds it with no code generator and no
 OpenAPI document. A reviewer sees a change to a public type as a change to a
 committed file.
 
+## Read the file with `#[path]`
+
+The generated file opens with an inner attribute that turns off every lint that is
+about hand-written source. Declare the file as a module, and rustc applies that
+attribute to the file alone:
+
+```rust,ignore
+#[path = "generated/api.rs"]
+pub mod api;
+```
+
+Do not use `include!`. It pastes the text into the module that calls it, and rustc
+rejects an inner attribute in a paste.
+
+A `#[path]` on an inline module sets the directory that the children of the module
+resolve against:
+
+```rust,ignore
+#[path = "generated/apimodel"]
+pub mod apimodel {
+    #[path = "common.rs"]
+    pub mod common;
+    #[path = "catalog.rs"]
+    pub mod catalog;
+}
+```
+
+A `#[path]` module is part of your crate, so `cargo fmt` walks it and reformats
+it. The generated text then no longer matches what the generator writes, and
+`--check` reports drift. Tell `rustfmt` to leave the directory alone in
+`.rustfmt.toml`:
+
+```toml
+ignore = ["**/generated/**"]
+```
+
 ## Gate the build with `--check`
 
 `--check` generates the code in memory and compares it with the output file. It
