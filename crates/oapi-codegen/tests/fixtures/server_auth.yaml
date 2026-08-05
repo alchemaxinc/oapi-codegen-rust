@@ -45,8 +45,10 @@ paths:
   /session:
     get:
       operationId: getSession
-      # A description over several lines, so the doc renders as `///` lines and
-      # not as one `/** */` block wedged between them.
+      # A description over several lines. The trait method splits it into `///`
+      # lines, because a `/** */` block would sit unevenly among the `///` lines
+      # the security section adds. `GetSessionResponse` keeps the block, since
+      # nothing follows its description.
       description: |
         Fetch session data, which an API key cookie protects.
 
