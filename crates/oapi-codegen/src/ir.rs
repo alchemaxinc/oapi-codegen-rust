@@ -85,6 +85,41 @@ pub struct Field {
     pub omit_empty: Option<bool>,
     /// `x-rust-serde-skip`: drop the field from (de)serialization via `#[serde(skip)]`.
     pub serde_skip: bool,
+    /// The schema's `default`, as the value serde falls back to when the
+    /// property is absent.
+    ///
+    /// An optional property with a default is *not* wrapped in `Option`, because
+    /// after deserialization it always holds a value. Only `nullable` keeps the
+    /// `Option`, since `null` is a value the property can carry.
+    ///
+    /// `default: null` never reaches here: the parser reads it into the same
+    /// `None` an absent key gives. It asks for what serde already does with a
+    /// missing `Option`, so nothing is lost.
+    pub default: Option<DefaultValue>,
+}
+
+/// A value a missing property falls back to, lowered from the schema's
+/// `default` and already checked against the field's type.
+///
+/// The JSON value alone is not enough to render Rust: `1` is `1` for an integer
+/// field and `1.0` for a floating-point one, and `"active"` is a string literal
+/// for a `String` field and a variant path for an enum. Resolving that once,
+/// while the schema is still in reach, keeps the emitter free of guesswork.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DefaultValue {
+    /// A string literal.
+    Str(String),
+    /// An integer literal.
+    Int(i64),
+    /// A floating-point literal.
+    Float(f64),
+    /// A `bool` literal.
+    Bool(bool),
+    /// A unit variant of a generated string enum, named by its identifier.
+    Variant(RustIdent),
+    /// An empty collection, which `Default::default()` gives for both `Vec` and
+    /// `HashMap`.
+    Empty,
 }
 
 /// A generated `enum`.

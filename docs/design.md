@@ -267,6 +267,48 @@ Each such schema becomes a type alias, and `type A = B; type B = A;` is an error
 (`E0391`) that no indirection removes. The generator reports it and names the
 schemas on the cycle.
 
+## A `default` removes the `Option`
+
+An optional property with a `default` lowers to a plain `T`, not `Option<T>`,
+with a `#[serde(default = "..")]` pointing at an associated function:
+
+```rust
+pub struct Widget {
+    #[serde(default = "Widget::default_count")]
+    pub count: i64,
+}
+
+impl Widget {
+    fn default_count() -> i64 {
+        10
+    }
+}
+```
+
+The document says the value is `10` when the key is absent, so after
+deserialization there is always a value and `Option` could only ever hold `Some`.
+The function is associated rather than free so it does not join the crate root,
+where every generated type already lives; field names are unique within a struct,
+so the names derived from them are too.
+
+`nullable` is the exception. There `null` is a value the property carries, so the
+`Option` stays and the default fills its `Some` side. Writing `default: null`
+does nothing: the parser reads it into the same "no default" an absent key gives,
+and it asks for what serde already does with a missing `Option`.
+
+A `default` on a **required** property is ignored. The property is always
+present, so the value would only ever be reached by a payload that omits
+something the document says must be there.
+
+Only a value with a literal form is accepted: a string, a number, a boolean, an
+enum value, an empty array, and an empty object. A non-empty array or object, or
+a value whose type disagrees with the property's, is an error rather than a
+silent drop, because dropping it leaves the document promising a value the code
+never supplies.
+
+The same applies to a query parameter, so `?limit=` with `default: 20` gives a
+plain `i32` field.
+
 ## The server names its security but does not enforce it
 
 A document's `security` says which credential an operation expects. The

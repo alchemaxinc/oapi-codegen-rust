@@ -447,6 +447,7 @@ mod tests {
                 required: true,
                 omit_empty: None,
                 serde_skip: false,
+                default: None,
             }],
             additional_properties: None,
             deny_unknown_fields: false,

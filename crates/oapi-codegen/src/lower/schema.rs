@@ -28,6 +28,7 @@ use crate::ir::Struct;
 use crate::ir::UnionVariant;
 use crate::loader::Spec;
 use crate::loader::ref_target_name;
+use crate::lower::default::lower_default;
 use crate::naming::Case;
 use crate::naming::X_RUST_NAME;
 use crate::naming::to_ident;
@@ -239,10 +240,39 @@ impl Mapper<'_> {
             ReferenceOr::Reference { .. } => None,
         };
 
+        // A required property is always present, so its `default` never fires.
+        // Honouring it would mean accepting a payload that omits a property the
+        // document says must be there.
+        let declared = data
+            .filter(|_| return !required)
+            .and_then(|data| return data.default.as_ref());
+
         let nullable = data.map(|data| return data.nullable).unwrap_or(false);
-        if !required || nullable {
+        // A default makes the property's absence indistinguishable from its
+        // presence, so `Option` would only ever hold `Some`. `nullable` is the
+        // exception: `null` is a value the property carries.
+        if (!required && declared.is_none()) || nullable {
             ty = ty.optional();
         }
+
+        let default = match declared {
+            Some(json) => {
+                let variants_of = |name: &str| {
+                    let ident = self.type_name_ident(name);
+                    return self.extra.iter().find_map(|item| {
+                        return match item {
+                            Item::Enum(enom) if enom.name == ident => match &enom.kind {
+                                EnumKind::Strings(variants) => Some(variants.clone()),
+                                EnumKind::Union(_) => None,
+                            },
+                            _ => None,
+                        };
+                    });
+                };
+                Some(lower_default(json, &ty, &variants_of, parent, wire)?)
+            }
+            None => None,
+        };
 
         let doc = data.and_then(doc_of);
         let deprecated = data.and_then(deprecation_of);
@@ -266,6 +296,7 @@ impl Mapper<'_> {
             required,
             omit_empty,
             serde_skip,
+            default,
         });
     }
 

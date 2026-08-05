@@ -1,0 +1,76 @@
+openapi: 3.0.3
+info:
+  title: Defaults
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Status:
+      type: string
+      enum:
+        - in-progress
+        - done
+    Widget:
+      type: object
+      required:
+        - name
+        - kind
+      properties:
+        name:
+          type: string
+        # A required property is always present, so its `default` never fires
+        # and the field keeps no fallback.
+        kind:
+          type: string
+          default: gadget
+        label:
+          type: string
+          default: unnamed
+        count:
+          type: integer
+          default: 10
+        ratio:
+          # A whole number is a valid default for a `number`, and has to reach
+          # the output as `1.0` rather than `1`.
+          type: number
+          default: 1
+        precise:
+          type: number
+          default: 1.5
+        enabled:
+          type: boolean
+          default: true
+        tags:
+          type: array
+          items:
+            type: string
+          default: []
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+        # An inline enum, whose default names a wire value that is not the
+        # variant identifier.
+        state:
+          type: string
+          enum:
+            - in-progress
+            - done
+          default: in-progress
+        # `nullable` keeps the `Option`, because `null` is a value the property
+        # can carry.
+        note:
+          type: string
+          nullable: true
+          default: none given
+        # `default: null` reaches the parser as no default at all, so no
+        # attribute is emitted. It asks for what serde already does with a
+        # missing `Option`.
+        cleared:
+          type: string
+          nullable: true
+          default: null
+        # No default, so this stays optional.
+        extra:
+          type: string

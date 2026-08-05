@@ -5,6 +5,7 @@
 //! [`validate`] collects independent semantic problems so one run can report
 //! every problem it finds rather than aborting on the first.
 
+pub mod default;
 pub mod paths;
 pub mod prune;
 pub mod recurse;

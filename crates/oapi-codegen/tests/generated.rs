@@ -58,6 +58,7 @@ mod generated {
     pub mod object_additional_properties;
     #[path = "object_deny_unknown_fields.rs"]
     pub mod object_deny_unknown_fields;
+
     #[path = "object_nested_inline.rs"]
     pub mod object_nested_inline;
     #[path = "object_optional_required.rs"]
@@ -72,6 +73,8 @@ mod generated {
     pub mod recursive_schema;
     #[path = "ref_local.rs"]
     pub mod ref_local;
+    #[path = "schema_defaults.rs"]
+    pub mod schema_defaults;
     #[path = "server_component_body_ref.rs"]
     pub mod server_component_body_ref;
     #[path = "server_component_param_ref.rs"]

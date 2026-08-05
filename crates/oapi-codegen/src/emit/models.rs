@@ -1,21 +1,25 @@
 //! Emitting model items (structs, enums, aliases) as token streams.
 
 use proc_macro2::TokenStream;
+use quote::format_ident;
 use quote::quote;
 
 use crate::emit::doc_attr;
 use crate::emit::emit_type;
 use crate::error::Result;
 use crate::ir::Alias;
+use crate::ir::DefaultValue;
 use crate::ir::Deprecation;
 use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
 use crate::ir::ForeignDerives;
 use crate::ir::Item;
+use crate::ir::RustType;
 use crate::ir::StringVariant;
 use crate::ir::Struct;
 use crate::ir::UnionVariant;
+use crate::naming::RustIdent;
 
 /// The full derive set for one generated model: its serde traits, plus which of
 /// `Debug`, `Clone`, `PartialEq` the model can carry.
@@ -169,9 +173,21 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
     let has_serde = serde.serialize || serde.deserialize;
 
     let mut fields = Vec::with_capacity(strukt.fields.len());
+    let mut defaults = Vec::new();
     for field in &strukt.fields {
-        fields.push(emit_field(field, has_serde)?);
+        fields.push(emit_field(field, has_serde, &strukt.name)?);
+        if let Some(value) = &field.default {
+            defaults.push(emit_default_fn(field, value)?);
+        }
     }
+    // serde needs a path to call, and an associated function keeps these out of
+    // the crate root, where every generated type already lives. Field names are
+    // unique within a struct, so the names derived from them are too.
+    let defaults = if defaults.is_empty() {
+        quote! {}
+    } else {
+        quote! { impl #name { #(#defaults)* } }
+    };
 
     let additional = match &strukt.additional_properties {
         Some(element) => {
@@ -210,13 +226,71 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
             #(#fields)*
             #additional
         }
+
+        #defaults
     });
+}
+
+/// The name serde calls to fill an absent property.
+fn default_fn_name(field: &Field) -> proc_macro2::Ident {
+    return format_ident!("default_{}", field.name.logical());
+}
+
+/// Render the associated function behind a field's `#[serde(default = "..")]`.
+fn emit_default_fn(field: &Field, value: &DefaultValue) -> Result<TokenStream> {
+    let name = default_fn_name(field);
+    let ty = emit_type(&field.ty)?;
+    let expr = emit_default_value(value, &field.ty)?;
+    let doc = format!(" The `default` the document gives `{}`.", field.name.logical());
+    return Ok(quote! {
+        #[doc = #doc]
+        fn #name() -> #ty {
+            #expr
+        }
+    });
+}
+
+/// Render a default as an expression of the field's type.
+fn emit_default_value(value: &DefaultValue, ty: &RustType) -> Result<TokenStream> {
+    match ty {
+        RustType::Option(inner) => {
+            let inner = emit_default_value(value, inner)?;
+            return Ok(quote! { Some(#inner) });
+        }
+        RustType::Boxed(inner) => {
+            let inner = emit_default_value(value, inner)?;
+            return Ok(quote! { Box::new(#inner) });
+        }
+        _ => {}
+    }
+    let expr = match value {
+        DefaultValue::Str(text) => quote! { #text.to_owned() },
+        // Unsuffixed, so one arm serves `i32` and `i64`, and a whole number
+        // still reads as a float where the field is one.
+        DefaultValue::Int(number) => {
+            let literal = proc_macro2::Literal::i64_unsuffixed(*number);
+            quote! { #literal }
+        }
+        DefaultValue::Float(number) => {
+            let literal = proc_macro2::Literal::f64_unsuffixed(*number);
+            quote! { #literal }
+        }
+        DefaultValue::Bool(flag) => quote! { #flag },
+        DefaultValue::Variant(variant) => {
+            let owner = emit_type(ty)?;
+            let variant = variant.to_token();
+            quote! { #owner::#variant }
+        }
+        // The return type pins this to the right empty collection.
+        DefaultValue::Empty => quote! { Default::default() },
+    };
+    return Ok(expr);
 }
 
 /// Render a single struct field. When the struct derives no serde trait,
 /// `#[serde(..)]` attributes are suppressed — without a serde derive macro in
 /// scope they are orphaned and fail to compile.
-fn emit_field(field: &Field, has_serde: bool) -> Result<TokenStream> {
+fn emit_field(field: &Field, has_serde: bool, owner: &RustIdent) -> Result<TokenStream> {
     let name = field.name.to_token();
     let ty = emit_type(&field.ty)?;
     let doc = doc_attr(&field.doc);
@@ -232,6 +306,10 @@ fn emit_field(field: &Field, has_serde: bool) -> Result<TokenStream> {
         let omit_empty = field.omit_empty.unwrap_or(!field.required);
         if omit_empty && field.ty.is_option() {
             metas.push(quote! { skip_serializing_if = "Option::is_none" });
+        }
+        if field.default.is_some() {
+            let path = format!("{}::{}", owner.logical(), default_fn_name(field));
+            metas.push(quote! { default = #path });
         }
     }
     let serde_attr = if !has_serde || metas.is_empty() {

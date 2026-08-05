@@ -27,12 +27,15 @@ paths:
           description: Restrict results to a single author.
           schema:
             type: string
+        # A default makes the parameter always present after deserialization,
+        # so the field is `i32` and not `Option<i32>`.
         - name: limit
           in: query
           required: false
           schema:
             type: integer
             format: int32
+            default: 20
         - name: available
           in: query
           required: true

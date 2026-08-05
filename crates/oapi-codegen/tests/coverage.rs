@@ -253,8 +253,13 @@ const TEST_TABLE: &[Feature] = &[
     },
     Feature {
         element: "meta.default",
-        status: Status::Ignored,
-        fixture: None,
+        status: Status::Supported,
+        fixture: Some("schema_defaults"),
+    },
+    Feature {
+        element: "meta.default.unrepresentable",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_default_value"),
     },
     Feature {
         element: "meta.deprecated",
@@ -625,6 +630,7 @@ generated_tests!(
     number_formats,
     object_additional_properties,
     object_deny_unknown_fields,
+    schema_defaults,
     object_nested_inline,
     object_optional_required,
     oneof_discriminator,
