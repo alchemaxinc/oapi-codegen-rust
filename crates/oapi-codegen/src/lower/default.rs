@@ -61,7 +61,14 @@ fn value_for(
         RustType::Option(inner) => value_for(json, inner, variants_of),
         RustType::Boxed(inner) => value_for(json, inner, variants_of),
         RustType::Bool => json.as_bool().map(DefaultValue::Bool),
-        RustType::I32 | RustType::I64 => json.as_i64().map(DefaultValue::Int),
+        RustType::I64 => json.as_i64().map(DefaultValue::Int),
+        // The emitted literal has no suffix, so `i32` takes its range from the
+        // return type of the function. A value outside that range gives code
+        // that does not compile.
+        RustType::I32 => json
+            .as_i64()
+            .filter(|number| return i32::try_from(*number).is_ok())
+            .map(DefaultValue::Int),
         // An integer is a valid floating-point default, and JSON writes `1`
         // rather than `1.0` for a whole number.
         RustType::F64 => json.as_f64().map(DefaultValue::Float),
@@ -106,7 +113,8 @@ fn describe(ty: &RustType) -> String {
     return match ty {
         RustType::Option(inner) | RustType::Boxed(inner) => describe(inner),
         RustType::Bool => "a boolean".to_owned(),
-        RustType::I32 | RustType::I64 => "an integer".to_owned(),
+        RustType::I32 => "a 32-bit integer".to_owned(),
+        RustType::I64 => "an integer".to_owned(),
         RustType::F64 => "a number".to_owned(),
         RustType::String => "a string".to_owned(),
         RustType::Vec(_) => "an array".to_owned(),
@@ -188,6 +196,19 @@ mod tests {
         assert!(lower(Value::from("7"), &RustType::I64).is_err());
         assert!(lower(Value::from(7_i64), &RustType::String).is_err());
         assert!(lower(Value::from(1.5_f64), &RustType::I64).is_err());
+    }
+
+    #[test]
+    fn an_i32_default_outside_the_range_is_rejected() {
+        let cases = [
+            (Value::from(i64::from(i32::MAX)), true),
+            (Value::from(i64::from(i32::MIN)), true),
+            (Value::from(i64::from(i32::MAX) + 1_i64), false),
+            (Value::from(i64::from(i32::MIN) - 1_i64), false),
+        ];
+        for (json, is_ok) in cases {
+            assert_eq!(lower(json, &RustType::I32).is_ok(), is_ok);
+        }
     }
 
     #[test]

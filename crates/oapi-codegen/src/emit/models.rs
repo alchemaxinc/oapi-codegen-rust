@@ -308,7 +308,9 @@ fn emit_field(field: &Field, has_serde: bool, owner: &RustIdent) -> Result<Token
             metas.push(quote! { skip_serializing_if = "Option::is_none" });
         }
         if field.default.is_some() {
-            let path = format!("{}::{}", owner.logical(), default_fn_name(field));
+            // `to_token` keeps any `r#` prefix. A path without it does not
+            // compile.
+            let path = format!("{}::{}", owner.to_token(), default_fn_name(field));
             metas.push(quote! { default = #path });
         }
     }
