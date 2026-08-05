@@ -224,6 +224,27 @@ pub(crate) fn doc_attr(doc: &Option<String>) -> TokenStream {
     return tokens;
 }
 
+/// Render one doc attribute per line, which rustdoc reads as one comment.
+///
+/// A blank line stays blank, so a caller can separate paragraphs with one. An
+/// entry that already holds line breaks, such as a multi-line `description` from
+/// the document, is split on them: a `#[doc]` carrying a `\n` prints as a
+/// `/** */` block, which would sit unevenly among its `///` siblings.
+pub(crate) fn doc_lines(lines: &[String]) -> TokenStream {
+    let attrs = lines.iter().flat_map(|entry| return entry.split('\n')).map(|line| {
+        // Leading space matches the `/// text` desugaring rustfmt produces. A
+        // blank line takes none, so no trailing space reaches the output.
+        let trimmed = line.trim_end();
+        let spaced = if trimmed.is_empty() {
+            String::new()
+        } else {
+            format!(" {trimmed}")
+        };
+        return quote! { #[doc = #spaced] };
+    });
+    return quote! { #(#attrs)* };
+}
+
 /// Render a Rust type expression.
 pub(crate) fn emit_type(ty: &RustType) -> Result<TokenStream> {
     let tokens = match ty {

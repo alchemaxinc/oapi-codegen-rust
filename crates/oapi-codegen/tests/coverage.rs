@@ -432,6 +432,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_prune",
     "server_filtering",
     "server_urls",
+    "server_auth",
 ];
 
 /// Server fixtures whose generation must fail with a documented error, covering
@@ -733,6 +734,7 @@ server_generated_tests!(
     server_prune,
     server_filtering,
     server_urls,
+    server_auth,
 );
 
 /// The server `#[test]`s must cover exactly the supported server fixtures.

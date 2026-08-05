@@ -267,6 +267,37 @@ Each such schema becomes a type alias, and `type A = B; type B = A;` is an error
 (`E0391`) that no indirection removes. The generator reports it and names the
 schemas on the cycle.
 
+## The server names its security but does not enforce it
+
+A document's `security` says which credential an operation expects. The
+generated `Api` trait says so too: a protected method carries a `# Security`
+section naming each scheme and where its credential sits, for example a bearer
+token in the `Authorization` header or an API key in the `X-API-Key` header. An
+operation with `security: []` carries no such note, so a public operation is
+easy to tell from a protected one.
+
+The generator stops there. It emits no check, no extractor, and no middleware.
+Verifying a credential needs knowledge only the application has: which signing
+key, which issuer, which claim names which user, and what a failure should
+return. Guessing any of that would produce a check that looks real and is not,
+which is worse than none.
+
+Enforce it outside the generated code, in a `tower` layer around the router. A
+trait method takes only the parameters the operation declares, so the credential
+never reaches it: a bearer token or an API key is not an OpenAPI parameter. Pass
+whatever the layer works out, such as a user identity, through the state your
+`Api` implementation already holds, or through a request extension the layer
+inserts.
+
+The listed schemes are a union, not a rule. A document can require two schemes at
+once, or offer a choice of several, and the generated list flattens both into the
+same set of names. Past one name, read the document's `security` for the exact
+rule.
+
+This also holds for schemes the client refuses, such as OAuth2. A server reads
+credentials rather than sending them, so nothing is rejected; the doc comment
+names the scheme and leaves the rest to the implementation.
+
 ## Config compatibility
 
 YAML config keys mirror `oapi-codegen`.

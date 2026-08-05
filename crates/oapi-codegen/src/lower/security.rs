@@ -1,11 +1,12 @@
-//! Lowering OpenAPI security schemes and requirements into the client IR.
+//! Lowering OpenAPI security schemes and requirements into the IR.
 //!
 //! Only the shared lowering pass runs here: it catalogues the document's
 //! `components.securitySchemes` and resolves each operation's *effective*
-//! security requirement. The server emitter ignores the result (server-side
-//! auth is not generated yet). The client emitter turns supported schemes into
-//! credential fields and rejects operations that require an
-//! [`crate::ir::SecuritySchemeKind::Unsupported`] scheme.
+//! security requirement. Both emitters read the result. The client turns
+//! supported schemes into credential fields and rejects operations that require
+//! an [`crate::ir::SecuritySchemeKind::Unsupported`] scheme. The server names
+//! the requirement in each trait method's doc comment, but emits no check: only
+//! the application knows how to verify a credential.
 
 use openapiv3::APIKeyLocation;
 use openapiv3::ReferenceOr;
