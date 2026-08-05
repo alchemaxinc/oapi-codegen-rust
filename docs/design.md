@@ -304,10 +304,14 @@ becomes valid.
 Only a value with a literal form works: a string, a number, a boolean, an enum
 value, an empty array, and an empty object. A non-empty array, a non-empty
 object, and a value of the wrong type are errors, not silent drops. A dropped
-default leaves the document and the code in disagreement.
+default leaves the document and the code in disagreement. An `int32` property
+with a default outside the range of `i32` is an error for the same reason. The
+alternative is generated code that does not compile.
 
-A query parameter follows the same rule. `?limit=` with `default: 20` gives a
-plain `i32` field.
+A query parameter follows the same rule. A `default: 20` on `limit` gives a
+plain `i32` field. The default applies when the request omits `limit`. An empty
+`?limit=` is not an omission. It is the text `""`, and a parse of it into an
+`i32` fails.
 
 ## The server names its security but does not enforce it
 
