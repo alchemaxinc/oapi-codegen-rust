@@ -1,18 +1,15 @@
 //! Lowering a schema's `default` into a value the emitter can render.
 //!
 //! JSON alone does not say what Rust to write. `1` is `1` for an integer field
-//! and `1.0` for a floating-point one; `"active"` is a string literal for a
-//! `String` field and a variant path for an enum. This resolves the value
-//! against the field's type while the schema is still in reach, so the emitter
-//! only has to print what it is handed.
+//! and `1.0` for a number field. `"active"` is a string for a `String` field and
+//! a variant path for an enum. This pass settles that against the field type,
+//! while the schema is still in hand. The emitter then prints the result.
 //!
-//! A value the generator has no literal for is an error, not a silent drop. A
-//! dropped default leaves the document promising a value the code never
-//! supplies.
+//! A value with no literal form is an error, not a silent drop. A dropped
+//! default leaves the document and the code in disagreement.
 //!
-//! `default: null` never arrives: the parser reads it into the same `None` an
-//! absent key gives. It asks for what serde already does with a missing
-//! `Option`, so nothing is lost by not seeing it.
+//! `default: null` never arrives. The parser reads it as no default at all, and
+//! serde already leaves a missing `Option` as `None`.
 
 use serde_json::Value;
 
@@ -22,12 +19,13 @@ use crate::ir::DefaultValue;
 use crate::ir::RustType;
 use crate::ir::StringVariant;
 
-/// Lower a `default` against the type the property lowered to.
+/// Lower a `default` against the type of the property.
 ///
-/// `variants_of` looks up a generated string enum by the name a
-/// [`RustType::Named`] carries, which is how an enum default finds its variant.
-/// Only an inline enum is reachable: a property that is a bare `$ref` carries no
-/// sibling keywords in OpenAPI 3.0, so it has no `default` to lower.
+/// `variants_of` finds a generated string enum by the name in
+/// [`RustType::Named`]. An enum default needs this to find its variant.
+///
+/// Only an inline enum arrives here. In OpenAPI 3.0 a bare `$ref` drops the keys
+/// beside it, so such a property has no `default`.
 pub fn lower_default(
     json: &Value,
     ty: &RustType,
@@ -42,9 +40,9 @@ pub fn lower_default(
             property: property.to_owned(),
             declared: json.to_string(),
             hint: format!(
-                "`{owner}.{property}` lowers to {}. Give it a `default` of that type, or drop the `default`. \
-                 Only a scalar, an enum value, an empty array, and an empty object can be rendered; \
-                 a non-empty array or object cannot.",
+                "`{owner}.{property}` lowers to {}. Give it a `default` of that type, or remove the `default`. \
+                 This generator renders a scalar, an enum value, an empty array, and an empty object. \
+                 It cannot render a non-empty array or object.",
                 describe(ty)
             ),
         }),
@@ -58,8 +56,8 @@ fn value_for(
     variants_of: &dyn Fn(&str) -> Option<Vec<StringVariant>>,
 ) -> Option<DefaultValue> {
     return match ty {
-        // A `nullable` property keeps its `Option`, so the value it defaults to
-        // is the `Some` side.
+        // A `nullable` property keeps its `Option`. The default fills the
+        // `Some` side of it.
         RustType::Option(inner) => value_for(json, inner, variants_of),
         RustType::Boxed(inner) => value_for(json, inner, variants_of),
         RustType::Bool => json.as_bool().map(DefaultValue::Bool),
@@ -71,8 +69,8 @@ fn value_for(
         RustType::Vec(_) => empty_if(json.as_array().is_some_and(|items| return items.is_empty())),
         RustType::Map(_) => empty_if(json.as_object().is_some_and(|entries| return entries.is_empty())),
         RustType::Named(name) => variant_for(json, name, variants_of),
-        // A date, a UUID, and the rest parse from a string at runtime, so a
-        // literal for them would have to be built rather than written.
+        // A date, a UUID, and the rest parse from a string at run time. There
+        // is no literal to write for them.
         _ => None,
     };
 }
@@ -84,7 +82,7 @@ fn empty_if(is_empty: bool) -> Option<DefaultValue> {
 
 /// The string enum variant whose wire value the default names.
 ///
-/// Matching on the wire value rather than the identifier is what makes
+/// The match is on the wire value, not on the identifier. This is what lets
 /// `default: "in-progress"` find `InProgress`.
 fn variant_for(
     json: &Value,
@@ -103,8 +101,7 @@ fn variant_for(
     return Some(DefaultValue::Variant(found.name.clone()));
 }
 
-/// A type named the way a specification author would recognise it, for the
-/// error message.
+/// The type, in the words a specification author uses, for the error message.
 fn describe(ty: &RustType) -> String {
     return match ty {
         RustType::Option(inner) | RustType::Boxed(inner) => describe(inner),

@@ -240,17 +240,17 @@ impl Mapper<'_> {
             ReferenceOr::Reference { .. } => None,
         };
 
-        // A required property is always present, so its `default` never fires.
-        // Honouring it would mean accepting a payload that omits a property the
-        // document says must be there.
+        // A required property is always present, so its `default` never
+        // applies. Use it, and a payload that omits a required property becomes
+        // valid.
         let declared = data
             .filter(|_| return !required)
             .and_then(|data| return data.default.as_ref());
 
         let nullable = data.map(|data| return data.nullable).unwrap_or(false);
-        // A default makes the property's absence indistinguishable from its
-        // presence, so `Option` would only ever hold `Some`. `nullable` is the
-        // exception: `null` is a value the property carries.
+        // With a default, an absent property ends up the same as a present one,
+        // so `Option` would only ever hold `Some`. `nullable` is the exception,
+        // because there `null` is a value the property carries.
         if (!required && declared.is_none()) || nullable {
             ty = ty.optional();
         }

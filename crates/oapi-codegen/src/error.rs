@@ -168,10 +168,9 @@ pub enum Error {
         hint: String,
     },
 
-    /// A schema's `default` cannot be rendered as a value of the field's Rust
-    /// type: the two disagree, or the value is a shape the generator has no
-    /// literal for. Dropping it would leave the document saying one thing and
-    /// the code doing another.
+    /// The schema `default` does not fit the Rust type of the field. Either the
+    /// two disagree, or the value has no literal form here. A dropped default
+    /// leaves the document and the code in disagreement.
     UnsupportedDefault {
         /// The type that owns the property.
         owner: String,

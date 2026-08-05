@@ -180,9 +180,9 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
             defaults.push(emit_default_fn(field, value)?);
         }
     }
-    // serde needs a path to call, and an associated function keeps these out of
-    // the crate root, where every generated type already lives. Field names are
-    // unique within a struct, so the names derived from them are too.
+    // serde needs a path to call. An associated function keeps these out of the
+    // crate root, where every generated type lives. Field names are unique
+    // within a struct, so the names built from them are too.
     let defaults = if defaults.is_empty() {
         quote! {}
     } else {
@@ -231,12 +231,12 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
     });
 }
 
-/// The name serde calls to fill an absent property.
+/// The name that serde calls to fill an absent property.
 fn default_fn_name(field: &Field) -> proc_macro2::Ident {
     return format_ident!("default_{}", field.name.logical());
 }
 
-/// Render the associated function behind a field's `#[serde(default = "..")]`.
+/// Render the associated function behind `#[serde(default = "..")]`.
 fn emit_default_fn(field: &Field, value: &DefaultValue) -> Result<TokenStream> {
     let name = default_fn_name(field);
     let ty = emit_type(&field.ty)?;
@@ -250,7 +250,7 @@ fn emit_default_fn(field: &Field, value: &DefaultValue) -> Result<TokenStream> {
     });
 }
 
-/// Render a default as an expression of the field's type.
+/// Render a default as an expression of the field type.
 fn emit_default_value(value: &DefaultValue, ty: &RustType) -> Result<TokenStream> {
     match ty {
         RustType::Option(inner) => {
@@ -265,7 +265,7 @@ fn emit_default_value(value: &DefaultValue, ty: &RustType) -> Result<TokenStream
     }
     let expr = match value {
         DefaultValue::Str(text) => quote! { #text.to_owned() },
-        // Unsuffixed, so one arm serves `i32` and `i64`, and a whole number
+        // No suffix, so one arm serves both `i32` and `i64`. A whole number
         // still reads as a float where the field is one.
         DefaultValue::Int(number) => {
             let literal = proc_macro2::Literal::i64_unsuffixed(*number);

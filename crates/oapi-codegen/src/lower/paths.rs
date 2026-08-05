@@ -416,8 +416,8 @@ impl Lowerer<'_> {
         if !data.required && declared.is_none() {
             ty = ty.optional();
         }
-        // A query parameter has no named type, so no default of one can name an
-        // enum variant.
+        // A query parameter never has a named type, so its default can never
+        // name an enum variant.
         let default = match &declared {
             Some(json) => Some(lower_default(json, &ty, &|_| return None, owner.logical(), &data.name)?),
             None => None,
@@ -447,8 +447,8 @@ impl Lowerer<'_> {
         data: &ParameterData,
     ) -> Result<Option<serde_json::Value>> {
         let ParameterSchemaOrContent::Schema(schema) = &data.format else {
-            // A `content` parameter is rejected by `query_param_type`, which
-            // gives the better message.
+            // `query_param_type` rejects a `content` parameter with a better
+            // message than this could give.
             return Ok(None);
         };
         let schema = self.resolve_param_schema(path, method, origin, &data.name, schema)?;

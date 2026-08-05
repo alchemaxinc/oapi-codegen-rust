@@ -269,8 +269,8 @@ schemas on the cycle.
 
 ## A `default` removes the `Option`
 
-An optional property with a `default` lowers to a plain `T`, not `Option<T>`,
-with a `#[serde(default = "..")]` pointing at an associated function:
+An optional property with a `default` lowers to a plain `T`, not `Option<T>`. A
+`#[serde(default = "..")]` attribute points at an associated function:
 
 ```rust
 pub struct Widget {
@@ -285,28 +285,28 @@ impl Widget {
 }
 ```
 
-The document says the value is `10` when the key is absent, so after
-deserialization there is always a value and `Option` could only ever hold `Some`.
-The function is associated rather than free so it does not join the crate root,
-where every generated type already lives; field names are unique within a struct,
-so the names derived from them are too.
+The document says the value is `10` when the key is absent. So the field always
+holds a value after a parse, and an `Option` there only ever holds `Some`.
 
-`nullable` is the exception. There `null` is a value the property carries, so the
-`Option` stays and the default fills its `Some` side. Writing `default: null`
-does nothing: the parser reads it into the same "no default" an absent key gives,
-and it asks for what serde already does with a missing `Option`.
+The function is associated, not free. This keeps it out of the crate root, where
+every generated type lives. Field names are unique within a struct, so these
+names are unique too.
 
-A `default` on a **required** property is ignored. The property is always
-present, so the value would only ever be reached by a payload that omits
-something the document says must be there.
+`nullable` is the exception. There `null` is a value that the property carries.
+The `Option` stays, and the default fills its `Some` side. A `default: null` does
+nothing. The parser reads it as no default at all, and serde already leaves a
+missing `Option` as `None`.
 
-Only a value with a literal form is accepted: a string, a number, a boolean, an
-enum value, an empty array, and an empty object. A non-empty array or object, or
-a value whose type disagrees with the property's, is an error rather than a
-silent drop, because dropping it leaves the document promising a value the code
-never supplies.
+The generator ignores a `default` on a **required** property. The property is
+always present. Use the default, and a payload that omits a required property
+becomes valid.
 
-The same applies to a query parameter, so `?limit=` with `default: 20` gives a
+Only a value with a literal form works: a string, a number, a boolean, an enum
+value, an empty array, and an empty object. A non-empty array, a non-empty
+object, and a value of the wrong type are errors, not silent drops. A dropped
+default leaves the document and the code in disagreement.
+
+A query parameter follows the same rule. `?limit=` with `default: 20` gives a
 plain `i32` field.
 
 ## The server names its security but does not enforce it
