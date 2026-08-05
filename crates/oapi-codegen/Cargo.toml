@@ -37,7 +37,6 @@ openapiv3 = "2.2.0"
 percent-encoding = "2.3.2"
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "multipart", "query", "form"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
 trycmd = "1.2.1"
 uuid = { version = "1.24.0", features = ["serde"] }

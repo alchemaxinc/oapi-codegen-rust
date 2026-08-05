@@ -175,8 +175,10 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
     let mut fields = Vec::with_capacity(strukt.fields.len());
     let mut defaults = Vec::new();
     for field in &strukt.fields {
-        fields.push(emit_field(field, has_serde, &strukt.name)?);
-        if let Some(value) = &field.default {
+        fields.push(emit_field(field, serde, &strukt.name)?);
+        // Only the `Deserialize` derive reads `default`, so only it calls these
+        // functions. Emitted beside any other derive set, they are dead code.
+        if let (Some(value), true) = (&field.default, serde.deserialize) {
             defaults.push(emit_default_fn(field, value)?);
         }
     }
@@ -290,7 +292,8 @@ fn emit_default_value(value: &DefaultValue, ty: &RustType) -> Result<TokenStream
 /// Render a single struct field. When the struct derives no serde trait,
 /// `#[serde(..)]` attributes are suppressed — without a serde derive macro in
 /// scope they are orphaned and fail to compile.
-fn emit_field(field: &Field, has_serde: bool, owner: &RustIdent) -> Result<TokenStream> {
+fn emit_field(field: &Field, serde: SerdeDerives, owner: &RustIdent) -> Result<TokenStream> {
+    let has_serde = serde.serialize || serde.deserialize;
     let name = field.name.to_token();
     let ty = emit_type(&field.ty)?;
     let doc = doc_attr(&field.doc);
@@ -307,7 +310,7 @@ fn emit_field(field: &Field, has_serde: bool, owner: &RustIdent) -> Result<Token
         if omit_empty && field.ty.is_option() {
             metas.push(quote! { skip_serializing_if = "Option::is_none" });
         }
-        if field.default.is_some() {
+        if field.default.is_some() && serde.deserialize {
             // `to_token` keeps any `r#` prefix. A path without it does not
             // compile.
             let path = format!("{}::{}", owner.to_token(), default_fn_name(field));
@@ -403,4 +406,87 @@ fn emit_alias(alias: &Alias) -> Result<TokenStream> {
         #deprecated
         pub type #name = #ty;
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::naming::Case;
+    use crate::naming::to_ident;
+
+    /// One struct, `Widget`, with one field that carries a `default`.
+    fn widget_with_a_default() -> Struct {
+        return Struct {
+            name: to_ident("Widget", Case::Pascal),
+            doc: None,
+            deprecated: None,
+            fields: vec![Field {
+                name: to_ident("count", Case::Snake),
+                rename: None,
+                doc: None,
+                deprecated: None,
+                ty: RustType::I64,
+                required: false,
+                omit_empty: None,
+                serde_skip: false,
+                default: Some(DefaultValue::Int(10)),
+            }],
+            additional_properties: None,
+            deny_unknown_fields: false,
+        };
+    }
+
+    fn rendered(serde: SerdeDerives) -> String {
+        let derives = ModelDerives {
+            serde,
+            foreign: ForeignDerives {
+                debug: true,
+                clone: true,
+                partial_eq: true,
+            },
+        };
+        return emit_struct(&widget_with_a_default(), derives)
+            .expect("this struct renders")
+            .to_string();
+    }
+
+    /// Only the `Deserialize` derive reads `default`. Beside any other derive
+    /// set the function has no caller, and the generated crate warns.
+    #[test]
+    fn a_default_function_needs_the_deserialize_derive() {
+        let cases = [
+            (
+                SerdeDerives {
+                    serialize: true,
+                    deserialize: true,
+                },
+                true,
+            ),
+            (
+                SerdeDerives {
+                    serialize: false,
+                    deserialize: true,
+                },
+                true,
+            ),
+            (
+                SerdeDerives {
+                    serialize: true,
+                    deserialize: false,
+                },
+                false,
+            ),
+            (
+                SerdeDerives {
+                    serialize: false,
+                    deserialize: false,
+                },
+                false,
+            ),
+        ];
+        for (serde, is_emitted) in cases {
+            let code = rendered(serde);
+            assert_eq!(code.contains("default_count"), is_emitted, "{code}");
+        }
+    }
 }
