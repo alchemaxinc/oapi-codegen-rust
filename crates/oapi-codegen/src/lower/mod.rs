@@ -5,6 +5,8 @@
 //! [`validate`] collects independent semantic problems so one run can report
 //! every problem it finds rather than aborting on the first.
 
+/// Lowering of a schema `default`. Used by [`schema`] and [`paths`] only.
+pub(crate) mod default;
 pub mod paths;
 pub mod prune;
 pub mod recurse;

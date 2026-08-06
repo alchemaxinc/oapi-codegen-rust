@@ -21,8 +21,8 @@ pub struct ListBooksQuery {
     /// Restrict results to a single author.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<i32>,
+    #[serde(default = "ListBooksQuery::default_limit")]
+    pub limit: i32,
     pub available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
@@ -30,6 +30,12 @@ pub struct ListBooksQuery {
     pub status: Option<Vec<String>>,
     #[serde(rename = "pageToken", skip_serializing_if = "Option::is_none")]
     pub page_token: Option<String>,
+}
+impl ListBooksQuery {
+    /// The `default` the document gives `limit`.
+    fn default_limit() -> i32 {
+        20
+    }
 }
 
 /// List books, filtered by query parameters.

@@ -80,6 +80,7 @@ use crate::loader::Resolved;
 use crate::loader::Spec;
 use crate::loader::ref_component_name;
 use crate::loader::ref_file_part;
+use crate::lower::default::lower_default;
 use crate::lower::schema::integer_format_type;
 use crate::lower::schema::string_format_type;
 use crate::lower::security;
@@ -360,6 +361,7 @@ impl Lowerer<'_> {
         params: &[Resolved<Parameter>],
         operation_name: &RustIdent,
     ) -> Result<Option<Struct>> {
+        let owner = operations::query_struct_name(operation_name);
         let mut fields = Vec::new();
         let mut seen: Vec<&str> = Vec::new();
         for parameter in params {
@@ -373,12 +375,12 @@ impl Lowerer<'_> {
                 continue;
             }
             seen.push(&parameter_data.name);
-            fields.push(self.query_field(path, method, parameter.origin.as_deref(), parameter_data, style)?);
+            fields.push(self.query_field(path, method, parameter.origin.as_deref(), parameter_data, style, &owner)?);
         }
         if fields.is_empty() {
             return Ok(None);
         }
-        let name = operations::query_struct_name(operation_name);
+        let name = owner;
         return Ok(Some(Struct {
             name,
             doc: None,
@@ -402,11 +404,26 @@ impl Lowerer<'_> {
         origin: Option<&str>,
         data: &ParameterData,
         style: &QueryStyle,
+        owner: &RustIdent,
     ) -> Result<Field> {
-        let mut ty = self.query_param_type(path, method, origin, data, style)?;
-        if !data.required {
+        let schema = self.query_param_schema(path, method, origin, data)?;
+        let mut ty = self.query_param_type(path, method, origin, data, style, &schema)?;
+
+        // A required parameter is always present, so its `default` never fires.
+        let declared = match data.required {
+            true => None,
+            false => schema.schema_data.default,
+        };
+        if !data.required && declared.is_none() {
             ty = ty.optional();
         }
+        // A query parameter never has a named type, so its default can never
+        // name an enum variant.
+        let default = match &declared {
+            Some(json) => Some(lower_default(json, &ty, &|_| return None, owner.logical(), &data.name)?),
+            None => None,
+        };
+
         let ident = to_ident(&data.name, Case::Snake);
         let rename = crate::naming::rename_for(&data.name, &ident);
         return Ok(Field {
@@ -418,7 +435,30 @@ impl Lowerer<'_> {
             required: data.required,
             omit_empty: None,
             serde_skip: false,
+            default,
         });
+    }
+
+    /// The schema of a query parameter, resolved one time for both the type and
+    /// the `default` to read.
+    ///
+    /// A `content` parameter is rejected here. This generator reads a query
+    /// parameter from a schema only.
+    fn query_param_schema(
+        &self,
+        path: &str,
+        method: &str,
+        origin: Option<&str>,
+        data: &ParameterData,
+    ) -> Result<Schema> {
+        let ParameterSchemaOrContent::Schema(schema) = &data.format else {
+            return Err(Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("query parameter `{}` uses `content`, which is not supported", data.name),
+            });
+        };
+        return self.resolve_param_schema(path, method, origin, &data.name, schema);
     }
 
     /// Map a query parameter's schema to a scalar Rust type, or a `Vec<T>` of
@@ -434,20 +474,10 @@ impl Lowerer<'_> {
         origin: Option<&str>,
         data: &ParameterData,
         style: &QueryStyle,
+        schema: &Schema,
     ) -> Result<RustType> {
         let name = data.name.as_str();
         let explode = data.explode;
-        let schema = match &data.format {
-            ParameterSchemaOrContent::Schema(schema) => schema,
-            ParameterSchemaOrContent::Content(_) => {
-                return Err(Error::UnsupportedOperation {
-                    method: method.to_owned(),
-                    path: path.to_owned(),
-                    reason: format!("query parameter `{name}` uses `content`, which is not supported"),
-                });
-            }
-        };
-        let schema = self.resolve_param_schema(path, method, origin, name, schema)?;
         if let SchemaKind::Type(Type::Array(array)) = &schema.schema_kind {
             if !matches!(style, QueryStyle::Form) || explode == Some(false) {
                 return Err(Error::UnsupportedOperation {

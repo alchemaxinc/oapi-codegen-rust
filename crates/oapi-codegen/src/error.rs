@@ -168,6 +168,19 @@ pub enum Error {
         hint: String,
     },
 
+    /// The schema `default` does not fit the Rust type of the field. Either the
+    /// two disagree, or the value has no literal form here. A dropped default
+    /// leaves the document and the code in disagreement.
+    UnsupportedDefault {
+        /// The type that owns the property.
+        owner: String,
+        /// The property's name as the document writes it.
+        property: String,
+        /// The offending `default`, as JSON.
+        declared: String,
+        hint: String,
+    },
+
     /// A parameter declared `in: path` has no matching `{placeholder}` in the
     /// operation's path template. An OpenAPI path parameter must appear in the
     /// path, and lowering it from the template will otherwise silently drop it
@@ -394,6 +407,17 @@ impl std::fmt::Display for Error {
                     "the {location} of `{method} {path}` declares only content types the generator cannot represent: {declared}"
                 );
             }
+            Error::UnsupportedDefault {
+                owner,
+                property,
+                declared,
+                ..
+            } => {
+                return write!(
+                    f,
+                    "the `default` of `{owner}.{property}` cannot be represented as a value of the property's Rust type: {declared}"
+                );
+            }
             Error::InvalidPathParameter { method, path, name } => {
                 return write!(
                     f,
@@ -480,6 +504,7 @@ impl std::error::Error for Error {
             | Error::UnsupportedSpecVersion { .. }
             | Error::UnsupportedSpecKey { .. }
             | Error::UnsupportedContentType { .. }
+            | Error::UnsupportedDefault { .. }
             | Error::UnresolvedRef(_)
             | Error::UnsupportedRef { .. }
             | Error::UnsupportedSchema { .. }

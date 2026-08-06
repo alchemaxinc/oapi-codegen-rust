@@ -1,21 +1,25 @@
 //! Emitting model items (structs, enums, aliases) as token streams.
 
 use proc_macro2::TokenStream;
+use quote::format_ident;
 use quote::quote;
 
 use crate::emit::doc_attr;
 use crate::emit::emit_type;
 use crate::error::Result;
 use crate::ir::Alias;
+use crate::ir::DefaultValue;
 use crate::ir::Deprecation;
 use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
 use crate::ir::ForeignDerives;
 use crate::ir::Item;
+use crate::ir::RustType;
 use crate::ir::StringVariant;
 use crate::ir::Struct;
 use crate::ir::UnionVariant;
+use crate::naming::RustIdent;
 
 /// The full derive set for one generated model: its serde traits, plus which of
 /// `Debug`, `Clone`, `PartialEq` the model can carry.
@@ -169,9 +173,23 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
     let has_serde = serde.serialize || serde.deserialize;
 
     let mut fields = Vec::with_capacity(strukt.fields.len());
+    let mut defaults = Vec::new();
     for field in &strukt.fields {
-        fields.push(emit_field(field, has_serde)?);
+        fields.push(emit_field(field, serde, &strukt.name)?);
+        // Only the `Deserialize` derive reads `default`, so only it calls these
+        // functions. Emitted beside any other derive set, they are dead code.
+        if let (Some(value), true) = (&field.default, serde.deserialize) {
+            defaults.push(emit_default_fn(field, value)?);
+        }
     }
+    // serde needs a path to call. An associated function keeps these out of the
+    // crate root, where every generated type lives. Field names are unique
+    // within a struct, so the names built from them are too.
+    let defaults = if defaults.is_empty() {
+        quote! {}
+    } else {
+        quote! { impl #name { #(#defaults)* } }
+    };
 
     let additional = match &strukt.additional_properties {
         Some(element) => {
@@ -210,13 +228,75 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
             #(#fields)*
             #additional
         }
+
+        #defaults
     });
+}
+
+/// The name that serde calls to fill an absent property.
+fn default_fn_name(field: &Field) -> proc_macro2::Ident {
+    return format_ident!("default_{}", field.name.logical());
+}
+
+/// Render the associated function behind `#[serde(default = "..")]`.
+fn emit_default_fn(field: &Field, value: &DefaultValue) -> Result<TokenStream> {
+    let name = default_fn_name(field);
+    let ty = emit_type(&field.ty)?;
+    let expr = emit_default_value(value, &field.ty)?;
+    let doc = doc_attr(&Some(format!(
+        "The `default` the document gives `{}`.",
+        field.name.logical()
+    )));
+    return Ok(quote! {
+        #doc
+        fn #name() -> #ty {
+            #expr
+        }
+    });
+}
+
+/// Render a default as an expression of the field type.
+fn emit_default_value(value: &DefaultValue, ty: &RustType) -> Result<TokenStream> {
+    match ty {
+        RustType::Option(inner) => {
+            let inner = emit_default_value(value, inner)?;
+            return Ok(quote! { Some(#inner) });
+        }
+        RustType::Boxed(inner) => {
+            let inner = emit_default_value(value, inner)?;
+            return Ok(quote! { Box::new(#inner) });
+        }
+        _ => {}
+    }
+    let expr = match value {
+        DefaultValue::Str(text) => quote! { #text.to_owned() },
+        // No suffix, so one arm serves both `i32` and `i64`. A whole number
+        // still reads as a float where the field is one.
+        DefaultValue::Int(number) => {
+            let literal = proc_macro2::Literal::i64_unsuffixed(*number);
+            quote! { #literal }
+        }
+        DefaultValue::Float(number) => {
+            let literal = proc_macro2::Literal::f64_unsuffixed(*number);
+            quote! { #literal }
+        }
+        DefaultValue::Bool(flag) => quote! { #flag },
+        DefaultValue::Variant(variant) => {
+            let owner = emit_type(ty)?;
+            let variant = variant.to_token();
+            quote! { #owner::#variant }
+        }
+        // The return type pins this to the right empty collection.
+        DefaultValue::Empty => quote! { Default::default() },
+    };
+    return Ok(expr);
 }
 
 /// Render a single struct field. When the struct derives no serde trait,
 /// `#[serde(..)]` attributes are suppressed — without a serde derive macro in
 /// scope they are orphaned and fail to compile.
-fn emit_field(field: &Field, has_serde: bool) -> Result<TokenStream> {
+fn emit_field(field: &Field, serde: SerdeDerives, owner: &RustIdent) -> Result<TokenStream> {
+    let has_serde = serde.serialize || serde.deserialize;
     let name = field.name.to_token();
     let ty = emit_type(&field.ty)?;
     let doc = doc_attr(&field.doc);
@@ -232,6 +312,12 @@ fn emit_field(field: &Field, has_serde: bool) -> Result<TokenStream> {
         let omit_empty = field.omit_empty.unwrap_or(!field.required);
         if omit_empty && field.ty.is_option() {
             metas.push(quote! { skip_serializing_if = "Option::is_none" });
+        }
+        if field.default.is_some() && serde.deserialize {
+            // `to_token` keeps any `r#` prefix. A path without it does not
+            // compile.
+            let path = format!("{}::{}", owner.to_token(), default_fn_name(field));
+            metas.push(quote! { default = #path });
         }
     }
     let serde_attr = if !has_serde || metas.is_empty() {
@@ -323,4 +409,87 @@ fn emit_alias(alias: &Alias) -> Result<TokenStream> {
         #deprecated
         pub type #name = #ty;
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::naming::Case;
+    use crate::naming::to_ident;
+
+    /// One struct, `Widget`, with one field that carries a `default`.
+    fn widget_with_a_default() -> Struct {
+        return Struct {
+            name: to_ident("Widget", Case::Pascal),
+            doc: None,
+            deprecated: None,
+            fields: vec![Field {
+                name: to_ident("count", Case::Snake),
+                rename: None,
+                doc: None,
+                deprecated: None,
+                ty: RustType::I64,
+                required: false,
+                omit_empty: None,
+                serde_skip: false,
+                default: Some(DefaultValue::Int(10)),
+            }],
+            additional_properties: None,
+            deny_unknown_fields: false,
+        };
+    }
+
+    fn rendered(serde: SerdeDerives) -> String {
+        let derives = ModelDerives {
+            serde,
+            foreign: ForeignDerives {
+                debug: true,
+                clone: true,
+                partial_eq: true,
+            },
+        };
+        return emit_struct(&widget_with_a_default(), derives)
+            .expect("this struct renders")
+            .to_string();
+    }
+
+    /// Only the `Deserialize` derive reads `default`. Beside any other derive
+    /// set the function has no caller, and the generated crate warns.
+    #[test]
+    fn a_default_function_needs_the_deserialize_derive() {
+        let cases = [
+            (
+                SerdeDerives {
+                    serialize: true,
+                    deserialize: true,
+                },
+                true,
+            ),
+            (
+                SerdeDerives {
+                    serialize: false,
+                    deserialize: true,
+                },
+                true,
+            ),
+            (
+                SerdeDerives {
+                    serialize: true,
+                    deserialize: false,
+                },
+                false,
+            ),
+            (
+                SerdeDerives {
+                    serialize: false,
+                    deserialize: false,
+                },
+                false,
+            ),
+        ];
+        for (serde, is_emitted) in cases {
+            let code = rendered(serde);
+            assert_eq!(code.contains("default_count"), is_emitted, "{code}");
+        }
+    }
 }

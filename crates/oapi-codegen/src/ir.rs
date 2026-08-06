@@ -85,6 +85,38 @@ pub struct Field {
     pub omit_empty: Option<bool>,
     /// `x-rust-serde-skip`: drop the field from (de)serialization via `#[serde(skip)]`.
     pub serde_skip: bool,
+    /// The value that serde uses when the property is absent, from `default`.
+    ///
+    /// An optional property with a default is *not* wrapped in `Option`. Once
+    /// parsed, it always holds a value. Only `nullable` keeps the `Option`,
+    /// because there `null` is a value that the property can carry.
+    ///
+    /// `default: null` never reaches here. The parser reads it as no default at
+    /// all, and serde already leaves a missing `Option` as `None`.
+    pub default: Option<DefaultValue>,
+}
+
+/// The value that serde uses when a property is absent.
+///
+/// Lowered from the schema `default` and already checked against the field type.
+/// The JSON value alone is not enough to write Rust. `1` is `1` for an integer
+/// field and `1.0` for a number field. `"active"` is a string for a `String`
+/// field and a variant path for an enum.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DefaultValue {
+    /// A string literal.
+    Str(String),
+    /// An integer literal.
+    Int(i64),
+    /// A floating-point literal.
+    Float(f64),
+    /// A `bool` literal.
+    Bool(bool),
+    /// A unit variant of a generated string enum, named by its identifier.
+    Variant(RustIdent),
+    /// An empty collection, which `Default::default()` gives for both `Vec` and
+    /// `HashMap`.
+    Empty,
 }
 
 /// A generated `enum`.

@@ -455,6 +455,7 @@ mod tests {
             required: true,
             omit_empty: None,
             serde_skip: false,
+            default: None,
         };
     }
 

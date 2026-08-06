@@ -267,6 +267,54 @@ Each such schema becomes a type alias, and `type A = B; type B = A;` is an error
 (`E0391`) that no indirection removes. The generator reports it and names the
 schemas on the cycle.
 
+## A `default` removes the `Option`
+
+An optional property with a `default` lowers to a plain `T`, not `Option<T>`. A
+`#[serde(default = "..")]` attribute points at an associated function:
+
+```rust
+pub struct Widget {
+    #[serde(default = "Widget::default_count")]
+    pub count: i64,
+}
+
+impl Widget {
+    fn default_count() -> i64 {
+        10
+    }
+}
+```
+
+The document says the value is `10` when the key is absent. So the field always
+holds a value after a parse, and an `Option` there only ever holds `Some`.
+
+The function is associated, not free. This keeps it out of the crate root, where
+every generated type lives. Field names are unique within a struct, so these
+names are unique too.
+
+`nullable` is the exception. There `null` is a value that the property carries.
+The `Option` stays, and the default fills its `Some` side. A `default: null` does
+nothing. The parser reads it as no default at all, and serde already leaves a
+missing `Option` as `None`.
+
+The generator ignores a `default` on a **required** property. The property is
+always present. Use the default, and a payload that omits a required property
+becomes valid.
+
+Only a value with a literal form works: a string, a number, a boolean, an enum
+value, an empty array, and an empty object. "An empty object" means a free-form
+map, from `additionalProperties`. A `default: {}` on a property with named
+properties is an error, because a struct has no such literal. A non-empty array,
+a non-empty object, and a value of the wrong type are errors too, not silent
+drops. A dropped default leaves the document and the code in disagreement. An
+`int32` property with a default outside the range of `i32` is an error for the
+same reason. The alternative is generated code that does not compile.
+
+A query parameter follows the same rule. A `default: 20` on `limit` gives a
+plain `i32` field. The default applies when the request omits `limit`. An empty
+`?limit=` is not an omission. It is the text `""`, and a parse of it into an
+`i32` fails.
+
 ## The server names its security but does not enforce it
 
 A document's `security` says which credential an operation expects. The
