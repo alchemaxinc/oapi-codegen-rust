@@ -243,9 +243,12 @@ fn emit_default_fn(field: &Field, value: &DefaultValue) -> Result<TokenStream> {
     let name = default_fn_name(field);
     let ty = emit_type(&field.ty)?;
     let expr = emit_default_value(value, &field.ty)?;
-    let doc = format!(" The `default` the document gives `{}`.", field.name.logical());
+    let doc = doc_attr(&Some(format!(
+        "The `default` the document gives `{}`.",
+        field.name.logical()
+    )));
     return Ok(quote! {
-        #[doc = #doc]
+        #doc
         fn #name() -> #ty {
             #expr
         }
