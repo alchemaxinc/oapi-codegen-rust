@@ -406,12 +406,13 @@ impl Lowerer<'_> {
         style: &QueryStyle,
         owner: &RustIdent,
     ) -> Result<Field> {
-        let mut ty = self.query_param_type(path, method, origin, data, style)?;
+        let schema = self.query_param_schema(path, method, origin, data)?;
+        let mut ty = self.query_param_type(path, method, origin, data, style, &schema)?;
 
         // A required parameter is always present, so its `default` never fires.
         let declared = match data.required {
             true => None,
-            false => self.query_param_default(path, method, origin, data)?,
+            false => schema.schema_data.default,
         };
         if !data.required && declared.is_none() {
             ty = ty.optional();
@@ -438,21 +439,26 @@ impl Lowerer<'_> {
         });
     }
 
-    /// The `default` a query parameter's schema declares, if any.
-    fn query_param_default(
+    /// The schema of a query parameter, resolved one time for both the type and
+    /// the `default` to read.
+    ///
+    /// A `content` parameter is rejected here. This generator reads a query
+    /// parameter from a schema only.
+    fn query_param_schema(
         &self,
         path: &str,
         method: &str,
         origin: Option<&str>,
         data: &ParameterData,
-    ) -> Result<Option<serde_json::Value>> {
+    ) -> Result<Schema> {
         let ParameterSchemaOrContent::Schema(schema) = &data.format else {
-            // `query_param_type` rejects a `content` parameter with a better
-            // message than this could give.
-            return Ok(None);
+            return Err(Error::UnsupportedOperation {
+                method: method.to_owned(),
+                path: path.to_owned(),
+                reason: format!("query parameter `{}` uses `content`, which is not supported", data.name),
+            });
         };
-        let schema = self.resolve_param_schema(path, method, origin, &data.name, schema)?;
-        return Ok(schema.schema_data.default);
+        return self.resolve_param_schema(path, method, origin, &data.name, schema);
     }
 
     /// Map a query parameter's schema to a scalar Rust type, or a `Vec<T>` of
@@ -468,20 +474,10 @@ impl Lowerer<'_> {
         origin: Option<&str>,
         data: &ParameterData,
         style: &QueryStyle,
+        schema: &Schema,
     ) -> Result<RustType> {
         let name = data.name.as_str();
         let explode = data.explode;
-        let schema = match &data.format {
-            ParameterSchemaOrContent::Schema(schema) => schema,
-            ParameterSchemaOrContent::Content(_) => {
-                return Err(Error::UnsupportedOperation {
-                    method: method.to_owned(),
-                    path: path.to_owned(),
-                    reason: format!("query parameter `{name}` uses `content`, which is not supported"),
-                });
-            }
-        };
-        let schema = self.resolve_param_schema(path, method, origin, name, schema)?;
         if let SchemaKind::Type(Type::Array(array)) = &schema.schema_kind {
             if !matches!(style, QueryStyle::Form) || explode == Some(false) {
                 return Err(Error::UnsupportedOperation {

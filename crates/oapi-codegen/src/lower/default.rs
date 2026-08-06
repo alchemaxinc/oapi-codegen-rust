@@ -214,5 +214,14 @@ mod tests {
     #[test]
     fn a_type_with_no_literal_form_is_rejected() {
         assert!(lower(Value::from("2020-01-01"), &RustType::Date).is_err());
+        // An empty map has a literal, `Default::default()`. A struct has none,
+        // so `{}` works for the first and not for the second.
+        let map = RustType::Map(Box::new(RustType::String));
+        assert_eq!(
+            lowered(Value::Object(serde_json::Map::new()), &map),
+            DefaultValue::Empty
+        );
+        let named = RustType::Named("Status".to_owned());
+        assert!(lower(Value::Object(serde_json::Map::new()), &named).is_err());
     }
 }
