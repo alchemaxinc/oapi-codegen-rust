@@ -434,6 +434,14 @@ pub fn check_duplicate_models(module: &Module) -> Result<()> {
 /// Every generation mode calls this check. `targets` says which names to hold,
 /// because only a server or a client writes `Result`.
 ///
+/// The check reads names, not uses, so it is wider than it has to be. A spec
+/// with a schema named `Box` and no recursion writes no `Box<T>`, and it would
+/// compile. It is still rejected. Two reasons keep it that way: a false
+/// rejection is loud and has a one-line remedy in the hint, while a missed use
+/// site emits code that does not compile, which is the failure this check
+/// exists to stop. The verdict also stays put. Adding a recursive schema later
+/// cannot turn an accepted name into a broken build.
+///
 /// # Errors
 ///
 /// Returns one [`Error::PreludeShadowing`] for a single name, or an

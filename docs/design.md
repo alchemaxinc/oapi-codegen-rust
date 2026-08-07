@@ -191,6 +191,13 @@ fails generation, and the remedy is `x-rust-name` or
 no `Result`, so a models-only run accepts a schema of that name. This matches the
 rule for `Api` and `Client`: a name is held only when the run writes it.
 
+Within a target the check reads names, not uses, so it is wider than it has to
+be. A spec with a schema named `Box` and no recursion writes no `Box<T>`, and it
+would compile, but it is rejected all the same. The trade is deliberate. A false
+rejection is loud and the hint gives the remedy on one line, while a missed use
+site emits code that does not compile. The verdict also stays put: adding a
+recursive schema later cannot turn an accepted name into a broken build.
+
 `Ok`, `Err`, `Some`, and `None` are free, and belong on no such list, but the
 reason is narrow enough to write down. Those name values. A **braced** `struct`,
 an `enum`, and an alias each take a type name only, so `Ok(..)` in generated code
@@ -200,9 +207,10 @@ name as well, and a model named `Ok` would then hide the prelude variant.
 The generator writes `pub struct Name {..}` at every site, so the rule holds. It
 is an invariant rather than an accident, and `every_generated_struct_is_braced`
 states it. The `combined_prelude_value_names` fixture compiles the adversarial
-case: models named `Ok`, `Err`, `Some`, and `None` beside a server and a client
-that write all four unqualified, including response enums that read `Ok(Ok)` and
-`Ok(Some)`.
+case: an operation references each of the four names, so none is pruned, and a
+server and a client then write all four without a path beside them. The generated
+file holds `Ok(Ok)`, `Ok(Some)`, and a `NotFound(None)` variant a few lines above
+a plain prelude `None`.
 
 ## OpenAPI 3.0 only, and the version gate
 

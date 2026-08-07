@@ -123,9 +123,10 @@ pub struct PreludeTypeName {
 /// value name too, and a model named `Ok` would then hide the prelude variant.
 /// The emitter writes `pub struct #name {..}` at every site, and
 /// `every_generated_struct_is_braced` holds it there. Fixture
-/// `combined_prelude_value_names` compiles the adversarial case: a server and a
-/// client that write `Ok(..)`, `Err(..)`, `Some(..)`, and `None` around models of
-/// those names.
+/// `combined_prelude_value_names` compiles the adversarial case: an operation
+/// references each of the four names, so none is pruned, and a server and a
+/// client then write `Ok(..)`, `Err(..)`, `Some(..)`, and `None` without a path
+/// beside models of those names.
 pub fn prelude_type_names(targets: Targets) -> Vec<PreludeTypeName> {
     // Models carry the first four whichever target asks for them.
     let mut names = vec![

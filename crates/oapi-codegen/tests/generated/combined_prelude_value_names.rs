@@ -26,6 +26,13 @@ pub struct Some {
     pub value: Option<String>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct None {
+    pub note: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub holder: Option<Some>,
+}
+
 #[derive(Debug, Clone)]
 pub struct UploadMultipart {
     pub caption: Option<String>,
@@ -49,8 +56,10 @@ pub struct ProbeQuery {
 pub enum ProbeResponse {
     /// some
     Ok(Some),
-    /// none
+    /// empty
     NoContent,
+    /// none
+    NotFound(None),
 }
 
 impl<S> axum::extract::FromRequest<S> for UploadMultipart
@@ -155,6 +164,15 @@ impl axum::response::IntoResponse for ProbeResponse {
                     Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
                 };
                 STATUS.into_response()
+            }
+            ProbeResponse::NotFound(body) => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    404,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
             }
         }
     }
@@ -295,6 +313,10 @@ impl Client {
         }
         if status.as_u16() == 204 {
             return Ok(ProbeResponse::NoContent);
+        }
+        if status.as_u16() == 404 {
+            let body: None = response.json()?;
+            return Ok(ProbeResponse::NotFound(body));
         }
         return Err(ClientError::UnexpectedStatus(status));
     }

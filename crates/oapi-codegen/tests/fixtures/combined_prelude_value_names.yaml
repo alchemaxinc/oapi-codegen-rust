@@ -39,13 +39,18 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Some" }
         "204":
+          description: empty
+        "404":
           description: none
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/None" }
 components:
   schemas:
-    # The adversarial case for `Ok`, `Err`, `Some`, and `None`. Every operation
-    # here references one, so pruning keeps them, and both generators emit
-    # `Ok(..)`, `Err(..)`, `Some(..)`, and `None` without a path around them. The
-    # response enums below even read `Ok(Ok)` and `Ok(Some)`.
+    # The adversarial case for `Ok`, `Err`, `Some`, and `None`. An operation
+    # references each of the four, so pruning keeps all four, and both generators
+    # emit `Ok(..)`, `Err(..)`, `Some(..)`, and `None` without a path around them.
+    # The response enums below even read `Ok(Ok)` and `Ok(Some)`.
     #
     # It compiles because each model is a *braced* `struct`, which takes a type
     # name only. A tuple or unit `struct` would take the value name too and break
