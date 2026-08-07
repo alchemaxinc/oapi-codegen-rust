@@ -91,6 +91,16 @@ verify-generated: ## Regenerate all generated files and fail when they differ fr
 	fi
 	@echo "Generated files are up to date."
 
+.PHONY: verify-package
+verify-package: ## Fail when the published package does not build, or when it carries the test suite
+	cargo package -p oapi-codegen --locked
+	@if cargo package -p oapi-codegen --locked --list | grep -q '^tests/'; then \
+		echo "ERROR: the package carries the test suite."; \
+		echo "Check 'include' in crates/oapi-codegen/Cargo.toml."; \
+		exit 1; \
+	fi
+	@echo "Package is trim and builds."
+
 .PHONY: docs
 docs: ## Generate and open Rust documentation
 	cargo doc --no-deps --open
