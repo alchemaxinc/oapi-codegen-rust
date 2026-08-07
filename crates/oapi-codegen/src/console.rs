@@ -245,9 +245,16 @@ fn hints_for(err: &Error) -> Vec<String> {
         Error::Unimplemented(_) => {
             return vec!["This generation mode is not supported yet.".to_owned()];
         }
-        Error::UnresolvedRef(_) | Error::UnsupportedRef { .. } => {
+        Error::UnresolvedRef(_) => {
             return vec![
-                "A same-document `#/components/...` pointer always resolves.".to_owned(),
+                "The document has no component at that pointer.".to_owned(),
+                "Check the spelling, and check that the component exists.".to_owned(),
+                "For a cross-file ref, the component must exist in the other file.".to_owned(),
+            ];
+        }
+        Error::UnsupportedRef { .. } => {
+            return vec![
+                "A same-document `#/components/...` pointer is the supported form at any site.".to_owned(),
                 "A cross-file `<file>#/components/...` ref resolves at a response, a parameter, or a request body. Give the file an `import-mapping` entry. The path is relative to the spec.".to_owned(),
                 "Inside a schema, only a same-document ref resolves. This covers a property, `items`, `additionalProperties`, `allOf`, and a union member.".to_owned(),
             ];
