@@ -1,0 +1,67 @@
+openapi: 3.0.3
+info:
+  title: Prelude value names, server and client
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                caption: { type: string }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ok" }
+        "400":
+          description: bad
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Err" }
+  /probe:
+    get:
+      operationId: probe
+      parameters:
+        - name: maybe
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: some
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Some" }
+        "204":
+          description: none
+components:
+  schemas:
+    # The adversarial case for `Ok`, `Err`, `Some`, and `None`. Every operation
+    # here references one, so pruning keeps them, and both generators emit
+    # `Ok(..)`, `Err(..)`, `Some(..)`, and `None` without a path around them. The
+    # response enums below even read `Ok(Ok)` and `Ok(Some)`.
+    #
+    # It compiles because each model is a *braced* `struct`, which takes a type
+    # name only. A tuple or unit `struct` would take the value name too and break
+    # this. `every_generated_struct_is_braced` holds that invariant.
+    Ok:
+      type: object
+      properties: { id: { type: string } }
+    Err:
+      type: object
+      properties: { message: { type: string } }
+    Some:
+      type: object
+      properties: { value: { type: string } }
+    None:
+      type: object
+      required: [note]
+      properties:
+        note: { type: string }
+        holder: { $ref: "#/components/schemas/Some" }

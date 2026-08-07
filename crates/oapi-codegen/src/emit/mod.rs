@@ -105,7 +105,7 @@ pub struct Targets {
 pub struct PreludeTypeName {
     /// The prelude identifier, for example `Option`.
     pub name: &'static str,
-    /// What the file writes the name for, for example `every optional field`,
+    /// What generated code can name it for, for example `every optional field`,
     /// used in the shadowing error.
     pub used_for: &'static str,
 }
@@ -117,10 +117,15 @@ pub struct PreludeTypeName {
 /// use of the shadowed type stops compiling, so
 /// [`crate::lower::check_prelude_shadowing`] rejects it up front.
 ///
-/// `Ok`, `Err`, `Some`, and `None` are absent, and belong in no list. Those name
-/// values, and a generated model is a braced `struct`, an `enum`, or an alias,
-/// which takes a type name only. So `Ok(..)` in emitted code still finds the
-/// prelude.
+/// `Ok`, `Err`, `Some`, and `None` are absent, and belong in no list, but the
+/// reason is narrow. Those name values, and a *braced* `struct`, an `enum`, and
+/// an alias each take a type name only. A tuple or unit `struct` would take the
+/// value name too, and a model named `Ok` would then hide the prelude variant.
+/// The emitter writes `pub struct #name {..}` at every site, and
+/// `every_generated_struct_is_braced` holds it there. Fixture
+/// `combined_prelude_value_names` compiles the adversarial case: a server and a
+/// client that write `Ok(..)`, `Err(..)`, `Some(..)`, and `None` around models of
+/// those names.
 pub fn prelude_type_names(targets: Targets) -> Vec<PreludeTypeName> {
     // Models carry the first four whichever target asks for them.
     let mut names = vec![

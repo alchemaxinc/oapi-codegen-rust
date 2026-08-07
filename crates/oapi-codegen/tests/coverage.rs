@@ -516,6 +516,7 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// flat crate-root layout in which the server and client share one file and the
 /// same per-operation types alongside the component models.
 const COMBINED_FIXTURES: &[&str] = &[
+    "combined_prelude_value_names",
     "combined_server_client",
     "combined_response_name_collision",
     "combined_x_rust_derive",
@@ -1174,6 +1175,7 @@ macro_rules! combined_generated_tests {
 }
 
 combined_generated_tests!(
+    combined_prelude_value_names,
     combined_server_client,
     combined_response_name_collision,
     combined_x_rust_derive,
@@ -1496,9 +1498,13 @@ fn prelude_name_check_is_target_scoped() {
 }
 
 /// A value name is not a type name. `Ok`, `Err`, `Some`, and `None` name values,
-/// and a generated model is a braced `struct`, an `enum`, or an alias, so it takes
-/// a type name only. Those four must therefore generate, and the generated file
-/// under `tests/generated` compiles as proof.
+/// and a *braced* `struct` takes a type name only, so those four must generate.
+/// The generated file under `tests/generated` compiles as proof.
+///
+/// This covers models-only output. `combined_prelude_value_names` covers the
+/// harder case, where a server and a client write `Ok(..)`, `Err(..)`, `Some(..)`,
+/// and `None` around models of those names. Both rest on
+/// `every_generated_struct_is_braced`.
 #[test]
 fn a_model_named_after_a_prelude_value_generates() {
     let fixture = tests_dir().join("fixtures").join("prelude_value_names.yaml");
@@ -2195,6 +2201,48 @@ fn fixtures_and_test_table_agree() {
             "fixture `{stem}.yaml` is not catalogued in TEST_TABLE",
         );
     }
+}
+
+/// Every generated `struct` must be braced, never a tuple or a unit `struct`.
+///
+/// This is what keeps `Ok`, `Err`, `Some`, and `None` free as schema names. A
+/// braced `struct` takes a type name only. A tuple or unit `struct` takes the
+/// value name of that identifier too, so a model named `Ok` would then shadow the
+/// prelude variant, and every `Ok(..)` the generators write would stop compiling.
+///
+/// The invariant is implicit in the emitter, which writes `pub struct #name {..}`
+/// at every site. This test states it, so a newtype added later fails here rather
+/// than in a consumer's build.
+#[test]
+fn every_generated_struct_is_braced() {
+    let dir = tests_dir().join("generated");
+    let entries = std::fs::read_dir(&dir).expect("read generated dir");
+    let mut checked = 0_usize;
+    for entry in entries {
+        let path = entry.expect("dir entry").path();
+        if !path.extension().is_some_and(|ext| {
+            return ext == "rs";
+        }) {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("read generated file");
+        for line in source.lines() {
+            let Some(rest) = line.trim_start().strip_prefix("pub struct ") else {
+                continue;
+            };
+            checked += 1;
+            // A braced struct opens its body, or its generics, before anything
+            // else. A tuple struct opens `(` and a unit struct ends at `;`.
+            let tail = rest.trim_end();
+            assert!(
+                tail.ends_with('{'),
+                "`{}` in {} is not a braced struct, which would take a prelude value name",
+                tail,
+                path.display(),
+            );
+        }
+    }
+    assert!(checked > 0, "no generated struct was checked, so the scan is broken");
 }
 
 /// The test table itself must be well-formed: unique elements, and every

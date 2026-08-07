@@ -229,8 +229,9 @@ pub enum Error {
     PreludeShadowing {
         /// The Rust type name that shadows the prelude.
         name: String,
-        /// What the file writes the shadowed name for, for example
-        /// `every optional field`.
+        /// What generated code can name the shadowed type for, for example
+        /// `every optional field`. The check reads names, not uses, so the file
+        /// at hand does not have to hold one.
         used_for: String,
         /// How to resolve the clash. Rendered by the console as a hint, and not
         /// by `Display`, so the console does not print it twice.
@@ -458,7 +459,7 @@ impl std::fmt::Display for Error {
             Error::PreludeShadowing { name, used_for, .. } => {
                 return write!(
                     f,
-                    "generated type `{name}` shadows the Rust prelude type of that name, which the file writes for {used_for}"
+                    "generated type `{name}` shadows the Rust prelude type of that name, which generated code can name without a path for {used_for}"
                 );
             }
             Error::DuplicateTypeName { name, .. } => {

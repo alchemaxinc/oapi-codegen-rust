@@ -191,10 +191,18 @@ fails generation, and the remedy is `x-rust-name` or
 no `Result`, so a models-only run accepts a schema of that name. This matches the
 rule for `Api` and `Client`: a name is held only when the run writes it.
 
-`Ok`, `Err`, `Some`, and `None` are free, and belong on no such list. Those name
-values. A generated model is a braced `struct`, an `enum`, or an alias, each of
-which takes a type name only, so `Ok(..)` in generated code still finds the
-prelude.
+`Ok`, `Err`, `Some`, and `None` are free, and belong on no such list, but the
+reason is narrow enough to write down. Those name values. A **braced** `struct`,
+an `enum`, and an alias each take a type name only, so `Ok(..)` in generated code
+still finds the prelude. A **tuple** or **unit** `struct` would take the value
+name as well, and a model named `Ok` would then hide the prelude variant.
+
+The generator writes `pub struct Name {..}` at every site, so the rule holds. It
+is an invariant rather than an accident, and `every_generated_struct_is_braced`
+states it. The `combined_prelude_value_names` fixture compiles the adversarial
+case: models named `Ok`, `Err`, `Some`, and `None` beside a server and a client
+that write all four unqualified, including response enums that read `Ok(Ok)` and
+`Ok(Some)`.
 
 ## OpenAPI 3.0 only, and the version gate
 

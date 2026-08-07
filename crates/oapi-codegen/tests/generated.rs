@@ -30,6 +30,8 @@ mod generated {
     pub mod client_negotiated_response;
     #[path = "client_widgets.rs"]
     pub mod client_widgets;
+    #[path = "combined_prelude_value_names.rs"]
+    pub mod combined_prelude_value_names;
     #[path = "combined_response_name_collision.rs"]
     pub mod combined_response_name_collision;
     #[path = "combined_server_client.rs"]
