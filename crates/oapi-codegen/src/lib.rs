@@ -87,12 +87,14 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
             client: want_client,
         };
         lower::check_type_name_collisions(&service, &module, &emit::reserved_type_names(targets))?;
+        lower::check_prelude_shadowing(&module, targets)?;
         return emit::emit_flat(&module, &service, server_urls.as_ref(), targets);
     }
     // Models-only generation prunes nothing, so the module holds every schema and
     // every collision reports.
     names.check_emitted(&module)?;
     lower::check_duplicate_models(&module)?;
+    lower::check_prelude_shadowing(&module, emit::Targets::default())?;
     lower::box_recursive_types(&mut module)?;
     return emit::emit_module(&module, server_urls.as_ref());
 }
@@ -117,6 +119,7 @@ pub fn generate_models_string(spec_path: &Path) -> Result<String> {
     // Every schema becomes an item here, so every collision reaches the file.
     names.check_emitted(&module)?;
     lower::check_duplicate_models(&module)?;
+    lower::check_prelude_shadowing(&module, emit::Targets::default())?;
     lower::box_recursive_types(&mut module)?;
     let code = emit::emit_module(&module, None)?;
     return Ok(code);

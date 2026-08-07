@@ -67,6 +67,10 @@ mod generated {
     pub mod oneof_discriminator;
     #[path = "oneof_untagged.rs"]
     pub mod oneof_untagged;
+    #[path = "prelude_result_name.rs"]
+    pub mod prelude_result_name;
+    #[path = "prelude_value_names.rs"]
+    pub mod prelude_value_names;
     #[path = "primitive_scalars.rs"]
     pub mod primitive_scalars;
     #[path = "recursive_schema.rs"]

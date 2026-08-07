@@ -89,13 +89,65 @@ pub fn emit_module(module: &Module, server_urls: Option<&ServerUrls>) -> Result<
 
 /// Which generator interfaces to emit alongside the shared per-operation types.
 ///
-/// At least one field is set whenever [`emit_flat`] is called.
-#[derive(Debug, Clone, Copy)]
+/// At least one field is set whenever [`emit_flat`] is called. The default, with
+/// no field set, is models-only generation.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Targets {
     /// Emit the axum server interface.
     pub server: bool,
     /// Emit the blocking `reqwest` client.
     pub client: bool,
+}
+
+/// A Rust prelude type that the emitted file names without a path, and what
+/// needs it.
+#[derive(Debug, Clone, Copy)]
+pub struct PreludeTypeName {
+    /// The prelude identifier, for example `Option`.
+    pub name: &'static str,
+    /// What the file writes the name for, for example `every optional field`,
+    /// used in the shadowing error.
+    pub used_for: &'static str,
+}
+
+/// The prelude types the requested `targets` name without a path.
+///
+/// A generated type of one of these names does not duplicate any item, so no
+/// collision check sees it. It shadows the prelude inside the file, and every
+/// use of the shadowed type stops compiling, so
+/// [`crate::lower::check_prelude_shadowing`] rejects it up front.
+///
+/// `Ok`, `Err`, `Some`, and `None` are absent, and belong in no list. Those name
+/// values, and a generated model is a braced `struct`, an `enum`, or an alias,
+/// which takes a type name only. So `Ok(..)` in emitted code still finds the
+/// prelude.
+pub fn prelude_type_names(targets: Targets) -> Vec<PreludeTypeName> {
+    // Models carry the first four whichever target asks for them.
+    let mut names = vec![
+        PreludeTypeName {
+            name: "Option",
+            used_for: "every optional field",
+        },
+        PreludeTypeName {
+            name: "String",
+            used_for: "every string field",
+        },
+        PreludeTypeName {
+            name: "Vec",
+            used_for: "every array field",
+        },
+        PreludeTypeName {
+            name: "Box",
+            used_for: "the indirection a recursive schema takes",
+        },
+    ];
+    if targets.server || targets.client {
+        names.push(PreludeTypeName {
+            name: "Result",
+            used_for: "every generated method signature",
+        });
+    }
+    return names;
 }
 
 /// A fixed type name the generator emits at the crate root for a given target,

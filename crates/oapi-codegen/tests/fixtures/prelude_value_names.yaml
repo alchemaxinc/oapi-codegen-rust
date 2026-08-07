@@ -1,0 +1,44 @@
+openapi: 3.0.3
+info:
+  title: Prelude value names
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # `Ok`, `Err`, `Some`, and `None` name values, not types. A generated model is
+    # a braced `struct`, an `enum`, or an alias, so it takes a type name only and
+    # leaves those four alone. `Holder` below then keeps its `Option`, and any
+    # `Ok(..)` a generator writes still finds the prelude.
+    Ok:
+      type: object
+      properties:
+        id:
+          type: string
+    Err:
+      type: object
+      properties:
+        message:
+          type: string
+    Some:
+      type: object
+      properties:
+        value:
+          type: string
+    None:
+      type: object
+      properties:
+        note:
+          type: string
+    Holder:
+      type: object
+      required:
+        - certain
+      properties:
+        certain:
+          type: string
+        maybe:
+          type: string
+        many:
+          type: array
+          items:
+            type: string

@@ -174,6 +174,28 @@ struct. Two types of one operation need a different suffix, because no method na
 separates them. Two types of different operations take `x-rust-name` on one of the
 two operations.
 
+## A prelude name is not free
+
+The section above is about two items that take one name. A model named `Option`
+is a different failure. It emits one item, duplicates nothing, and passes every
+collision check. It hides the prelude `Option` for the whole file instead, so
+each `Option<String>` there reads as that struct and takes no argument. The file
+stops compiling.
+
+Five names carry this risk, because the emitted file writes them without a path:
+`Option`, `String`, `Vec`, `Box`, and `Result`. A model that takes one of them
+fails generation, and the remedy is `x-rust-name` or
+`output-options.type-name-suffix`.
+
+`Result` is held only when a server or a client is generated. Models alone name
+no `Result`, so a models-only run accepts a schema of that name. This matches the
+rule for `Api` and `Client`: a name is held only when the run writes it.
+
+`Ok`, `Err`, `Some`, and `None` are free, and belong on no such list. Those name
+values. A generated model is a braced `struct`, an `enum`, or an alias, each of
+which takes a type name only, so `Ok(..)` in generated code still finds the
+prelude.
+
 ## OpenAPI 3.0 only, and the version gate
 
 The generator reads OpenAPI 3.0 documents through the `openapiv3` crate. Every

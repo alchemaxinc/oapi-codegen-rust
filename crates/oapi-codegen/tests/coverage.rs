@@ -338,6 +338,21 @@ const TEST_TABLE: &[Feature] = &[
         status: Status::Supported,
         fixture: Some("type_name_collisions"),
     },
+    Feature {
+        element: "naming.prelude-value-names",
+        status: Status::Supported,
+        fixture: Some("prelude_value_names"),
+    },
+    Feature {
+        element: "naming.prelude-type-names",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_prelude_shadowing"),
+    },
+    Feature {
+        element: "naming.prelude-type-names.target-scoped",
+        status: Status::Supported,
+        fixture: Some("prelude_result_name"),
+    },
     // Document-level (server/client generation). The axum server generator now
     // covers a slice of paths/parameters/requestBody/responses; the blocking
     // reqwest client generator additionally covers securitySchemes. Those slices
@@ -630,6 +645,8 @@ generated_tests!(
     number_formats,
     object_additional_properties,
     object_deny_unknown_fields,
+    prelude_result_name,
+    prelude_value_names,
     schema_defaults,
     object_nested_inline,
     object_optional_required,
@@ -1423,6 +1440,78 @@ fn operation_types_that_take_client_reserved_names_fail() {
     assert!(
         report.contains("`Client`") && report.contains("`ClientError`"),
         "one run must report both reserved names, got: {report}",
+    );
+}
+
+/// A model that takes the name of a prelude type the file writes without a path
+/// must stop generation. Such a model emits one item and duplicates nothing, so
+/// no other collision check sees it. It shadows the prelude instead, and the
+/// generated file stops compiling.
+#[test]
+fn a_model_that_shadows_a_prelude_type_fails() {
+    let fixture = tests_dir().join("fixtures").join("unsupported_prelude_shadowing.yaml");
+    let err = oapi_codegen::generate_models_string(&fixture).expect_err("a model named `Option` must stop generation");
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    // One run reports every shadowed name, so the author fixes them together.
+    assert_eq!(problems.len(), 4, "expected every shadowed name, got: {problems:?}");
+    let report = err.to_string();
+    for name in ["Option", "String", "Vec", "Box"] {
+        assert!(report.contains(name), "the report must name `{name}`, got: {report}");
+    }
+}
+
+/// The remedy must name a rename, because the prelude name is fixed.
+#[test]
+fn the_prelude_shadowing_hint_offers_a_rename() {
+    let fixture = tests_dir().join("fixtures").join("unsupported_prelude_shadowing.yaml");
+    let err = oapi_codegen::generate_models_string(&fixture).expect_err("a shadowing model must stop generation");
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    let first = problems.first().expect("at least one problem");
+    let oapi_codegen::Error::PreludeShadowing { hint, used_for, .. } = first else {
+        panic!("expected PreludeShadowing, got: {first:?}");
+    };
+    assert!(
+        hint.contains("x-rust-name"),
+        "the hint must offer a rename, got: {hint}"
+    );
+    assert!(!used_for.is_empty(), "the problem must say what needs the name");
+}
+
+/// A prelude name is only held when the run writes it. Models name no `Result`,
+/// so a model of that name generates. A server writes `Result` in every method
+/// signature, so the same document fails there.
+#[test]
+fn prelude_name_check_is_target_scoped() {
+    let fixture = tests_dir().join("fixtures").join("prelude_result_name.yaml");
+    oapi_codegen::generate_models_string(&fixture).expect("models alone name no `Result`");
+    let err = oapi_codegen::generate(&fixture, &server_config()).expect_err("a server writes `Result` in every method");
+    assert!(
+        matches!(err, oapi_codegen::Error::PreludeShadowing { .. }),
+        "expected PreludeShadowing, got: {err:?}",
+    );
+}
+
+/// A value name is not a type name. `Ok`, `Err`, `Some`, and `None` name values,
+/// and a generated model is a braced `struct`, an `enum`, or an alias, so it takes
+/// a type name only. Those four must therefore generate, and the generated file
+/// under `tests/generated` compiles as proof.
+#[test]
+fn a_model_named_after_a_prelude_value_generates() {
+    let fixture = tests_dir().join("fixtures").join("prelude_value_names.yaml");
+    let code = oapi_codegen::generate_models_string(&fixture).expect("a prelude value name is free");
+    assert!(
+        code.contains("pub struct Ok") && code.contains("pub struct None"),
+        "the models must keep their names, got: {code}",
+    );
+    // The same file still writes `Option` for an optional field, which proves the
+    // four names left it alone.
+    assert!(
+        code.contains("pub maybe: Option<String>"),
+        "the file must still name the prelude `Option`, got: {code}",
     );
 }
 

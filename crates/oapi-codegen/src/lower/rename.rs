@@ -24,6 +24,7 @@ use crate::config::OUTPUT_OPTIONS_KEY;
 use crate::config::RESPONSE_TYPE_SUFFIX_KEY;
 use crate::config::TYPE_NAME_SUFFIX_KEY;
 use crate::emit::ReservedTypeName;
+use crate::emit::Targets;
 use crate::error::Error;
 use crate::error::Result;
 use crate::ir::EnumKind;
@@ -418,6 +419,37 @@ pub fn check_duplicate_models(module: &Module) -> Result<()> {
                 hint: duplicate_model_hint(item.name()),
             });
         }
+    }
+    return diagnostics.into_result();
+}
+
+/// Fail generation if an emitted item takes the name of a prelude type that the
+/// file names without a path.
+///
+/// This is not a duplicate-name check. A schema named `Option` emits one item,
+/// so [`check_duplicate_models`] and [`check_type_name_collisions`] both pass.
+/// The item shadows `Option` for the whole file instead, and every `Option<T>`
+/// in it then reads as that struct.
+///
+/// Every generation mode calls this check. `targets` says which names to hold,
+/// because only a server or a client writes `Result`.
+///
+/// # Errors
+///
+/// Returns one [`Error::PreludeShadowing`] for a single name, or an
+/// [`Error::Validation`] that holds all of them.
+pub fn check_prelude_shadowing(module: &Module, targets: Targets) -> Result<()> {
+    let mut diagnostics = crate::lower::validate::Diagnostics::new();
+    let prelude = crate::emit::prelude_type_names(targets);
+    for item in &module.items {
+        let Some(shadowed) = prelude.iter().find(|entry| return entry.name == item.name()) else {
+            continue;
+        };
+        diagnostics.push(Error::PreludeShadowing {
+            name: shadowed.name.to_owned(),
+            used_for: shadowed.used_for.to_owned(),
+            hint: format!("Rename the schema with `{X_RUST_NAME}`, or with `output-options.type-name-suffix`."),
+        });
     }
     return diagnostics.into_result();
 }

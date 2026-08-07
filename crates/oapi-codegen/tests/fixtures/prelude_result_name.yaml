@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: Prelude name a server needs
+  version: 1.0.0
+paths:
+  /probe:
+    get:
+      operationId: probe
+      responses:
+        "200":
+          description: A payload whose type takes a prelude name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Result"
+components:
+  schemas:
+    # Models name no `Result`, so a model of that name is free here. A server or
+    # a client writes `Result` in every method signature, so the same document
+    # fails for those targets. `prelude_name_check_is_target_scoped` holds both
+    # halves.
+    Result:
+      type: object
+      properties:
+        state:
+          type: string

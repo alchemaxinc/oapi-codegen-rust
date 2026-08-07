@@ -278,6 +278,7 @@ fn hints_for(err: &Error) -> Vec<String> {
         | Error::UnsupportedContentType { hint, .. }
         | Error::TypeNameCollision { hint, .. }
         | Error::DuplicateTypeName { hint, .. }
+        | Error::PreludeShadowing { hint, .. }
         | Error::OperationTypeCollision { hint, .. }
         | Error::SchemaNameCollision { hint, .. }
         | Error::RecursiveAlias { hint, .. }
