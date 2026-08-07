@@ -174,6 +174,44 @@ struct. Two types of one operation need a different suffix, because no method na
 separates them. Two types of different operations take `x-rust-name` on one of the
 two operations.
 
+## A prelude name is not free
+
+The section above is about two items that take one name. A model named `Option`
+is a different failure. It emits one item, duplicates nothing, and passes every
+collision check. It hides the prelude `Option` for the whole file instead, so
+each `Option<String>` there reads as that struct and takes no argument. The file
+stops compiling.
+
+Five names carry this risk, because the emitted file writes them without a path:
+`Option`, `String`, `Vec`, `Box`, and `Result`. A model that takes one of them
+fails generation, and the remedy is `x-rust-name` or
+`output-options.type-name-suffix`.
+
+`Result` is held only when a server or a client is generated. Models alone name
+no `Result`, so a models-only run accepts a schema of that name. This matches the
+rule for `Api` and `Client`: a name is held only when the run writes it.
+
+Within a target the check reads names, not uses, so it is wider than it has to
+be. A spec with a schema named `Box` and no recursion writes no `Box<T>`, and it
+would compile, but it is rejected all the same. The trade is deliberate. A false
+rejection is loud and the hint gives the remedy on one line, while a missed use
+site emits code that does not compile. The verdict also stays put: adding a
+recursive schema later cannot turn an accepted name into a broken build.
+
+`Ok`, `Err`, `Some`, and `None` are free, and belong on no such list, but the
+reason is narrow enough to write down. Those name values. A **braced** `struct`,
+an `enum`, and an alias each take a type name only, so `Ok(..)` in generated code
+still finds the prelude. A **tuple** or **unit** `struct` would take the value
+name as well, and a model named `Ok` would then hide the prelude variant.
+
+The generator writes `pub struct Name {..}` at every site, so the rule holds. It
+is an invariant rather than an accident, and `every_generated_struct_is_braced`
+states it. The `combined_prelude_value_names` fixture compiles the adversarial
+case: an operation references each of the four names, so none is pruned, and a
+server and a client then write all four without a path beside them. The generated
+file holds `Ok(Ok)`, `Ok(Some)`, and a `NotFound(None)` variant a few lines above
+a plain prelude `None`.
+
 ## OpenAPI 3.0 only, and the version gate
 
 The generator reads OpenAPI 3.0 documents through the `openapiv3` crate. Every

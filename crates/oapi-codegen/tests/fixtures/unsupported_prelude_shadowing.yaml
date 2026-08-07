@@ -1,0 +1,35 @@
+openapi: 3.0.3
+info:
+  title: Prelude type names
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # The generated file names each of these without a path. A model of the same
+    # name hides the prelude type for the whole file, and every use of it there
+    # stops compiling. One run must report all four.
+    Option:
+      type: object
+      properties:
+        kind:
+          type: string
+    String:
+      type: object
+      properties:
+        text:
+          type: string
+    Vec:
+      type: object
+      properties:
+        len:
+          type: integer
+    Box:
+      type: object
+      properties:
+        size:
+          type: integer
+    Holder:
+      type: object
+      properties:
+        maybe:
+          type: string

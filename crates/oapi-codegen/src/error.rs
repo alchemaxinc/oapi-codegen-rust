@@ -220,6 +220,24 @@ pub enum Error {
         hint: String,
     },
 
+    /// A generated type took the name of a Rust prelude type that the emitted
+    /// code writes unqualified, such as `Option` or `Vec`.
+    ///
+    /// The name does not duplicate an emitted item, so no other collision check
+    /// sees it. It shadows the prelude inside the generated file instead, and
+    /// every use of the shadowed type there stops compiling.
+    PreludeShadowing {
+        /// The Rust type name that shadows the prelude.
+        name: String,
+        /// What generated code can name the shadowed type for, for example
+        /// `every optional field`. The check reads names, not uses, so the file
+        /// at hand does not have to hold one.
+        used_for: String,
+        /// How to resolve the clash. Rendered by the console as a hint, and not
+        /// by `Display`, so the console does not print it twice.
+        hint: String,
+    },
+
     /// Two emitted items took one Rust type name, and at least one of them came
     /// from an inline schema that lowering hoisted to the crate root.
     ///
@@ -438,6 +456,12 @@ impl std::fmt::Display for Error {
                     "generated {artifact} `{name}` collides with a component schema of the same name"
                 );
             }
+            Error::PreludeShadowing { name, used_for, .. } => {
+                return write!(
+                    f,
+                    "generated type `{name}` shadows the Rust prelude type of that name, which generated code can name without a path for {used_for}"
+                );
+            }
             Error::DuplicateTypeName { name, .. } => {
                 return write!(f, "two generated items both take the Rust type name `{name}`");
             }
@@ -511,6 +535,7 @@ impl std::error::Error for Error {
             | Error::SchemaDepthExceeded { .. }
             | Error::TypeNameCollision { .. }
             | Error::DuplicateTypeName { .. }
+            | Error::PreludeShadowing { .. }
             | Error::OperationTypeCollision { .. }
             | Error::SchemaNameCollision { .. }
             | Error::RecursiveAlias { .. }
