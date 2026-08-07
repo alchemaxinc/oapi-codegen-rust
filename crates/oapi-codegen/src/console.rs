@@ -247,8 +247,9 @@ fn hints_for(err: &Error) -> Vec<String> {
         }
         Error::UnresolvedRef(_) | Error::UnsupportedRef { .. } => {
             return vec![
-                "Supported references are local `#/components/...` pointers and same-directory cross-file refs."
-                    .to_owned(),
+                "A same-document `#/components/...` pointer always resolves.".to_owned(),
+                "A cross-file `<file>#/components/...` ref resolves at a response, a parameter, or a request body. Give the file an `import-mapping` entry. The path is relative to the spec.".to_owned(),
+                "Inside a schema, only a same-document ref resolves. This covers a property, `items`, `additionalProperties`, `allOf`, and a union member.".to_owned(),
             ];
         }
         Error::UnsupportedSchema { .. } | Error::UnsupportedOperation { .. } => {
