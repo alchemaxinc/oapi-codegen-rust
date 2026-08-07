@@ -93,13 +93,15 @@ verify-generated: ## Regenerate all generated files and fail when they differ fr
 
 .PHONY: verify-package
 verify-package: ## Fail when the published package does not build, or when it carries the test suite
-	cargo package -p oapi-codegen --locked
-	@if cargo package -p oapi-codegen --locked --list | grep -q '^tests/'; then \
+	@set -euo pipefail; \
+	files="$$(cargo package -p oapi-codegen --locked --list)"; \
+	if grep -q '^tests/' <<< "$$files"; then \
 		echo "ERROR: the package carries the test suite."; \
 		echo "Check 'include' in crates/oapi-codegen/Cargo.toml."; \
 		exit 1; \
 	fi
-	@echo "Package is trim and builds."
+	cargo package -p oapi-codegen --locked
+	@echo "The package builds and carries no tests."
 
 .PHONY: docs
 docs: ## Generate and open Rust documentation
