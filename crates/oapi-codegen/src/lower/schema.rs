@@ -28,6 +28,7 @@ use crate::ir::Struct;
 use crate::ir::UnionVariant;
 use crate::loader::Spec;
 use crate::loader::ref_target_name;
+use crate::loader::schema_ref_reason;
 use crate::lower::default::lower_default;
 use crate::naming::Case;
 use crate::naming::X_RUST_NAME;
@@ -83,7 +84,7 @@ pub fn generate_models(spec: &Spec, names: &crate::lower::rename::TypeNames) -> 
                 let target = ref_target_name(reference).ok_or_else(|| {
                     return Error::UnsupportedRef {
                         reference: reference.clone(),
-                        reason: "top-level schema alias must reference another schema".to_owned(),
+                        reason: schema_ref_reason(reference, "a top-level schema alias"),
                     };
                 })?;
                 items.push(Item::Alias(Alias {
@@ -311,7 +312,7 @@ impl Mapper<'_> {
         let target = ref_target_name(reference).ok_or_else(|| {
             return Error::UnsupportedRef {
                 reference: reference.clone(),
-                reason: "allOf ref must reference a schema".to_owned(),
+                reason: schema_ref_reason(reference, "an allOf member"),
             };
         })?;
         return Ok(Some(target.to_owned()));
@@ -335,7 +336,7 @@ impl Mapper<'_> {
                 let target = ref_target_name(reference).ok_or_else(|| {
                     return Error::UnsupportedRef {
                         reference: reference.clone(),
-                        reason: "allOf ref must reference a schema".to_owned(),
+                        reason: schema_ref_reason(reference, "an allOf member"),
                     };
                 })?;
                 RustType::Named(target.to_owned())
@@ -444,7 +445,7 @@ impl Mapper<'_> {
             let target = ref_target_name(reference).ok_or_else(|| {
                 return Error::UnsupportedRef {
                     reference: reference.clone(),
-                    reason: "discriminator mapping must reference a schema".to_owned(),
+                    reason: schema_ref_reason(reference, "a discriminator mapping"),
                 };
             })?;
             variants.push(UnionVariant {
@@ -469,7 +470,7 @@ impl Mapper<'_> {
                     let target = ref_target_name(reference).ok_or_else(|| {
                         return Error::UnsupportedRef {
                             reference: reference.clone(),
-                            reason: "union member ref must reference a schema".to_owned(),
+                            reason: schema_ref_reason(reference, "a union member"),
                         };
                     })?;
                     // Name the variant from the *resolved* type name, so an
@@ -533,7 +534,7 @@ impl Mapper<'_> {
                 let target = ref_target_name(reference).ok_or_else(|| {
                     return Error::UnsupportedRef {
                         reference: reference.clone(),
-                        reason: "property ref must reference a schema".to_owned(),
+                        reason: schema_ref_reason(reference, "a property"),
                     };
                 })?;
                 return Ok(RustType::Named(target.to_owned()));
@@ -553,7 +554,7 @@ impl Mapper<'_> {
                 let target = ref_target_name(reference).ok_or_else(|| {
                     return Error::UnsupportedRef {
                         reference: reference.clone(),
-                        reason: "additionalProperties ref must reference a schema".to_owned(),
+                        reason: schema_ref_reason(reference, "additionalProperties"),
                     };
                 })?;
                 return Ok(RustType::Named(target.to_owned()));

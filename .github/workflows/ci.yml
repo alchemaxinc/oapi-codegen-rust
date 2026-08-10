@@ -200,6 +200,15 @@ jobs:
       - name: Check generated code is up to date
         run: make verify-generated
 
+      # `include` in the crate manifest is an allowlist, so a new source file
+      # under a path it does not name would be dropped from the package and the
+      # release would be the first thing to notice. Package here instead, with
+      # the same `--locked` the deploy workflow publishes with. The step runs
+      # after the drift check, which leaves a clean tree, because `cargo
+      # package` refuses a dirty one.
+      - name: Check the published package builds and stays trim
+        run: make verify-package
+
   lint-prettier:
     runs-on: ubuntu-latest
     needs: install-prettier

@@ -508,6 +508,20 @@ pub fn ref_target_name(reference: &str) -> Option<&str> {
     return ref_component_name(reference, "schemas");
 }
 
+/// The reason a schema `$ref` at `site` gives no name.
+///
+/// [`ref_target_name`] answers `None` for two different faults, and the remedy
+/// differs. A cross-file ref names a schema and still fails, so a message that
+/// asks the author to reference a schema misleads. Name the fault instead.
+///
+/// `site` reads into the sentence, for example `a property`.
+pub fn schema_ref_reason(reference: &str, site: &str) -> String {
+    if ref_file_part(reference).is_some() {
+        return format!("a cross-file ref does not resolve at {site}");
+    }
+    return format!("{site} must reference `#/components/schemas/<name>`");
+}
+
 /// Extract the trailing component name of the given `kind` (`schemas`,
 /// `responses`, `parameters`, or `requestBodies`) from a (possibly cross-file)
 /// `$ref`.
@@ -608,6 +622,20 @@ mod tests {
             None
         );
         assert_eq!(ref_target_name("#/components/responses/Bar"), None);
+    }
+
+    /// The two faults behind a `None` from [`ref_target_name`] need different
+    /// remedies, so the reason must tell them apart.
+    #[test]
+    fn a_schema_ref_reason_names_the_fault() {
+        assert_eq!(
+            schema_ref_reason("common.yaml#/components/schemas/X", "a property"),
+            "a cross-file ref does not resolve at a property"
+        );
+        assert_eq!(
+            schema_ref_reason("#/components/responses/Bar", "a property"),
+            "a property must reference `#/components/schemas/<name>`"
+        );
     }
 
     #[test]

@@ -6,6 +6,15 @@ edition.workspace = true
 repository.workspace = true
 license.workspace = true
 
+# An allowlist, not an `exclude`. A new directory in the crate then stays out of
+# a publish until someone names it here. `include` overrides `exclude`, so the
+# manifest carries one of the two and not both.
+#
+# The `tests` directory holds the fixtures and their generated files, which is
+# almost the whole of the package. A consumer builds the crate and does not run
+# its suite, so the files stay in the repository only.
+include = ["src/**/*.rs"]
+
 [[bin]]
 name = "oapi-codegen"
 path = "src/main.rs"
