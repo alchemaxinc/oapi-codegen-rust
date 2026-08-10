@@ -120,6 +120,8 @@ mod generated {
     #[path = "server_urls.rs"]
     pub mod server_urls;
 
+    #[path = "integer_enum.rs"]
+    pub mod integer_enum;
     #[path = "server_auth.rs"]
     pub mod server_auth;
     #[path = "server_xfile_refs.rs"]

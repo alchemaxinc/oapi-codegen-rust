@@ -305,6 +305,43 @@ Each such schema becomes a type alias, and `type A = B; type B = A;` is an error
 (`E0391`) that no indirection removes. The generator reports it and names the
 schemas on the cycle.
 
+## An integer `enum` becomes a real enum
+
+`enum` on an `integer` schema gives a Rust `enum`, and not a bare `i64`. Each
+value becomes a unit variant with the value as its discriminant.
+
+```yaml
+Priority:
+  type: integer
+  enum: [1, 2, 3]
+```
+
+```rust
+#[serde(try_from = "i64", into = "i64")]
+#[repr(i64)]
+pub enum Priority {
+    Value1 = 1,
+    Value2 = 2,
+    Value3 = 3,
+}
+```
+
+The `repr` follows the `format`, so `int32` gives `i32`. A generated
+`From` and `TryFrom` pair carries the value, and the wire form stays a bare
+number. A number the document does not list fails to deserialize, and the message
+names the type and the value.
+
+Each `serde` key drives one trait, so the generator writes `try_from` only with
+`Deserialize` and `into` only with `Serialize`. A response-only model therefore
+gets `into` alone.
+
+A default variant name comes from the value: `1` gives `Value1`, and `-1` gives
+`ValueMinus1`. These names are poor, so give `x-enum-varnames` as a string enum
+does.
+
+A `number` or `boolean` `enum` still lowers to a bare `f64` or `bool`. A float is
+not a legal discriminant, and a boolean enum names nothing useful.
+
 ## A `default` removes the `Option`
 
 An optional property with a `default` lowers to a plain `T`, not `Option<T>`. A

@@ -20,6 +20,7 @@ use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
 use crate::ir::ForeignDerives;
+use crate::ir::IntegerVariant;
 use crate::ir::Item;
 use crate::ir::Module;
 use crate::ir::RustType;
@@ -150,6 +151,10 @@ impl Mapper<'_> {
             SchemaKind::Type(Type::String(st)) if !st.enumeration.is_empty() => {
                 Item::Enum(self.string_enum(name, &st.enumeration, data))
             }
+            SchemaKind::Type(Type::Integer(it)) if !it.enumeration.is_empty() => {
+                let repr = integer_format_type(&it.format);
+                Item::Enum(self.integer_enum(name, &it.enumeration, repr, data))
+            }
             SchemaKind::Type(Type::Object(obj)) => self.object_to_item(name, obj, data)?,
             SchemaKind::OneOf { one_of } | SchemaKind::AnyOf { any_of: one_of } => {
                 Item::Enum(self.make_union(name, one_of, data)?)
@@ -278,7 +283,7 @@ impl Mapper<'_> {
                         return match item {
                             Item::Enum(enom) if enom.name == ident => match &enom.kind {
                                 EnumKind::Strings(variants) => Some(variants.clone()),
-                                EnumKind::Union(_) => None,
+                                EnumKind::Union(_) | EnumKind::Integers { .. } => None,
                             },
                             _ => None,
                         };
@@ -520,6 +525,35 @@ impl Mapper<'_> {
         };
     }
 
+    /// Lower an integer schema that carries an `enum` into a C-like Rust enum.
+    ///
+    /// A variant takes its name from `x-enum-varnames` when the document gives
+    /// one. Otherwise the name comes from the value: `1` gives `Value1`, and
+    /// `-1` gives `ValueMinus1`.
+    fn integer_enum(&self, name: &str, values: &[Option<i64>], repr: RustType, data: &SchemaData) -> Enum {
+        let varnames =
+            extension_str_array(data, X_ENUM_VARNAMES).or_else(|| return extension_str_array(data, X_ENUM_NAMES));
+        let mut variants = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (index, value) in values.iter().flatten().enumerate() {
+            let base = match varnames.as_ref().and_then(|names| return names.get(index)) {
+                Some(custom) => to_ident(custom, Case::Pascal),
+                None => to_ident(&integer_variant_name(*value), Case::Pascal),
+            };
+            variants.push(IntegerVariant {
+                name: crate::naming::deconflict_ident(base, &mut seen),
+                value: *value,
+                doc: None,
+            });
+        }
+        return Enum {
+            name: self.type_name_ident(name),
+            doc: doc_of(data),
+            deprecated: deprecation_of(data),
+            kind: EnumKind::Integers { repr, variants },
+        };
+    }
+
     /// Resolve a property/items/additionalProperties schema reference to a type,
     /// hoisting inline named types into `self.extra` as needed.
     fn type_from_schema_ref(&mut self, hint: &str, schema: &ReferenceOr<Box<Schema>>) -> Result<RustType> {
@@ -579,6 +613,12 @@ impl Mapper<'_> {
                 RustType::Named(hint.to_owned())
             }
             SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
+            SchemaKind::Type(Type::Integer(it)) if !it.enumeration.is_empty() => {
+                let repr = integer_format_type(&it.format);
+                let enom = self.integer_enum(hint, &it.enumeration, repr, data);
+                self.extra.push(Item::Enum(enom));
+                RustType::Named(hint.to_owned())
+            }
             SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
             SchemaKind::Type(Type::Number(_)) => RustType::F64,
             SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
@@ -677,6 +717,14 @@ pub(crate) fn string_format_type(format: &VariantOrUnknownOrEmpty<StringFormat>)
 }
 
 /// Map an integer `format` to a Rust type.
+/// The default name for an integer enum variant, from its value.
+fn integer_variant_name(value: i64) -> String {
+    if value < 0 {
+        return format!("value_minus_{}", value.unsigned_abs());
+    }
+    return format!("value_{value}");
+}
+
 pub(crate) fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat>) -> RustType {
     let ty = match format {
         VariantOrUnknownOrEmpty::Item(IntegerFormat::Int32) => RustType::I32,

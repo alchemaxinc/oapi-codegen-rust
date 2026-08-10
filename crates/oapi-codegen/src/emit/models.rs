@@ -14,6 +14,7 @@ use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
 use crate::ir::ForeignDerives;
+use crate::ir::IntegerVariant;
 use crate::ir::Item;
 use crate::ir::RustType;
 use crate::ir::StringVariant;
@@ -355,6 +356,40 @@ pub(crate) fn emit_enum(enom: &Enum, derives: ModelDerives) -> Result<TokenStrea
                 }
             }
         }
+        EnumKind::Integers { repr, variants } => {
+            let repr_ty = emit_type(repr)?;
+            let rendered: Vec<TokenStream> = variants.iter().map(emit_integer_variant).collect();
+            // `try_from`/`into` carry the bare number over the wire. Each one
+            // drives a single serde trait, so emit it only when that trait
+            // derives, or serde rejects the attribute as unused.
+            let mut convert = Vec::new();
+            if derives.serde.deserialize {
+                let text = format!("{repr_ty}");
+                convert.push(quote! { try_from = #text });
+            }
+            if derives.serde.serialize {
+                let text = format!("{repr_ty}");
+                convert.push(quote! { into = #text });
+            }
+            let convert_attr = if convert.is_empty() {
+                quote! {}
+            } else {
+                quote! { #[serde(#(#convert),*)] }
+            };
+            let conversions = emit_integer_conversions(&enom.name, repr, variants);
+            quote! {
+                #doc
+                #derive_attr
+                #convert_attr
+                #[repr(#repr_ty)]
+                #deprecated
+                pub enum #name {
+                    #(#rendered)*
+                }
+
+                #conversions
+            }
+        }
         EnumKind::Union(variants) => {
             let mut rendered = Vec::with_capacity(variants.len());
             for variant in variants {
@@ -372,6 +407,58 @@ pub(crate) fn emit_enum(enom: &Enum, derives: ModelDerives) -> Result<TokenStrea
         }
     };
     return Ok(tokens);
+}
+
+/// Render one unit variant of an integer enum.
+fn emit_integer_variant(variant: &IntegerVariant) -> TokenStream {
+    let name = variant.name.to_token();
+    let doc = doc_attr(&variant.doc);
+    let value = proc_macro2::Literal::i64_unsuffixed(variant.value);
+    return quote! {
+        #doc
+        #name = #value,
+    };
+}
+
+/// Render the two conversions that `#[serde(try_from, into)]` needs.
+///
+/// A value the document does not list fails deserialization, and the message
+/// names both the type and the value.
+fn emit_integer_conversions(name: &RustIdent, repr: &RustType, variants: &[IntegerVariant]) -> TokenStream {
+    let ident = name.to_token();
+    let repr_ty = match emit_type(repr) {
+        Ok(tokens) => tokens,
+        Err(_) => return quote! {},
+    };
+    let label = name.logical();
+    let mut to_number = Vec::with_capacity(variants.len());
+    let mut from_number = Vec::with_capacity(variants.len());
+    for variant in variants {
+        let variant_ident = variant.name.to_token();
+        let value = proc_macro2::Literal::i64_unsuffixed(variant.value);
+        to_number.push(quote! { #ident::#variant_ident => #value, });
+        from_number.push(quote! { #value => Ok(#ident::#variant_ident), });
+    }
+    return quote! {
+        impl From<#ident> for #repr_ty {
+            fn from(value: #ident) -> Self {
+                return match value {
+                    #(#to_number)*
+                };
+            }
+        }
+
+        impl TryFrom<#repr_ty> for #ident {
+            type Error = String;
+
+            fn try_from(value: #repr_ty) -> Result<Self, Self::Error> {
+                return match value {
+                    #(#from_number)*
+                    other => Err(format!("`{}` is not a value of `{}`", other, #label)),
+                };
+            }
+        }
+    };
 }
 
 /// Render one unit variant of a string enum.

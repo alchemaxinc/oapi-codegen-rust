@@ -1,0 +1,42 @@
+openapi: "3.0.3"
+info:
+  title: Integer enum
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Priority:
+      type: integer
+      description: How urgent the job is.
+      enum:
+        - 1
+        - 2
+        - 3
+    # A negative value and `int32` both reach the name and the `repr`.
+    Offset:
+      type: integer
+      format: int32
+      enum:
+        - -1
+        - 0
+        - 1
+    # `x-enum-varnames` names the variants, as it does for a string enum.
+    Level:
+      type: integer
+      enum:
+        - 10
+        - 20
+      x-enum-varnames:
+        - Low
+        - High
+    # An inline enum hoists to its own type, and the property points at it.
+    Job:
+      type: object
+      properties:
+        priority:
+          $ref: "#/components/schemas/Priority"
+        retries:
+          type: integer
+          enum:
+            - 0
+            - 5

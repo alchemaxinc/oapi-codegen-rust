@@ -137,6 +137,16 @@ pub struct Enum {
 pub enum EnumKind {
     /// A C-like string enum: unit variants mapped to wire strings.
     Strings(Vec<StringVariant>),
+    /// A C-like integer enum: unit variants with explicit discriminants.
+    ///
+    /// The wire form is a bare number, so the emitted type carries
+    /// `#[serde(try_from, into)]` and a `#[repr]` of [`Self::Integers::repr`].
+    Integers {
+        /// The integer type the discriminants take, either `i32` or `i64`.
+        repr: RustType,
+        /// The permitted values, in document order.
+        variants: Vec<IntegerVariant>,
+    },
     /// A `#[serde(untagged)]` union over the given newtype variants.
     ///
     /// Untagged (rather than internally tagged) is used even when the OpenAPI
@@ -153,6 +163,17 @@ pub struct StringVariant {
     pub name: RustIdent,
     /// `#[serde(rename = "...")]` value, when the wire value differs.
     pub rename: Option<String>,
+    /// Doc comment, if any.
+    pub doc: Option<String>,
+}
+
+/// A unit variant of an integer enum.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntegerVariant {
+    /// Rust variant identifier.
+    pub name: RustIdent,
+    /// The discriminant, and the value on the wire.
+    pub value: i64,
     /// Doc comment, if any.
     pub doc: Option<String>,
 }
