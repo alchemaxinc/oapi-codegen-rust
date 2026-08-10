@@ -80,7 +80,7 @@ fn item_refs(item: &Item) -> Vec<String> {
     return match item {
         Item::Struct(s) => struct_refs(s),
         Item::Enum(enumeration) => match &enumeration.kind {
-            EnumKind::Strings(_) => Vec::new(),
+            EnumKind::Strings(_) | EnumKind::Integers { .. } => Vec::new(),
             EnumKind::Union(variants) => variants
                 .iter()
                 .filter_map(|variant| return named_ref(&variant.ty))

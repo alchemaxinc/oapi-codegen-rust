@@ -82,6 +82,21 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("string_enum"),
     },
     Feature {
+        element: "schema.type.integer.enum",
+        status: Status::Supported,
+        fixture: Some("integer_enum"),
+    },
+    Feature {
+        element: "schema.type.enum.duplicate-value",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_duplicate_enum_value"),
+    },
+    Feature {
+        element: "schema.type.integer.enum.out-of-range",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_enum_value_out_of_range"),
+    },
+    Feature {
         element: "schema.oneOf",
         status: Status::Supported,
         fixture: Some("oneof_untagged"),
@@ -662,6 +677,7 @@ generated_tests!(
     primitive_scalars,
     recursive_schema,
     ref_local,
+    integer_enum,
     string_enum,
     string_formats,
     type_name_collisions,

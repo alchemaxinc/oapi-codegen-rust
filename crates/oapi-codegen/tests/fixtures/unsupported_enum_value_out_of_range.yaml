@@ -1,0 +1,14 @@
+openapi: "3.0.3"
+info:
+  title: Enum value out of range
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # `int32` gives a `repr` of `i32`, which cannot hold this literal.
+    Offset:
+      type: integer
+      format: int32
+      enum:
+        - 1
+        - 4294967296

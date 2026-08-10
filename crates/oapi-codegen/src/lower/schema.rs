@@ -20,6 +20,7 @@ use crate::ir::Enum;
 use crate::ir::EnumKind;
 use crate::ir::Field;
 use crate::ir::ForeignDerives;
+use crate::ir::IntegerVariant;
 use crate::ir::Item;
 use crate::ir::Module;
 use crate::ir::RustType;
@@ -148,7 +149,11 @@ impl Mapper<'_> {
 
         let item = match &schema.schema_kind {
             SchemaKind::Type(Type::String(st)) if !st.enumeration.is_empty() => {
-                Item::Enum(self.string_enum(name, &st.enumeration, data))
+                Item::Enum(self.string_enum(name, &st.enumeration, data)?)
+            }
+            SchemaKind::Type(Type::Integer(it)) if !it.enumeration.is_empty() => {
+                let repr = integer_format_type(&it.format);
+                Item::Enum(self.integer_enum(name, &it.enumeration, &repr, data)?)
             }
             SchemaKind::Type(Type::Object(obj)) => self.object_to_item(name, obj, data)?,
             SchemaKind::OneOf { one_of } | SchemaKind::AnyOf { any_of: one_of } => {
@@ -278,7 +283,7 @@ impl Mapper<'_> {
                         return match item {
                             Item::Enum(enom) if enom.name == ident => match &enom.kind {
                                 EnumKind::Strings(variants) => Some(variants.clone()),
-                                EnumKind::Union(_) => None,
+                                EnumKind::Union(_) | EnumKind::Integers { .. } => None,
                             },
                             _ => None,
                         };
@@ -494,12 +499,24 @@ impl Mapper<'_> {
     ///
     /// `x-enum-varnames` / `x-enumNames` override variant identifiers positionally
     /// (in declaration order). The wire value is preserved via `#[serde(rename)]`.
-    fn string_enum(&self, name: &str, values: &[Option<String>], data: &SchemaData) -> Enum {
+    ///
+    /// A repeated value is an error. The second variant would take the same
+    /// `rename`, which leaves it unreachable and compiles only with a warning.
+    fn string_enum(&self, name: &str, values: &[Option<String>], data: &SchemaData) -> Result<Enum> {
         let varnames =
             extension_str_array(data, X_ENUM_VARNAMES).or_else(|| return extension_str_array(data, X_ENUM_NAMES));
+        let mut diagnostics = crate::lower::validate::Diagnostics::new();
         let mut variants = Vec::new();
         let mut seen = std::collections::HashSet::new();
+        let mut values_seen = std::collections::HashSet::new();
         for (index, value) in values.iter().flatten().enumerate() {
+            if !values_seen.insert(value.as_str()) {
+                diagnostics.push(Error::UnsupportedSchema {
+                    path: name.to_owned(),
+                    reason: format!("the `enum` gives `{value}` more than once"),
+                });
+                continue;
+            }
             let base = match varnames.as_ref().and_then(|names| return names.get(index)) {
                 Some(custom) => to_ident(custom, Case::Pascal),
                 None => to_ident(value, Case::Pascal),
@@ -512,12 +529,66 @@ impl Mapper<'_> {
                 doc: None,
             });
         }
-        return Enum {
+        diagnostics.into_result()?;
+        return Ok(Enum {
             name: self.type_name_ident(name),
             doc: doc_of(data),
             deprecated: deprecation_of(data),
             kind: EnumKind::Strings(variants),
-        };
+        });
+    }
+
+    /// Lower an integer schema that carries an `enum` into a C-like Rust enum.
+    ///
+    /// A variant takes its name from `x-enum-varnames` when the document gives
+    /// one. Otherwise the name comes from the value: `1` gives `Value1`, and
+    /// `-1` gives `ValueMinus1`.
+    ///
+    /// A repeated value is an error, because two variants cannot share one
+    /// discriminant (`E0081`). A value the `format` cannot hold is an error for
+    /// the same reason: the literal does not fit the `repr`.
+    fn integer_enum(&self, name: &str, values: &[Option<i64>], repr: &RustType, data: &SchemaData) -> Result<Enum> {
+        let varnames =
+            extension_str_array(data, X_ENUM_VARNAMES).or_else(|| return extension_str_array(data, X_ENUM_NAMES));
+        let mut diagnostics = crate::lower::validate::Diagnostics::new();
+        let mut variants = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut values_seen = std::collections::HashSet::new();
+        for (index, value) in values.iter().flatten().enumerate() {
+            if !values_seen.insert(*value) {
+                diagnostics.push(Error::UnsupportedSchema {
+                    path: name.to_owned(),
+                    reason: format!("the `enum` gives `{value}` more than once"),
+                });
+                continue;
+            }
+            if !fits_repr(*value, repr) {
+                diagnostics.push(Error::UnsupportedSchema {
+                    path: name.to_owned(),
+                    reason: format!("the `enum` gives `{value}`, which `{}` cannot hold", repr_name(repr)),
+                });
+                continue;
+            }
+            let base = match varnames.as_ref().and_then(|names| return names.get(index)) {
+                Some(custom) => to_ident(custom, Case::Pascal),
+                None => to_ident(&integer_variant_name(*value), Case::Pascal),
+            };
+            variants.push(IntegerVariant {
+                name: crate::naming::deconflict_ident(base, &mut seen),
+                value: *value,
+                doc: None,
+            });
+        }
+        diagnostics.into_result()?;
+        return Ok(Enum {
+            name: self.type_name_ident(name),
+            doc: doc_of(data),
+            deprecated: deprecation_of(data),
+            kind: EnumKind::Integers {
+                repr: repr.clone(),
+                variants,
+            },
+        });
     }
 
     /// Resolve a property/items/additionalProperties schema reference to a type,
@@ -574,11 +645,17 @@ impl Mapper<'_> {
 
         let ty = match &schema.schema_kind {
             SchemaKind::Type(Type::String(st)) if !st.enumeration.is_empty() => {
-                let enom = self.string_enum(hint, &st.enumeration, data);
+                let enom = self.string_enum(hint, &st.enumeration, data)?;
                 self.extra.push(Item::Enum(enom));
                 RustType::Named(hint.to_owned())
             }
             SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
+            SchemaKind::Type(Type::Integer(it)) if !it.enumeration.is_empty() => {
+                let repr = integer_format_type(&it.format);
+                let enom = self.integer_enum(hint, &it.enumeration, &repr, data)?;
+                self.extra.push(Item::Enum(enom));
+                RustType::Named(hint.to_owned())
+            }
             SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
             SchemaKind::Type(Type::Number(_)) => RustType::F64,
             SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
@@ -674,6 +751,30 @@ pub(crate) fn string_format_type(format: &VariantOrUnknownOrEmpty<StringFormat>)
         VariantOrUnknownOrEmpty::Empty => RustType::String,
     };
     return ty;
+}
+
+/// Whether an integer enum value fits the `repr` its `format` chooses.
+fn fits_repr(value: i64, repr: &RustType) -> bool {
+    if matches!(*repr, RustType::I32) {
+        return i32::try_from(value).is_ok();
+    }
+    return true;
+}
+
+/// The Rust name of an integer enum `repr`, for a diagnostic.
+fn repr_name(repr: &RustType) -> &'static str {
+    if matches!(*repr, RustType::I32) {
+        return "i32";
+    }
+    return "i64";
+}
+
+/// The default name for an integer enum variant, from its value.
+fn integer_variant_name(value: i64) -> String {
+    if value < 0 {
+        return format!("value_minus_{}", value.unsigned_abs());
+    }
+    return format!("value_{value}");
 }
 
 /// Map an integer `format` to a Rust type.
