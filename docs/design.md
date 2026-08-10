@@ -339,6 +339,12 @@ A default variant name comes from the value: `1` gives `Value1`, and `-1` gives
 `ValueMinus1`. These names are poor, so give `x-enum-varnames` as a string enum
 does.
 
+An `enum` names each value once. A repeat is an error, for a string enum and an
+integer enum alike. Two integer variants cannot share one discriminant
+(`E0081`), and two string variants that share one `rename` leave the second
+unreachable. An integer value the `repr` cannot hold is an error for the same
+reason: the literal does not fit.
+
 A `number` or `boolean` `enum` still lowers to a bare `f64` or `bool`. A float is
 not a legal discriminant, and a boolean enum names nothing useful.
 
