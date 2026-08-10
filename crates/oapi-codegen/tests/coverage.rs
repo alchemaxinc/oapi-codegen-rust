@@ -87,9 +87,14 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("integer_enum"),
     },
     Feature {
-        element: "schema.type.enum.duplicate-value",
+        element: "schema.type.integer.enum.duplicate-value",
         status: Status::Unsupported,
         fixture: Some("unsupported_duplicate_enum_value"),
+    },
+    Feature {
+        element: "schema.type.string.enum.duplicate-value",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_duplicate_string_enum_value"),
     },
     Feature {
         element: "schema.type.integer.enum.out-of-range",

@@ -376,7 +376,7 @@ pub(crate) fn emit_enum(enom: &Enum, derives: ModelDerives) -> Result<TokenStrea
             } else {
                 quote! { #[serde(#(#convert),*)] }
             };
-            let conversions = emit_integer_conversions(&enom.name, repr, variants);
+            let conversions = emit_integer_conversions(&enom.name, repr, variants)?;
             quote! {
                 #doc
                 #derive_attr
@@ -424,12 +424,9 @@ fn emit_integer_variant(variant: &IntegerVariant) -> TokenStream {
 ///
 /// A value the document does not list fails deserialization, and the message
 /// names both the type and the value.
-fn emit_integer_conversions(name: &RustIdent, repr: &RustType, variants: &[IntegerVariant]) -> TokenStream {
+fn emit_integer_conversions(name: &RustIdent, repr: &RustType, variants: &[IntegerVariant]) -> Result<TokenStream> {
     let ident = name.to_token();
-    let repr_ty = match emit_type(repr) {
-        Ok(tokens) => tokens,
-        Err(_) => return quote! {},
-    };
+    let repr_ty = emit_type(repr)?;
     let label = name.logical();
     let mut to_number = Vec::with_capacity(variants.len());
     let mut from_number = Vec::with_capacity(variants.len());
@@ -439,7 +436,7 @@ fn emit_integer_conversions(name: &RustIdent, repr: &RustType, variants: &[Integ
         to_number.push(quote! { #ident::#variant_ident => #value, });
         from_number.push(quote! { #value => Ok(#ident::#variant_ident), });
     }
-    return quote! {
+    return Ok(quote! {
         impl From<#ident> for #repr_ty {
             fn from(value: #ident) -> Self {
                 return match value {
@@ -458,7 +455,7 @@ fn emit_integer_conversions(name: &RustIdent, repr: &RustType, variants: &[Integ
                 };
             }
         }
-    };
+    });
 }
 
 /// Render one unit variant of a string enum.
