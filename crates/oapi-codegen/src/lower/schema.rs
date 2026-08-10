@@ -81,17 +81,12 @@ pub fn generate_models(spec: &Spec, names: &crate::lower::rename::TypeNames) -> 
                 items.push(item);
             }
             ReferenceOr::Reference { reference } => {
-                let target = ref_target_name(reference).ok_or_else(|| {
-                    return Error::UnsupportedRef {
-                        reference: reference.clone(),
-                        reason: schema_ref_reason(reference, "a top-level schema alias"),
-                    };
-                })?;
+                let target = mapper.schema_ref_target(reference, "a top-level schema alias")?;
                 items.push(Item::Alias(Alias {
                     name: mapper.type_name_ident(name),
                     doc: None,
                     deprecated: None,
-                    ty: RustType::Named(target.to_owned()),
+                    ty: RustType::Named(target),
                 }));
             }
         }
@@ -113,6 +108,25 @@ struct Mapper<'a> {
 }
 
 impl Mapper<'_> {
+    /// The name a schema `$ref` at `site` points to.
+    ///
+    /// Two faults end generation here. The ref can have a form no schema site
+    /// accepts, which [`schema_ref_reason`] describes. The ref can also name a
+    /// schema the document does not declare. Without the second check the name
+    /// reaches the output, and the generated file does not compile.
+    fn schema_ref_target(&self, reference: &str, site: &str) -> Result<String> {
+        let target = ref_target_name(reference).ok_or_else(|| {
+            return Error::UnsupportedRef {
+                reference: reference.to_owned(),
+                reason: schema_ref_reason(reference, site),
+            };
+        })?;
+        if !self.spec.schemas().contains_key(target) {
+            return Err(Error::UnresolvedRef(reference.to_owned()));
+        }
+        return Ok(target.to_owned());
+    }
+
     /// The identifier for a top-level type, honouring an `x-rust-name` override.
     fn type_name_ident(&self, name: &str) -> crate::naming::RustIdent {
         let effective = self.renames.get(name).map(String::as_str).unwrap_or(name);
@@ -309,13 +323,8 @@ impl Mapper<'_> {
         let [ReferenceOr::Reference { reference }] = members else {
             return Ok(None);
         };
-        let target = ref_target_name(reference).ok_or_else(|| {
-            return Error::UnsupportedRef {
-                reference: reference.clone(),
-                reason: schema_ref_reason(reference, "an allOf member"),
-            };
-        })?;
-        return Ok(Some(target.to_owned()));
+        let target = self.schema_ref_target(reference, "an allOf member")?;
+        return Ok(Some(target));
     }
 
     /// Collapse a single-member `allOf` to the type of its sole member.
@@ -333,13 +342,8 @@ impl Mapper<'_> {
         };
         let ty = match only {
             ReferenceOr::Reference { reference } => {
-                let target = ref_target_name(reference).ok_or_else(|| {
-                    return Error::UnsupportedRef {
-                        reference: reference.clone(),
-                        reason: schema_ref_reason(reference, "an allOf member"),
-                    };
-                })?;
-                RustType::Named(target.to_owned())
+                let target = self.schema_ref_target(reference, "an allOf member")?;
+                RustType::Named(target)
             }
             ReferenceOr::Item(schema) => self.type_from_schema(hint, schema)?,
         };
@@ -442,15 +446,10 @@ impl Mapper<'_> {
         let mut variants = Vec::with_capacity(disc.mapping.len());
         let mut seen = std::collections::HashSet::new();
         for (value, reference) in &disc.mapping {
-            let target = ref_target_name(reference).ok_or_else(|| {
-                return Error::UnsupportedRef {
-                    reference: reference.clone(),
-                    reason: schema_ref_reason(reference, "a discriminator mapping"),
-                };
-            })?;
+            let target = self.schema_ref_target(reference, "a discriminator mapping")?;
             variants.push(UnionVariant {
                 name: crate::naming::deconflict_ident(to_ident(value, Case::Pascal), &mut seen),
-                ty: RustType::Named(target.to_owned()),
+                ty: RustType::Named(target),
             });
         }
         return Ok(variants);
@@ -467,19 +466,14 @@ impl Mapper<'_> {
         for (index, member) in members.iter().enumerate() {
             let variant = match member {
                 ReferenceOr::Reference { reference } => {
-                    let target = ref_target_name(reference).ok_or_else(|| {
-                        return Error::UnsupportedRef {
-                            reference: reference.clone(),
-                            reason: schema_ref_reason(reference, "a union member"),
-                        };
-                    })?;
+                    let target = self.schema_ref_target(reference, "a union member")?;
                     // Name the variant from the *resolved* type name, so an
                     // `x-rust-name` override or a configured collision suffix
                     // reaches the variant too. The raw target name would give a
                     // variant that contradicts its own payload type.
                     UnionVariant {
-                        name: crate::naming::deconflict_ident(self.type_name_ident(target), &mut seen),
-                        ty: RustType::Named(target.to_owned()),
+                        name: crate::naming::deconflict_ident(self.type_name_ident(&target), &mut seen),
+                        ty: RustType::Named(target),
                     }
                 }
                 ReferenceOr::Item(schema) => {
@@ -531,13 +525,8 @@ impl Mapper<'_> {
     fn type_from_schema_ref(&mut self, hint: &str, schema: &ReferenceOr<Box<Schema>>) -> Result<RustType> {
         match schema {
             ReferenceOr::Reference { reference } => {
-                let target = ref_target_name(reference).ok_or_else(|| {
-                    return Error::UnsupportedRef {
-                        reference: reference.clone(),
-                        reason: schema_ref_reason(reference, "a property"),
-                    };
-                })?;
-                return Ok(RustType::Named(target.to_owned()));
+                let target = self.schema_ref_target(reference, "a property")?;
+                return Ok(RustType::Named(target));
             }
             ReferenceOr::Item(schema) => {
                 let ty = self.type_from_schema(hint, schema)?;
@@ -551,13 +540,8 @@ impl Mapper<'_> {
     fn type_from_ref_schema(&mut self, hint: &str, schema: &ReferenceOr<Schema>) -> Result<RustType> {
         match schema {
             ReferenceOr::Reference { reference } => {
-                let target = ref_target_name(reference).ok_or_else(|| {
-                    return Error::UnsupportedRef {
-                        reference: reference.clone(),
-                        reason: schema_ref_reason(reference, "additionalProperties"),
-                    };
-                })?;
-                return Ok(RustType::Named(target.to_owned()));
+                let target = self.schema_ref_target(reference, "additionalProperties")?;
+                return Ok(RustType::Named(target));
             }
             ReferenceOr::Item(schema) => {
                 let ty = self.type_from_schema(hint, schema)?;

@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: A response schema ref with no target
+  version: 1.0.0
+paths:
+  # The server path reads a schema `$ref` of its own, so the models fix does not
+  # cover it. This operation once generated `Ok(Missing)` and reported success.
+  /a:
+    get:
+      operationId: a
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Missing" }
+components: {}
