@@ -353,6 +353,11 @@ const TEST_TABLE: &[Feature] = &[
         status: Status::Supported,
         fixture: Some("prelude_result_name"),
     },
+    Feature {
+        element: "ref.missing-target",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_missing_schema_ref"),
+    },
     // Document-level (server/client generation). The axum server generator now
     // covers a slice of paths/parameters/requestBody/responses; the blocking
     // reqwest client generator additionally covers securitySchemes. Those slices
@@ -470,6 +475,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_bytes_cookie_param",
     "server_unsupported_xfile_param_ref",
     "server_unsupported_xfile_body_ref",
+    "server_unsupported_missing_schema_ref",
     "server_unsupported_xfile_missing_component",
     "server_unsupported_xfile_no_import_mapping",
     "server_unsupported_xfile_object_path_param",
@@ -1462,6 +1468,27 @@ fn a_model_that_shadows_a_prelude_type_fails() {
     for name in ["Option", "String", "Vec", "Box"] {
         assert!(report.contains(name), "the report must name `{name}`, got: {report}");
     }
+}
+
+/// A `$ref` to a schema the document does not declare must stop generation.
+///
+/// The generator once read the name out of the pointer and asked no question,
+/// so `$ref: "#/components/schemas/Missing"` at a property wrote
+/// `pub x: Option<Missing>` and reported success. Nothing declares `Missing`,
+/// so the file does not compile. A silent bad output is worse than an error.
+#[test]
+fn a_ref_to_a_missing_schema_fails() {
+    let fixture = tests_dir().join("fixtures").join("unsupported_missing_schema_ref.yaml");
+    let err = oapi_codegen::generate_models_string(&fixture).expect_err("a ref with no target must stop generation");
+    let report = err.to_string();
+    assert!(
+        matches!(err, oapi_codegen::Error::UnresolvedRef(_)),
+        "an absent target is an unresolved ref, got: {err:?}"
+    );
+    assert!(
+        report.contains("Absent"),
+        "the report must name the absent target, got: {report}"
+    );
 }
 
 /// The remedy must name a rename, because the prelude name is fixed.

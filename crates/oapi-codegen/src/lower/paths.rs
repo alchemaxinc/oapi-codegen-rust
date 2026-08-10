@@ -1522,6 +1522,13 @@ impl Lowerer<'_> {
             .map(str::to_owned)
             .or_else(|| return origin.map(str::to_owned));
         let Some(file) = file else {
+            // A local ref must name a schema this document declares. Without the
+            // check the name reaches the output, and the generated file does not
+            // compile. A cross-file ref below resolves through the
+            // `import-mapping` instead, so the other document owns that name.
+            if !self.spec.schemas().contains_key(target) {
+                return Err(Error::UnresolvedRef(reference.to_owned()));
+            }
             return Ok(RustType::Named(target.to_owned()));
         };
         let module = self.import_mapping.get(&file).ok_or_else(|| {
