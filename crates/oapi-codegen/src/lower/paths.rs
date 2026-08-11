@@ -412,7 +412,7 @@ impl Lowerer<'_> {
         // A required parameter is always present, so its `default` never fires.
         let declared = match data.required {
             true => None,
-            false => schema.schema_data.default,
+            false => schema.schema_data.default.clone(),
         };
         if !data.required && declared.is_none() {
             ty = ty.optional();
@@ -426,7 +426,10 @@ impl Lowerer<'_> {
 
         let ident = to_ident(&data.name, Case::Snake);
         let rename = crate::naming::rename_for(&data.name, &ident);
-        return Ok(Field {
+        // A query parameter is the one place a server reads a value it does not
+        // own, so a constraint here does the most work.
+        let constraints = crate::lower::constraints::constraints_of(&schema);
+        let field = Field {
             name: ident,
             rename,
             doc: data.description.as_deref().and_then(trimmed),
@@ -436,7 +439,10 @@ impl Lowerer<'_> {
             omit_empty: None,
             serde_skip: false,
             default,
-        });
+            constraints,
+        };
+        crate::lower::constraints::check_constraints(&field)?;
+        return Ok(field);
     }
 
     /// The schema of a query parameter, resolved one time for both the type and

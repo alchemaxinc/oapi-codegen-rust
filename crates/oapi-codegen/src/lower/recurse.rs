@@ -448,6 +448,7 @@ mod tests {
                 omit_empty: None,
                 serde_skip: false,
                 default: None,
+                constraints: None,
             }],
             additional_properties: None,
             deny_unknown_fields: false,

@@ -163,6 +163,9 @@ pub fn required_dependencies(code: &str) -> Vec<Dependency> {
     if has("uuid::") {
         deps.push(with_features("uuid", true, vec!["serde"]));
     }
+    if has("regex::") {
+        deps.push(with_features("regex", false, vec!["std", "perf", "unicode"]));
+    }
     if has("http::") {
         deps.push(plain("http"));
     }

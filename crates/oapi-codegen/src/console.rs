@@ -259,6 +259,15 @@ fn hints_for(err: &Error) -> Vec<String> {
                 "Inside a schema, only a same-document ref resolves. This covers a property, `items`, `additionalProperties`, `allOf`, and a union member.".to_owned(),
             ];
         }
+        Error::UnsupportedSchema { reason, .. } if reason.contains("`multipleOf`") => {
+            return vec!["JSON Schema asks for a `multipleOf` above zero. A step of zero divides by zero.".to_owned()];
+        }
+        Error::UnsupportedSchema { reason, .. } if reason.contains("does not fit `i32`") => {
+            return vec![
+                "A bound must fit the type the `format` chooses. `int32` holds -2147483648 to 2147483647. Drop the `format` to get `i64`."
+                    .to_owned(),
+            ];
+        }
         Error::UnsupportedSchema { reason, .. } if reason.contains("`enum`") => {
             return vec![
                 "An `enum` names each value once. Remove the repeat.".to_owned(),

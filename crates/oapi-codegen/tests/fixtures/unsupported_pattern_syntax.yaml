@@ -1,0 +1,18 @@
+openapi: "3.0.3"
+info:
+  title: Unsupported pattern
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # OpenAPI writes a `pattern` in ECMA-262, which has look-ahead. Rust regular
+    # expressions do not. The generator reads the pattern and stops here, rather
+    # than write code that does not build.
+    Token:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+          pattern: "(?=x)abc"

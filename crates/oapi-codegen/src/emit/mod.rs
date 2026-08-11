@@ -5,6 +5,7 @@
 //! and pretty-printed with `prettyplease`.
 
 mod axum;
+mod constraints;
 mod models;
 mod operation;
 mod reqwest;

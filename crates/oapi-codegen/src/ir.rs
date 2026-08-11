@@ -94,6 +94,66 @@ pub struct Field {
     /// `default: null` never reaches here. The parser reads it as no default at
     /// all, and serde already leaves a missing `Option` as `None`.
     pub default: Option<DefaultValue>,
+    /// The validation keywords the property declares, when it declares any.
+    ///
+    /// The generator checks these on the way in, so the check runs only where
+    /// the code deserializes. A response the server writes is not checked.
+    pub constraints: Option<Constraints>,
+}
+
+/// A numeric bound, in the form the document writes it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Bound {
+    /// A bound on an `integer` schema.
+    Int(i64),
+    /// A bound on a `number` schema.
+    Float(f64),
+}
+
+/// The validation keywords a schema declares.
+///
+/// A field with no keyword carries `None`, so the common schema costs nothing.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Constraints {
+    /// `pattern`: the value must match this regular expression.
+    pub pattern: Option<String>,
+    /// `minLength`, counted in characters, as JSON Schema counts them.
+    pub min_length: Option<usize>,
+    /// `maxLength`, counted in characters.
+    pub max_length: Option<usize>,
+    /// `minimum`.
+    pub minimum: Option<Bound>,
+    /// `maximum`.
+    pub maximum: Option<Bound>,
+    /// `exclusiveMinimum`: makes `minimum` a strict bound.
+    pub exclusive_minimum: bool,
+    /// `exclusiveMaximum`: makes `maximum` a strict bound.
+    pub exclusive_maximum: bool,
+    /// `multipleOf`.
+    pub multiple_of: Option<Bound>,
+    /// `minItems`.
+    pub min_items: Option<usize>,
+    /// `maxItems`.
+    pub max_items: Option<usize>,
+    /// `uniqueItems`.
+    pub unique_items: bool,
+    /// `minProperties`.
+    pub min_properties: Option<usize>,
+    /// `maxProperties`.
+    pub max_properties: Option<usize>,
+    /// The type the checks run against, when the field names an alias.
+    ///
+    /// A `$ref` to a constrained scalar gives the field a named type, and the
+    /// name alone does not say which check applies. Lowering resolves the ref
+    /// and records the type behind the name here.
+    pub checked_as: Option<RustType>,
+}
+
+impl Constraints {
+    /// Whether the schema declares no keyword at all.
+    pub fn is_empty(&self) -> bool {
+        return *self == Self::default();
+    }
 }
 
 /// The value that serde uses when a property is absent.
@@ -323,6 +383,25 @@ impl RustType {
     /// "Option::is_none"` is valid).
     pub fn is_option(&self) -> bool {
         return matches!(self, RustType::Option(_));
+    }
+
+    /// The type inside any `Option` or `Box` wrapper.
+    ///
+    /// A `Vec` and a `Map` are not wrappers here. Each carries keywords of its
+    /// own, so a rule reads the collection and not an element.
+    pub fn innermost(&self) -> &RustType {
+        return match self {
+            RustType::Option(inner) | RustType::Boxed(inner) => inner.innermost(),
+            other => other,
+        };
+    }
+
+    /// Whether this is a scalar the generated code compares with `==`.
+    pub fn is_scalar(&self) -> bool {
+        return matches!(
+            self,
+            RustType::Bool | RustType::I32 | RustType::I64 | RustType::F64 | RustType::String
+        );
     }
 
     /// An `x-rust-type` target whose `x-rust-derive` is absent, so it claims all

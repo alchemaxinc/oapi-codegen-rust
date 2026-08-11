@@ -182,6 +182,11 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
         if let (Some(value), true) = (&field.default, serde.deserialize) {
             defaults.push(emit_default_fn(field, value)?);
         }
+        // A rule runs on the way in, so it needs the `Deserialize` derive. With
+        // any other derive set the function would be dead code.
+        if serde.deserialize && super::constraints::is_checked(field) {
+            defaults.push(super::constraints::emit_validate_fn(field)?);
+        }
     }
     // serde needs a path to call. An associated function keeps these out of the
     // crate root, where every generated type lives. Field names are unique
@@ -319,6 +324,15 @@ fn emit_field(field: &Field, serde: SerdeDerives, owner: &RustIdent) -> Result<T
             // compile.
             let path = format!("{}::{}", owner.to_token(), default_fn_name(field));
             metas.push(quote! { default = #path });
+        }
+        if serde.deserialize && super::constraints::is_checked(field) {
+            let path = format!("{}::{}", owner.to_token(), super::constraints::validate_fn_name(field));
+            metas.push(quote! { deserialize_with = #path });
+            // `deserialize_with` makes serde read the field even when it is
+            // absent, so an optional field without a `default` needs one.
+            if field.ty.is_option() && field.default.is_none() {
+                metas.push(quote! { default });
+            }
         }
     }
     let serde_attr = if !has_serde || metas.is_empty() {
@@ -520,6 +534,7 @@ mod tests {
                 omit_empty: None,
                 serde_skip: false,
                 default: Some(DefaultValue::Int(10)),
+                constraints: None,
             }],
             additional_properties: None,
             deny_unknown_fields: false,
