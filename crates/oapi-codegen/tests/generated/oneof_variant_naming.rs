@@ -9,50 +9,61 @@
 )]
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Node {
-    pub id: String,
-    pub child: Box<Node>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Comment {
-    pub text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reply: Option<Box<Comment>>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Tree {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub children: Option<Vec<Tree>>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Registry {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub entries: Option<std::collections::HashMap<String, Registry>>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Parent {
-    pub child: Box<Kid>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Kid {
-    pub parent: Box<Parent>,
+#[serde(untagged)]
+pub enum Scalars {
+    String(String),
+    I32(i32),
+    I64(i64),
+    F64(f64),
+    Bool(bool),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
-pub enum Expression {
-    String(String),
-    Expression(Box<Expression>),
+pub enum Formats {
+    Date(chrono::NaiveDate),
+    DateTime(chrono::DateTime<chrono::Utc>),
+    Uuid(uuid::Uuid),
 }
 
-pub type Wrapper = Holder;
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum Named {
+    Cat(Cat),
+    Dog(Dog),
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Holder {
-    pub wrapped: Box<Wrapper>,
+pub struct Widget {
+    pub sku: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum Referenced {
+    Widget(Widget),
+    Tally(Vec<String>),
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum Mixed {
+    String(String),
+    Widget(Widget),
+    Detail(Detail),
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct Cat {
+    pub meow: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct Dog {
+    pub bark: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct Detail {
+    pub note: String,
 }

@@ -284,6 +284,18 @@ fn hints_for(err: &Error) -> Vec<String> {
                     .to_owned(),
             ];
         }
+        Error::UnsupportedSchema { reason, .. } if reason.contains("gives the variant no name") => {
+            return vec![
+                "A member of a `oneOf` becomes a variant, and that variant needs a name. Give the member an `x-rust-name`, or move it into a component schema and point at it with `$ref`."
+                    .to_owned(),
+            ];
+        }
+        Error::UnsupportedSchema { reason, .. } if reason.contains("the union holds") => {
+            return vec![
+                "A `oneOf` becomes an untagged enum. Serde reads the variants in order and takes the first that fits, so a repeated type is unreachable. Remove the repeated member."
+                    .to_owned(),
+            ];
+        }
         Error::UnsupportedSchema { reason, .. } if reason.contains("`enum`") => {
             return vec![
                 "An `enum` names each value once. Remove the repeat.".to_owned(),
@@ -572,7 +584,21 @@ mod tests {
                 "the `uniqueItems` rule does not reach the type this field holds",
                 "numbers, strings, or booleans",
             ),
-            ("the `enum` gives `1` more than once", "Remove the repeat"),
+            ("the `enum` gives `1` more than once", "names each value once"),
+            (
+                "the union holds `Cat` twice, as `Cat` and as `Cat2`",
+                "Remove the repeated member",
+            ),
+            (
+                "member 0 of the union gives the variant no name",
+                "move it into a component schema",
+            ),
+            // A schema named `enum` puts that word in the union message too.
+            // The union arm must still win.
+            (
+                "the union holds `enum` twice, as `Enum` and as `Enum2`",
+                "Remove the repeated member",
+            ),
         ];
         for (reason, wanted) in cases {
             let err = Error::UnsupportedSchema {

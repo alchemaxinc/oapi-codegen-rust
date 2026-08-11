@@ -451,6 +451,7 @@ impl Mapper<'_> {
             Some(disc) if !disc.mapping.is_empty() => self.union_variants_from_mapping(disc)?,
             Some(_) | None => self.union_variants_from_members(name, members)?,
         };
+        check_variant_types(name, &variants)?;
         return Ok(Enum {
             name: self.type_name_ident(name),
             doc: doc_of(data),
@@ -481,6 +482,7 @@ impl Mapper<'_> {
     ) -> Result<Vec<UnionVariant>> {
         let mut variants = Vec::with_capacity(members.len());
         let mut seen = std::collections::HashSet::new();
+        let mut diagnostics = crate::lower::validate::Diagnostics::new();
         for (index, member) in members.iter().enumerate() {
             let variant = match member {
                 ReferenceOr::Reference { reference } => {
@@ -495,16 +497,25 @@ impl Mapper<'_> {
                     }
                 }
                 ReferenceOr::Item(schema) => {
-                    let hint = format!("{name}_variant_{index}");
-                    let ty = self.type_from_schema(&hint, schema)?;
+                    let Some(seed) = inline_variant_seed(schema) else {
+                        diagnostics.push(Error::UnsupportedSchema {
+                            path: name.to_owned(),
+                            reason: format!("member {index} of the union gives the variant no name"),
+                        });
+                        continue;
+                    };
+                    // The seed names the variant and any type the member hoists,
+                    // so the two agree.
+                    let ty = self.type_from_schema(&seed, schema)?;
                     UnionVariant {
-                        name: crate::naming::deconflict_ident(to_ident(&hint, Case::Pascal), &mut seen),
+                        name: crate::naming::deconflict_ident(to_ident(&seed, Case::Pascal), &mut seen),
                         ty,
                     }
                 }
             };
             variants.push(variant);
         }
+        diagnostics.into_result()?;
         return Ok(variants);
     }
 
@@ -788,6 +799,79 @@ fn integer_variant_name(value: i64) -> String {
         return format!("value_minus_{}", value.unsigned_abs());
     }
     return format!("value_{value}");
+}
+
+/// The name an inline union member gives its variant, if it gives one at all.
+///
+/// `x-rust-name` names any member. Without it, only a member that hoists no type
+/// of its own can be named, and the type it holds gives that name.
+///
+/// A member that hoists — an object, a list, a map, an `enum` — needs a name for
+/// the hoisted type as well as for the variant. The position would give one, but
+/// a position carries no meaning and moves when the document changes, so the
+/// author gives the name instead.
+fn inline_variant_seed(schema: &Schema) -> Option<String> {
+    if let Some(custom) = extension_str(&schema.schema_data, X_RUST_NAME) {
+        return Some(custom.to_owned());
+    }
+    let ty = non_hoisting_type(schema)?;
+    return type_variant_name(&ty).map(str::to_owned);
+}
+
+/// The type an inline union member holds when it hoists nothing.
+///
+/// `None` means the member hoists a type of its own, which then needs a name.
+fn non_hoisting_type(schema: &Schema) -> Option<RustType> {
+    return match &schema.schema_kind {
+        SchemaKind::Type(Type::String(st)) if st.enumeration.is_empty() => Some(string_format_type(&st.format)),
+        SchemaKind::Type(Type::Integer(it)) if it.enumeration.is_empty() => Some(integer_format_type(&it.format)),
+        SchemaKind::Type(Type::Number(_)) => Some(RustType::F64),
+        SchemaKind::Type(Type::Boolean(_)) => Some(RustType::Bool),
+        _ => None,
+    };
+}
+
+/// The variant name a type gives, for a union member that hoists nothing.
+///
+/// A union cannot hold one type twice, so these names stay unique.
+fn type_variant_name(ty: &RustType) -> Option<&'static str> {
+    return match ty {
+        RustType::Bool => Some("Bool"),
+        RustType::I32 => Some("I32"),
+        RustType::I64 => Some("I64"),
+        RustType::F64 => Some("F64"),
+        RustType::String => Some("String"),
+        RustType::Date => Some("Date"),
+        RustType::DateTime => Some("DateTime"),
+        RustType::Uuid => Some("Uuid"),
+        RustType::Bytes => Some("Bytes"),
+        _ => None,
+    };
+}
+
+/// Reject a union that holds one type more than once.
+///
+/// The emitted enum is `#[serde(untagged)]`. Serde reads the variants in order
+/// and takes the first that fits, so a repeated type makes the later variant
+/// unreachable. A value built with that variant comes back as the earlier one,
+/// which changes the value and reports nothing.
+fn check_variant_types(name: &str, variants: &[UnionVariant]) -> Result<()> {
+    let mut diagnostics = crate::lower::validate::Diagnostics::new();
+    for (index, variant) in variants.iter().enumerate() {
+        let Some(earlier) = variants.iter().take(index).find(|other| return other.ty == variant.ty) else {
+            continue;
+        };
+        diagnostics.push(Error::UnsupportedSchema {
+            path: name.to_owned(),
+            reason: format!(
+                "the union holds `{}` twice, as `{}` and as `{}`",
+                variant.ty.label(),
+                earlier.name.logical(),
+                variant.name.logical()
+            ),
+        });
+    }
+    return diagnostics.into_result();
 }
 
 /// Map an integer `format` to a Rust type.

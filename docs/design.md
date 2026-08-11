@@ -156,7 +156,9 @@ An inline schema carries no name of its own, so `x-rust-name` on that schema has
 nothing to override. The remedy acts on the component schema that encloses it, or it
 moves the inline schema into a component of its own. This matches Go's
 `oapi-codegen`, which documents `x-go-name` on a component schema and on a property,
-and not on an inline schema.
+and not on an inline schema. A member of a `oneOf` list is the one exception,
+because that member becomes a variant that needs a name of its own. See
+[Union variants](extensions.md#union-variants).
 
 A per-operation type can take the name of a model. A schema named `<Op>Response` is
 the common case.
@@ -347,6 +349,35 @@ reason: the literal does not fit.
 
 A `number` or `boolean` `enum` still lowers to a bare `f64` or `bool`. A float is
 not a legal discriminant, and a boolean enum names nothing useful.
+
+## A union cannot hold one type twice
+
+A `oneOf` or an `anyOf` becomes an enum with `#[serde(untagged)]`, so no tag
+appears on the wire and serde picks a variant by shape. It reads the variants in
+declaration order and takes the first that fits.
+
+That order makes a repeated type unreachable. A union whose members give `Cat`
+twice compiles, and the second variant never matches: a value built with it
+serializes like the first and reads back as the first. The value changes, and
+nothing reports it. So a repeated type is an error, and the message names the two
+variants that share it.
+
+The check reads the lowered Rust type, not the schema. Two members that differ in
+the document but reach one type still collide, which is the case that matters,
+because the wire is all serde sees.
+
+The check does not read shapes. Two distinct types with the same fields still
+shadow each other at run time, and the generator accepts them. Deciding that in
+general means comparing every optional field and every subset, so the generator
+draws the line at a repeated type, where the fault is exact.
+
+A variant takes its name from `x-rust-name`, else from the type a `$ref` names,
+else from the type an inline member holds when it hoists none of its own. An
+inline member that hoists a type gets no name from the generator, and generation
+stops until the author gives one. A position would name it, but a position
+carries no meaning and it moves: swapping two members would point one name at the
+other shape and change what already-compiling code means. This is the argument
+that [type-name collisions](#type-name-collisions-fail-fast) already make.
 
 ## Value constraints are checked when the value comes in
 
