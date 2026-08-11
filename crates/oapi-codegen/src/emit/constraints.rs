@@ -180,7 +180,7 @@ fn string_checks(constraints: &Constraints, tests: &mut Vec<Check>) {
 
 /// `minimum`, `maximum`, and `multipleOf`, with the two `exclusive` flags.
 fn number_checks(constraints: &Constraints, ty: &RustType, tests: &mut Vec<Check>) {
-    if let Some(min) = &constraints.minimum {
+    if let Some(min) = constraints.minimum {
         let literal = bound_literal(min);
         let text = bound_text(min);
         if constraints.exclusive_minimum {
@@ -195,7 +195,7 @@ fn number_checks(constraints: &Constraints, ty: &RustType, tests: &mut Vec<Check
             });
         }
     }
-    if let Some(max) = &constraints.maximum {
+    if let Some(max) = constraints.maximum {
         let literal = bound_literal(max);
         let text = bound_text(max);
         if constraints.exclusive_maximum {
@@ -210,7 +210,7 @@ fn number_checks(constraints: &Constraints, ty: &RustType, tests: &mut Vec<Check
             });
         }
     }
-    if let Some(step) = &constraints.multiple_of {
+    if let Some(step) = constraints.multiple_of {
         let literal = bound_literal(step);
         let text = bound_text(step);
         if matches!(*ty, RustType::F64) {
@@ -306,8 +306,8 @@ fn map_checks(constraints: &Constraints, tests: &mut Vec<Check>) {
 /// The bound and the field agree by construction. An `integer` schema gives an
 /// `i32` or an `i64` and an integer bound, and a `number` schema gives an `f64`
 /// and a float bound. So the literal follows the bound, and nothing converts.
-fn bound_literal(bound: &Bound) -> TokenStream {
-    return match *bound {
+fn bound_literal(bound: Bound) -> TokenStream {
+    return match bound {
         Bound::Float(value) => {
             let literal = proc_macro2::Literal::f64_suffixed(value);
             quote! { #literal }
@@ -320,8 +320,8 @@ fn bound_literal(bound: &Bound) -> TokenStream {
 }
 
 /// A bound as the message writes it.
-fn bound_text(bound: &Bound) -> String {
-    return match *bound {
+fn bound_text(bound: Bound) -> String {
+    return match bound {
         Bound::Int(value) => value.to_string(),
         Bound::Float(value) => value.to_string(),
     };

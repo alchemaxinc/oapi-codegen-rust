@@ -102,7 +102,10 @@ pub struct Field {
 }
 
 /// A numeric bound, in the form the document writes it.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// A bound holds one number, so it copies. `f64` has no `Eq`, so the list stops
+/// at `PartialEq`.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Bound {
     /// A bound on an `integer` schema.
     Int(i64),

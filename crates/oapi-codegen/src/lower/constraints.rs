@@ -118,8 +118,8 @@ pub(crate) fn check_constraints(field: &Field) -> Result<()> {
     };
     let name = field.name.logical();
     let mut diagnostics = crate::lower::validate::Diagnostics::new();
-    if let Some(step) = &constraints.multiple_of {
-        let positive = match *step {
+    if let Some(step) = constraints.multiple_of {
+        let positive = match step {
             Bound::Int(value) => value > 0,
             Bound::Float(value) => value > 0.0_f64,
         };
@@ -132,11 +132,11 @@ pub(crate) fn check_constraints(field: &Field) -> Result<()> {
     }
     if matches!(*checked, RustType::I32) {
         for (keyword, bound) in [
-            ("minimum", &constraints.minimum),
-            ("maximum", &constraints.maximum),
-            ("multipleOf", &constraints.multiple_of),
+            ("minimum", constraints.minimum),
+            ("maximum", constraints.maximum),
+            ("multipleOf", constraints.multiple_of),
         ] {
-            let Some(Bound::Int(value)) = *bound else {
+            let Some(Bound::Int(value)) = bound else {
                 continue;
             };
             if i32::try_from(value).is_err() {
@@ -202,8 +202,8 @@ fn check_reach(
 }
 
 /// A bound as a message writes it.
-fn bound_text(bound: &Bound) -> String {
-    return match *bound {
+fn bound_text(bound: Bound) -> String {
+    return match bound {
         Bound::Int(value) => format!("{value}"),
         Bound::Float(value) => format!("{value}"),
     };
