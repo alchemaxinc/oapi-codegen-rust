@@ -158,7 +158,7 @@ moves the inline schema into a component of its own. This matches Go's
 `oapi-codegen`, which documents `x-go-name` on a component schema and on a property,
 and not on an inline schema. A member of a `oneOf` list is the one exception,
 because that member becomes a variant that needs a name of its own. See
-[Union variants](#union-variants).
+[Union variants](extensions.md#union-variants).
 
 A per-operation type can take the name of a model. A schema named `<Op>Response` is
 the common case.
@@ -372,8 +372,12 @@ general means comparing every optional field and every subset, so the generator
 draws the line at a repeated type, where the fault is exact.
 
 A variant takes its name from `x-rust-name`, else from the type a `$ref` names,
-else from the type an inline scalar holds, else from its position. `x-rust-name`
-on a member names the hoisted type too, so the variant and its payload agree.
+else from the type an inline member holds when it hoists none of its own. An
+inline member that hoists a type gets no name from the generator, and generation
+stops until the author gives one. A position would name it, but a position
+carries no meaning and it moves: swapping two members would point one name at the
+other shape and change what already-compiling code means. This is the argument
+that [type-name collisions](#type-name-collisions-fail-fast) already make.
 
 ## Value constraints are checked when the value comes in
 

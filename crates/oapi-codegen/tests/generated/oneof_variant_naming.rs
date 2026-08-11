@@ -12,15 +12,18 @@
 #[serde(untagged)]
 pub enum Scalars {
     String(String),
+    I32(i32),
     I64(i64),
+    F64(f64),
     Bool(bool),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
-pub enum Objects {
-    ObjectsVariant0(ObjectsVariant0),
-    ObjectsVariant1(ObjectsVariant1),
+pub enum Formats {
+    Date(chrono::NaiveDate),
+    DateTime(chrono::DateTime<chrono::Utc>),
+    Uuid(uuid::Uuid),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
@@ -31,21 +34,23 @@ pub enum Named {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct Widget {
+    pub sku: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum Referenced {
+    Widget(Widget),
+    Tally(Vec<String>),
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Mixed {
     String(String),
-    MixedVariant1(Vec<String>),
+    Widget(Widget),
     Detail(Detail),
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct ObjectsVariant0 {
-    pub meow: String,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct ObjectsVariant1 {
-    pub bark: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]

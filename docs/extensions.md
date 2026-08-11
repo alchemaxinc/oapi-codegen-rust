@@ -127,9 +127,9 @@ an inline schema, with one exception: a member of a `oneOf` or an `anyOf` list.
 Go's `oapi-codegen` documents `x-go-name` the same way for the general case.
 
 A member of a `oneOf` list becomes a variant of the generated enum. That variant
-needs a name, and an inline member gives none, so the generator falls back to the
-position. `x-rust-name` on the member replaces that fallback, and it names the
-hoisted type too, so the two agree:
+needs a name, and an inline object gives none, so generation stops until the
+author gives one. `x-rust-name` on the member gives it, and it names the hoisted
+type too, so the two agree:
 
 ```yaml
 components:
@@ -144,8 +144,9 @@ components:
               type: string
 ```
 
-This gives `Pet::Cat(Cat)` in place of `Pet::PetVariant0(PetVariant0)`. See
-[Union variants](#union-variants) for the names the generator picks without it.
+This gives `Pet::Cat(Cat)`. Without it the member has no name and generation
+stops. See [Union variants](#union-variants) for the members that do carry a name
+of their own.
 
 The generator hoists an inline object to the crate root and names it after the
 property path that encloses it. The inline `bar` property of schema `Foo` therefore
@@ -182,18 +183,26 @@ components:
 A `oneOf` or an `anyOf` becomes an untagged enum. Each member becomes a variant,
 and the name of that variant comes from the first rule below that applies.
 
-| Member                  | Variant name                               |
-| ----------------------- | ------------------------------------------ |
-| Carries `x-rust-name`   | The name it gives                          |
-| A `$ref`                | The name of the type it points to          |
-| An inline scalar        | The type it holds: `String`, `I64`, `Bool` |
-| Any other inline schema | The position: `<Union>Variant<index>`      |
+| Member                                          | Variant name                                                                                  |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Carries `x-rust-name`                           | The name it gives                                                                             |
+| A `$ref`                                        | The name of the type it points to                                                             |
+| An inline member that hoists no type of its own | The type it holds: `String`, `I32`, `I64`, `F64`, `Bool`, `Date`, `DateTime`, `Uuid`, `Bytes` |
+| Any other inline member                         | None. Generation stops.                                                                       |
 
-A scalar member hoists no type of its own, so the position names nothing a reader
-can use. The type says more, and a union cannot hold one type twice, so the name
-stays unique.
+A member that hoists no type is named by the type it holds. A union cannot hold
+one type twice, so these names stay unique.
 
-Two members that lower to one type end generation. Serde reads an untagged enum in
-order and takes the first variant that fits, so the second one never matches. A
-value built with it comes back as the first variant, which changes the value and
-reports nothing. Remove the repeated member.
+Every other inline member must carry `x-rust-name`, or move into a component
+schema that a `$ref` points at. An object, a list, and a map each hoist a type
+that needs a name of its own, and only the author can give one that means
+anything. The position could name them, but the generator does not use it: a
+position carries no meaning, and it moves. Swapping two members of a `oneOf` would
+point `Variant0` at the other shape and change what already-compiling code means.
+This follows the rule that
+[type-name collisions](design.md#type-name-collisions-fail-fast) already use.
+
+Two members that lower to one type also end generation. Serde reads an untagged
+enum in order and takes the first variant that fits, so the second one never
+matches. A value built with it comes back as the first variant, which changes the
+value and reports nothing. Remove the repeated member.

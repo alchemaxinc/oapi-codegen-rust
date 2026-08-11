@@ -142,6 +142,11 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("unsupported_duplicate_union_variant"),
     },
     Feature {
+        element: "schema.oneOf.unnamed-inline-member",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_unnamed_union_member"),
+    },
+    Feature {
         element: "schema.oneOf.discriminator",
         status: Status::Supported,
         fixture: Some("oneof_discriminator"),

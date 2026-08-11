@@ -1,0 +1,25 @@
+openapi: "3.0.3"
+info:
+  title: an inline oneOf member with no name
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # Each member hoists a type, and neither gives a name. The position would
+    # name them, but a position carries no meaning and moves when the member
+    # list changes order, so a later edit would point `Variant0` at the other
+    # shape and change the meaning of code that already compiles.
+    #
+    # Both members are reported, not just the first.
+    Pet:
+      oneOf:
+        - type: object
+          required: [meow]
+          properties:
+            meow:
+              type: string
+        - type: object
+          required: [bark]
+          properties:
+            bark:
+              type: string

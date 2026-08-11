@@ -482,6 +482,7 @@ impl Mapper<'_> {
     ) -> Result<Vec<UnionVariant>> {
         let mut variants = Vec::with_capacity(members.len());
         let mut seen = std::collections::HashSet::new();
+        let mut diagnostics = crate::lower::validate::Diagnostics::new();
         for (index, member) in members.iter().enumerate() {
             let variant = match member {
                 ReferenceOr::Reference { reference } => {
@@ -496,21 +497,16 @@ impl Mapper<'_> {
                     }
                 }
                 ReferenceOr::Item(schema) => {
-                    // An `x-rust-name` on the member names both the variant and
-                    // the type the member hoists, so the two agree. Without it
-                    // the position is the only thing that tells members apart.
-                    let hint = match extension_str(&schema.schema_data, X_RUST_NAME) {
-                        Some(custom) => custom.to_owned(),
-                        None => format!("{name}_variant_{index}"),
+                    let Some(seed) = inline_variant_seed(schema) else {
+                        diagnostics.push(Error::UnsupportedSchema {
+                            path: name.to_owned(),
+                            reason: format!("member {index} of the union gives the variant no name"),
+                        });
+                        continue;
                     };
-                    let ty = self.type_from_schema(&hint, schema)?;
-                    // A scalar member hoists no type, so the hint reaches
-                    // nothing. Name the variant after the type it holds, which
-                    // says more than the position does.
-                    let seed = match scalar_variant_name(&ty) {
-                        Some(scalar) if !schema.schema_data.extensions.contains_key(X_RUST_NAME) => scalar.to_owned(),
-                        Some(_) | None => hint,
-                    };
+                    // The seed names the variant and any type the member hoists,
+                    // so the two agree.
+                    let ty = self.type_from_schema(&seed, schema)?;
                     UnionVariant {
                         name: crate::naming::deconflict_ident(to_ident(&seed, Case::Pascal), &mut seen),
                         ty,
@@ -519,6 +515,7 @@ impl Mapper<'_> {
             };
             variants.push(variant);
         }
+        diagnostics.into_result()?;
         return Ok(variants);
     }
 
@@ -804,17 +801,50 @@ fn integer_variant_name(value: i64) -> String {
     return format!("value_{value}");
 }
 
-/// The variant name for a union member that lowers to a scalar.
+/// The name an inline union member gives its variant, if it gives one at all.
 ///
-/// A scalar hoists no type of its own, so the position hint names nothing. The
-/// type is the only thing that tells one scalar member from another.
-fn scalar_variant_name(ty: &RustType) -> Option<&'static str> {
+/// `x-rust-name` names any member. Without it, only a member that hoists no type
+/// of its own can be named, and the type it holds gives that name.
+///
+/// A member that hoists — an object, a list, a map, an `enum` — needs a name for
+/// the hoisted type as well as for the variant. The position would give one, but
+/// a position carries no meaning and moves when the document changes, so the
+/// author gives the name instead.
+fn inline_variant_seed(schema: &Schema) -> Option<String> {
+    if let Some(custom) = extension_str(&schema.schema_data, X_RUST_NAME) {
+        return Some(custom.to_owned());
+    }
+    let ty = non_hoisting_type(schema)?;
+    return type_variant_name(&ty).map(str::to_owned);
+}
+
+/// The type an inline union member holds when it hoists nothing.
+///
+/// `None` means the member hoists a type of its own, which then needs a name.
+fn non_hoisting_type(schema: &Schema) -> Option<RustType> {
+    return match &schema.schema_kind {
+        SchemaKind::Type(Type::String(st)) if st.enumeration.is_empty() => Some(string_format_type(&st.format)),
+        SchemaKind::Type(Type::Integer(it)) if it.enumeration.is_empty() => Some(integer_format_type(&it.format)),
+        SchemaKind::Type(Type::Number(_)) => Some(RustType::F64),
+        SchemaKind::Type(Type::Boolean(_)) => Some(RustType::Bool),
+        _ => None,
+    };
+}
+
+/// The variant name a type gives, for a union member that hoists nothing.
+///
+/// A union cannot hold one type twice, so these names stay unique.
+fn type_variant_name(ty: &RustType) -> Option<&'static str> {
     return match ty {
         RustType::Bool => Some("Bool"),
         RustType::I32 => Some("I32"),
         RustType::I64 => Some("I64"),
         RustType::F64 => Some("F64"),
         RustType::String => Some("String"),
+        RustType::Date => Some("Date"),
+        RustType::DateTime => Some("DateTime"),
+        RustType::Uuid => Some("Uuid"),
+        RustType::Bytes => Some("Bytes"),
         _ => None,
     };
 }
@@ -855,7 +885,6 @@ pub(crate) fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat
 }
 
 /// Extract a string-valued extension (for example `x-rust-type`) from schema data.
-/// Extract a string-valued extension (for example `x-rust-name`) from schema data.
 fn extension_str<'a>(data: &'a SchemaData, key: &str) -> Option<&'a str> {
     let value = data.extensions.get(key)?;
     return value.as_str();

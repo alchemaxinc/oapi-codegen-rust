@@ -5,28 +5,27 @@ info:
 paths: {}
 components:
   schemas:
-    # A scalar member hoists no type, so the position names nothing a reader can
-    # use. Each variant takes the name of the type it holds.
+    # A member that hoists no type takes the name of the type it holds. These
+    # names keep their meaning when the member list changes order.
     Scalars:
       oneOf:
         - type: string
         - type: integer
+          format: int32
+        - type: integer
+        - type: number
         - type: boolean
-    # An object member hoists a struct, and the two names must agree. Without an
-    # override the position is the only thing that tells the members apart.
-    Objects:
+    # A `format` gives a type of its own, and that type gives the name.
+    Formats:
       oneOf:
-        - type: object
-          required: [meow]
-          properties:
-            meow:
-              type: string
-        - type: object
-          required: [bark]
-          properties:
-            bark:
-              type: string
-    # `x-rust-name` on an inline member names the variant and the hoisted type.
+        - type: string
+          format: date
+        - type: string
+          format: date-time
+        - type: string
+          format: uuid
+    # A member that hoists a type has no name to take, so it gives one.
+    # `x-rust-name` names the variant and the hoisted type alike.
     Named:
       oneOf:
         - x-rust-name: Cat
@@ -41,13 +40,26 @@ components:
           properties:
             bark:
               type: string
-    # A member list that mixes the three cases above.
+    Widget:
+      type: object
+      required: [sku]
+      properties:
+        sku:
+          type: string
+    # A `$ref` member takes the name of the type it points at. A list hoists no
+    # struct of its own, but it still holds no name, so it gives one.
+    Referenced:
+      oneOf:
+        - $ref: "#/components/schemas/Widget"
+        - x-rust-name: Tally
+          type: array
+          items:
+            type: string
+    # A member list that mixes every rule above.
     Mixed:
       oneOf:
         - type: string
-        - type: array
-          items:
-            type: string
+        - $ref: "#/components/schemas/Widget"
         - x-rust-name: Detail
           type: object
           required: [note]
