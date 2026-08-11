@@ -275,7 +275,7 @@ fn hints_for(err: &Error) -> Vec<String> {
                 "An `x-rust-type` does the same. The rules of that type are its own.".to_owned(),
             ];
         }
-        Error::UnsupportedSchema { reason, .. } if reason.contains("`multipleOf`") => {
+        Error::UnsupportedSchema { reason, .. } if reason.contains("is not above zero") => {
             return vec!["JSON Schema asks for a `multipleOf` above zero. A step of zero divides by zero.".to_owned()];
         }
         Error::UnsupportedSchema { reason, .. } if reason.contains("does not fit `i32`") => {
@@ -549,6 +549,42 @@ mod tests {
             hints.iter().any(|h| return h.contains("{tz}") && h.contains("query")),
             "hint should suggest adding the placeholder or changing `in:`, got: {hints:?}",
         );
+    }
+
+    /// Each constraint fault must reach its own hint. The arms read the reason
+    /// text, so a broad one can take a message meant for a later arm and send the
+    /// reader to the wrong fix.
+    #[test]
+    fn each_constraint_fault_reaches_its_own_hint() {
+        let cases = [
+            ("the `multipleOf` value `0` is not above zero", "divides by zero"),
+            ("the `multipleOf` value `5000000000` does not fit `i32`", "-2147483648"),
+            ("the `minimum` value `-5000000000` does not fit `i32`", "-2147483648"),
+            (
+                "the `pattern` rule does not reach the type this field holds",
+                "Drop the `format`",
+            ),
+            (
+                "the `minProperties` rule does not reach the type this field holds",
+                "free-form map",
+            ),
+            (
+                "the `uniqueItems` rule does not reach the type this field holds",
+                "numbers, strings, or booleans",
+            ),
+            ("the `enum` gives `1` more than once", "Remove the repeat"),
+        ];
+        for (reason, wanted) in cases {
+            let err = Error::UnsupportedSchema {
+                path: "field".to_owned(),
+                reason: reason.to_owned(),
+            };
+            let hints = hints_for(&err);
+            assert!(
+                hints.iter().any(|hint| return hint.contains(wanted)),
+                "`{reason}` should reach a hint holding `{wanted}`, got: {hints:?}",
+            );
+        }
     }
 
     #[test]
