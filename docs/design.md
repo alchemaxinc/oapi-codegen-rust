@@ -348,6 +348,60 @@ reason: the literal does not fit.
 A `number` or `boolean` `enum` still lowers to a bare `f64` or `bool`. A float is
 not a legal discriminant, and a boolean enum names nothing useful.
 
+## Value constraints are checked when the value comes in
+
+A schema can narrow the values it accepts with `pattern`, `minimum`, `minItems`,
+and ten more keywords. The generator writes these as checks, and serde runs them
+while it reads the value. A bad value fails to parse, so it never reaches a
+handler.
+
+The check runs on the way in only. A model that carries a response gets no check,
+because the code that builds the response owns the value. This is the
+same rule the derives follow: a direction the output does not use costs nothing.
+
+A field with a check takes `#[serde(deserialize_with = "...")]`, and the struct
+takes the function beside its defaults. `deserialize_with` makes serde read the
+field even when the payload omits it, so an optional field without a `default`
+also takes a bare `#[serde(default)]`. Without it, an absent optional field
+fails to parse.
+
+A length counts characters, not bytes, as JSON Schema states. The check reads one
+character past the bound and stops there, so a long string from an untrusted
+caller costs the bound and not its own length. A `minLength` of zero writes no
+check, because no string fails it.
+
+`uniqueItems` applies to a list of scalars only, because a model that reaches a
+foreign type can lose `PartialEq`. A hashable element goes into a set, which
+reads the list one time. A `f64` has neither `Eq` nor `Hash`, so a list of them
+compares each pair instead. That costs the square of the length, and a server
+takes the list from an untrusted caller, so write `maxItems` beside
+`uniqueItems`.
+
+`minProperties` and `maxProperties` reach a map only. A struct declares its
+properties, so the count is already fixed when the file compiles.
+
+A `pattern` becomes a `regex::Regex`, built one time and held. OpenAPI writes a
+pattern in ECMA-262, which has look-ahead and back-references. Rust regular
+expressions have neither. So the generator reads every pattern at generation
+time and stops on one it cannot hold, rather than write a file that does not
+build. This is also why the `expect` beside the built regex cannot fire.
+
+A `$ref` to a constrained scalar makes a type alias, and an alias carries no
+serde attribute. The field that names the alias takes the checks instead. A
+target with an `enum` or an `x-rust-type` is left alone: there the name and the
+type below it are not the same thing.
+
+A rule that cannot reach its type is an error, not a silence. A `format` of
+`date`, `date-time`, `uuid`, or `binary` names a type that is no longer a string,
+so a `pattern` there reads nothing once the value is parsed. An `x-rust-type`
+does the same. `minProperties` on a schema that names its properties, and
+`uniqueItems` on a list of models, cannot run either. Each stops the run and
+names the way out, because a rule the document states and the code drops is worse
+than no rule at all.
+
+`readOnly` and `writeOnly` are read by nothing yet. They mark a direction, not a
+value, and one struct cannot be both.
+
 ## A `default` removes the `Option`
 
 An optional property with a `default` lowers to a plain `T`, not `Option<T>`. A

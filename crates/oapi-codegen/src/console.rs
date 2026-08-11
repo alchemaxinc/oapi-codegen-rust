@@ -259,6 +259,31 @@ fn hints_for(err: &Error) -> Vec<String> {
                 "Inside a schema, only a same-document ref resolves. This covers a property, `items`, `additionalProperties`, `allOf`, and a union member.".to_owned(),
             ];
         }
+        Error::UnsupportedSchema { reason, .. } if reason.contains("does not reach the type") => {
+            if reason.contains("Properties") {
+                return vec![
+                    "`minProperties` and `maxProperties` read a free-form map. A schema that names its properties fixes the count already.".to_owned(),
+                ];
+            }
+            if reason.contains("uniqueItems") {
+                return vec![
+                    "`uniqueItems` reads a list of numbers, strings, or booleans. A list of models cannot always compare.".to_owned(),
+                ];
+            }
+            return vec![
+                "A `format` can name a type that is no longer a string, such as a date or a UUID. Drop the `format` to keep the string and the rule.".to_owned(),
+                "An `x-rust-type` does the same. The rules of that type are its own.".to_owned(),
+            ];
+        }
+        Error::UnsupportedSchema { reason, .. } if reason.contains("is not above zero") => {
+            return vec!["JSON Schema asks for a `multipleOf` above zero. A step of zero divides by zero.".to_owned()];
+        }
+        Error::UnsupportedSchema { reason, .. } if reason.contains("does not fit `i32`") => {
+            return vec![
+                "A bound must fit the type the `format` chooses. `int32` holds -2147483648 to 2147483647. Drop the `format` to get `i64`."
+                    .to_owned(),
+            ];
+        }
         Error::UnsupportedSchema { reason, .. } if reason.contains("`enum`") => {
             return vec![
                 "An `enum` names each value once. Remove the repeat.".to_owned(),
@@ -524,6 +549,42 @@ mod tests {
             hints.iter().any(|h| return h.contains("{tz}") && h.contains("query")),
             "hint should suggest adding the placeholder or changing `in:`, got: {hints:?}",
         );
+    }
+
+    /// Each constraint fault must reach its own hint. The arms read the reason
+    /// text, so a broad one can take a message meant for a later arm and send the
+    /// reader to the wrong fix.
+    #[test]
+    fn each_constraint_fault_reaches_its_own_hint() {
+        let cases = [
+            ("the `multipleOf` value `0` is not above zero", "divides by zero"),
+            ("the `multipleOf` value `5000000000` does not fit `i32`", "-2147483648"),
+            ("the `minimum` value `-5000000000` does not fit `i32`", "-2147483648"),
+            (
+                "the `pattern` rule does not reach the type this field holds",
+                "Drop the `format`",
+            ),
+            (
+                "the `minProperties` rule does not reach the type this field holds",
+                "free-form map",
+            ),
+            (
+                "the `uniqueItems` rule does not reach the type this field holds",
+                "numbers, strings, or booleans",
+            ),
+            ("the `enum` gives `1` more than once", "Remove the repeat"),
+        ];
+        for (reason, wanted) in cases {
+            let err = Error::UnsupportedSchema {
+                path: "field".to_owned(),
+                reason: reason.to_owned(),
+            };
+            let hints = hints_for(&err);
+            assert!(
+                hints.iter().any(|hint| return hint.contains(wanted)),
+                "`{reason}` should reach a hint holding `{wanted}`, got: {hints:?}",
+            );
+        }
     }
 
     #[test]

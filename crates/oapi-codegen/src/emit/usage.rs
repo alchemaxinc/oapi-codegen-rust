@@ -456,6 +456,7 @@ mod tests {
             omit_empty: None,
             serde_skip: false,
             default: None,
+            constraints: None,
         };
     }
 

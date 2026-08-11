@@ -132,6 +132,8 @@ mod generated {
     pub mod string_formats;
     #[path = "type_name_collisions.rs"]
     pub mod type_name_collisions;
+    #[path = "value_constraints.rs"]
+    pub mod value_constraints;
 }
 
 /// Stand-in for the foreign types the `ext_x_rust_derive` fixture points its

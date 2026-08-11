@@ -36,7 +36,7 @@ use crate::naming::X_RUST_NAME;
 use crate::naming::to_ident;
 
 /// The `x-rust-type` extension: emit a verbatim Rust type expression.
-const X_RUST_TYPE: &str = "x-rust-type";
+pub(crate) const X_RUST_TYPE: &str = "x-rust-type";
 /// The `x-rust-derive` extension: which of `Debug`, `Clone`, `PartialEq` an
 /// `x-rust-type` target implements.
 const X_RUST_DERIVE: &str = "x-rust-derive";
@@ -307,7 +307,17 @@ impl Mapper<'_> {
             None => to_ident(wire, Case::Snake),
         };
         let rename = crate::naming::rename_for(wire, &ident);
-        return Ok(Field {
+        let constraints = match prop {
+            ReferenceOr::Item(schema) => crate::lower::constraints::constraints_of(schema),
+            // The alias a `$ref` makes carries no serde attribute, so the field
+            // takes the checks the target declares.
+            ReferenceOr::Reference { reference } => self
+                .spec
+                .resolve(reference)
+                .ok()
+                .and_then(crate::lower::constraints::constraints_through_ref),
+        };
+        let field = Field {
             name: ident,
             rename,
             doc,
@@ -317,7 +327,10 @@ impl Mapper<'_> {
             omit_empty,
             serde_skip,
             default,
-        });
+            constraints,
+        };
+        crate::lower::constraints::check_constraints(&field)?;
+        return Ok(field);
     }
 
     /// Return the referenced schema name when `members` is a single `$ref`

@@ -102,6 +102,31 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("unsupported_enum_value_out_of_range"),
     },
     Feature {
+        element: "schema.constraints",
+        status: Status::Supported,
+        fixture: Some("value_constraints"),
+    },
+    Feature {
+        element: "schema.constraints.pattern.syntax",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_pattern_syntax"),
+    },
+    Feature {
+        element: "schema.constraints.multipleOf.zero",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_multiple_of_zero"),
+    },
+    Feature {
+        element: "schema.constraints.bound.out-of-range",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_bound_out_of_range"),
+    },
+    Feature {
+        element: "schema.constraints.unreachable",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_constraint_reach"),
+    },
+    Feature {
         element: "schema.oneOf",
         status: Status::Supported,
         fixture: Some("oneof_untagged"),
@@ -685,6 +710,7 @@ generated_tests!(
     integer_enum,
     string_enum,
     string_formats,
+    value_constraints,
     type_name_collisions,
 );
 

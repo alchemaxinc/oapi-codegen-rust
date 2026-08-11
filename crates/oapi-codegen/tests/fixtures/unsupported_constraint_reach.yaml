@@ -1,0 +1,19 @@
+openapi: "3.0.3"
+info:
+  title: Unsupported constraint reach
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # A `format` of `date-time` names a timestamp, not a string. A `pattern`
+    # reads a string, so it reaches nothing here. Saying nothing would leave the
+    # document promising a rule that never runs.
+    Event:
+      type: object
+      required:
+        - when
+      properties:
+        when:
+          type: string
+          format: date-time
+          pattern: "^2024"
