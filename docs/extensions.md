@@ -123,7 +123,29 @@ block, so every method name stays the choice of the spec author.
 ## Inline schemas
 
 `x-rust-name` applies to a top-level schema and to a property. It does not apply to
-an inline schema. Go's `oapi-codegen` documents `x-go-name` the same way.
+an inline schema, with one exception: a member of a `oneOf` or an `anyOf` list.
+Go's `oapi-codegen` documents `x-go-name` the same way for the general case.
+
+A member of a `oneOf` list becomes a variant of the generated enum. That variant
+needs a name, and an inline member gives none, so the generator falls back to the
+position. `x-rust-name` on the member replaces that fallback, and it names the
+hoisted type too, so the two agree:
+
+```yaml
+components:
+  schemas:
+    Pet:
+      oneOf:
+        - x-rust-name: Cat
+          type: object
+          required: [meow]
+          properties:
+            meow:
+              type: string
+```
+
+This gives `Pet::Cat(Cat)` in place of `Pet::PetVariant0(PetVariant0)`. See
+[Union variants](#union-variants) for the names the generator picks without it.
 
 The generator hoists an inline object to the crate root and names it after the
 property path that encloses it. The inline `bar` property of schema `Foo` therefore
@@ -154,3 +176,24 @@ components:
         sku:
           type: string
 ```
+
+## Union variants
+
+A `oneOf` or an `anyOf` becomes an untagged enum. Each member becomes a variant,
+and the name of that variant comes from the first rule below that applies.
+
+| Member                  | Variant name                               |
+| ----------------------- | ------------------------------------------ |
+| Carries `x-rust-name`   | The name it gives                          |
+| A `$ref`                | The name of the type it points to          |
+| An inline scalar        | The type it holds: `String`, `I64`, `Bool` |
+| Any other inline schema | The position: `<Union>Variant<index>`      |
+
+A scalar member hoists no type of its own, so the position names nothing a reader
+can use. The type says more, and a union cannot hold one type twice, so the name
+stays unique.
+
+Two members that lower to one type end generation. Serde reads an untagged enum in
+order and takes the first variant that fits, so the second one never matches. A
+value built with it comes back as the first variant, which changes the value and
+reports nothing. Remove the repeated member.

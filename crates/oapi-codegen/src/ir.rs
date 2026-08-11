@@ -407,6 +407,33 @@ impl RustType {
         );
     }
 
+    /// The type as text, for an error message.
+    ///
+    /// Emission goes through `emit::emit_type`, which builds tokens. This gives
+    /// a reader the same type in a message that the lowering stage can write,
+    /// where no token stream exists yet.
+    pub fn label(&self) -> String {
+        return match self {
+            RustType::Bool => "bool".to_owned(),
+            RustType::I32 => "i32".to_owned(),
+            RustType::I64 => "i64".to_owned(),
+            RustType::F64 => "f64".to_owned(),
+            RustType::String => "String".to_owned(),
+            RustType::Value => "serde_json::Value".to_owned(),
+            RustType::Date => "chrono::NaiveDate".to_owned(),
+            RustType::DateTime => "chrono::DateTime<chrono::Utc>".to_owned(),
+            RustType::Uuid => "uuid::Uuid".to_owned(),
+            RustType::Bytes => "Vec<u8>".to_owned(),
+            RustType::Vec(inner) => format!("Vec<{}>", inner.label()),
+            RustType::Map(inner) => format!("std::collections::HashMap<String, {}>", inner.label()),
+            RustType::Option(inner) => format!("Option<{}>", inner.label()),
+            RustType::Boxed(inner) => format!("Box<{}>", inner.label()),
+            RustType::Named(name) => name.clone(),
+            RustType::External { module, name } => format!("{module}::{name}"),
+            RustType::Verbatim { text, .. } => text.clone(),
+        };
+    }
+
     /// An `x-rust-type` target whose `x-rust-derive` is absent, so it claims all
     /// three non-serde traits. The common case, and the shape every test that
     /// does not test this feature wants.

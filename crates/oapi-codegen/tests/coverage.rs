@@ -132,6 +132,16 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("oneof_untagged"),
     },
     Feature {
+        element: "schema.oneOf.variant-naming",
+        status: Status::Supported,
+        fixture: Some("oneof_variant_naming"),
+    },
+    Feature {
+        element: "schema.oneOf.duplicate-variant-type",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_duplicate_union_variant"),
+    },
+    Feature {
         element: "schema.oneOf.discriminator",
         status: Status::Supported,
         fixture: Some("oneof_discriminator"),
@@ -704,6 +714,7 @@ generated_tests!(
     object_optional_required,
     oneof_discriminator,
     oneof_untagged,
+    oneof_variant_naming,
     primitive_scalars,
     recursive_schema,
     ref_local,

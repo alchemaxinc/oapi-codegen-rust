@@ -1,0 +1,56 @@
+openapi: "3.0.3"
+info:
+  title: how an inline oneOf member gets its name
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # A scalar member hoists no type, so the position names nothing a reader can
+    # use. Each variant takes the name of the type it holds.
+    Scalars:
+      oneOf:
+        - type: string
+        - type: integer
+        - type: boolean
+    # An object member hoists a struct, and the two names must agree. Without an
+    # override the position is the only thing that tells the members apart.
+    Objects:
+      oneOf:
+        - type: object
+          required: [meow]
+          properties:
+            meow:
+              type: string
+        - type: object
+          required: [bark]
+          properties:
+            bark:
+              type: string
+    # `x-rust-name` on an inline member names the variant and the hoisted type.
+    Named:
+      oneOf:
+        - x-rust-name: Cat
+          type: object
+          required: [meow]
+          properties:
+            meow:
+              type: string
+        - x-rust-name: Dog
+          type: object
+          required: [bark]
+          properties:
+            bark:
+              type: string
+    # A member list that mixes the three cases above.
+    Mixed:
+      oneOf:
+        - type: string
+        - type: array
+          items:
+            type: string
+        - x-rust-name: Detail
+          type: object
+          required: [note]
+          properties:
+            note:
+              type: string

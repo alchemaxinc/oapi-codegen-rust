@@ -451,6 +451,7 @@ impl Mapper<'_> {
             Some(disc) if !disc.mapping.is_empty() => self.union_variants_from_mapping(disc)?,
             Some(_) | None => self.union_variants_from_members(name, members)?,
         };
+        check_variant_types(name, &variants)?;
         return Ok(Enum {
             name: self.type_name_ident(name),
             doc: doc_of(data),
@@ -495,10 +496,23 @@ impl Mapper<'_> {
                     }
                 }
                 ReferenceOr::Item(schema) => {
-                    let hint = format!("{name}_variant_{index}");
+                    // An `x-rust-name` on the member names both the variant and
+                    // the type the member hoists, so the two agree. Without it
+                    // the position is the only thing that tells members apart.
+                    let hint = match extension_str(&schema.schema_data, X_RUST_NAME) {
+                        Some(custom) => custom.to_owned(),
+                        None => format!("{name}_variant_{index}"),
+                    };
                     let ty = self.type_from_schema(&hint, schema)?;
+                    // A scalar member hoists no type, so the hint reaches
+                    // nothing. Name the variant after the type it holds, which
+                    // says more than the position does.
+                    let seed = match scalar_variant_name(&ty) {
+                        Some(scalar) if !schema.schema_data.extensions.contains_key(X_RUST_NAME) => scalar.to_owned(),
+                        Some(_) | None => hint,
+                    };
                     UnionVariant {
-                        name: crate::naming::deconflict_ident(to_ident(&hint, Case::Pascal), &mut seen),
+                        name: crate::naming::deconflict_ident(to_ident(&seed, Case::Pascal), &mut seen),
                         ty,
                     }
                 }
@@ -790,6 +804,46 @@ fn integer_variant_name(value: i64) -> String {
     return format!("value_{value}");
 }
 
+/// The variant name for a union member that lowers to a scalar.
+///
+/// A scalar hoists no type of its own, so the position hint names nothing. The
+/// type is the only thing that tells one scalar member from another.
+fn scalar_variant_name(ty: &RustType) -> Option<&'static str> {
+    return match ty {
+        RustType::Bool => Some("Bool"),
+        RustType::I32 => Some("I32"),
+        RustType::I64 => Some("I64"),
+        RustType::F64 => Some("F64"),
+        RustType::String => Some("String"),
+        _ => None,
+    };
+}
+
+/// Reject a union that holds one type more than once.
+///
+/// The emitted enum is `#[serde(untagged)]`. Serde reads the variants in order
+/// and takes the first that fits, so a repeated type makes the later variant
+/// unreachable. A value built with that variant comes back as the earlier one,
+/// which changes the value and reports nothing.
+fn check_variant_types(name: &str, variants: &[UnionVariant]) -> Result<()> {
+    let mut diagnostics = crate::lower::validate::Diagnostics::new();
+    for (index, variant) in variants.iter().enumerate() {
+        let Some(earlier) = variants.iter().take(index).find(|other| return other.ty == variant.ty) else {
+            continue;
+        };
+        diagnostics.push(Error::UnsupportedSchema {
+            path: name.to_owned(),
+            reason: format!(
+                "the union holds `{}` twice, as `{}` and as `{}`",
+                variant.ty.label(),
+                earlier.name.logical(),
+                variant.name.logical()
+            ),
+        });
+    }
+    return diagnostics.into_result();
+}
+
 /// Map an integer `format` to a Rust type.
 pub(crate) fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat>) -> RustType {
     let ty = match format {
@@ -801,6 +855,7 @@ pub(crate) fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat
 }
 
 /// Extract a string-valued extension (for example `x-rust-type`) from schema data.
+/// Extract a string-valued extension (for example `x-rust-name`) from schema data.
 fn extension_str<'a>(data: &'a SchemaData, key: &str) -> Option<&'a str> {
     let value = data.extensions.get(key)?;
     return value.as_str();
