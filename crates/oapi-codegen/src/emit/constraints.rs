@@ -167,13 +167,13 @@ fn string_checks(constraints: &Constraints, tests: &mut Vec<Check>) {
         let last = min - 1;
         tests.push(Check {
             test: quote! { item.chars().nth(#last).is_none() },
-            message: format!("must hold {min} characters or more"),
+            message: format!("must hold {min} or more characters"),
         });
     }
     if let Some(max) = constraints.max_length {
         tests.push(Check {
             test: quote! { item.chars().nth(#max).is_some() },
-            message: format!("must hold {max} characters or fewer"),
+            message: format!("must hold {max} or fewer characters"),
         });
     }
 }
@@ -244,13 +244,13 @@ fn array_checks(constraints: &Constraints, ty: &RustType, tests: &mut Vec<Check>
     if let Some(min) = constraints.min_items {
         tests.push(Check {
             test: quote! { item.len() < #min },
-            message: format!("must hold {min} items or more"),
+            message: format!("must hold {min} or more items"),
         });
     }
     if let Some(max) = constraints.max_items {
         tests.push(Check {
             test: quote! { item.len() > #max },
-            message: format!("must hold {max} items or fewer"),
+            message: format!("must hold {max} or fewer items"),
         });
     }
     if !constraints.unique_items {
@@ -278,7 +278,7 @@ fn array_checks(constraints: &Constraints, ty: &RustType, tests: &mut Vec<Check>
     };
     tests.push(Check {
         test,
-        message: "must hold no repeated item".to_owned(),
+        message: "must not repeat an item".to_owned(),
     });
 }
 
@@ -290,13 +290,13 @@ fn map_checks(constraints: &Constraints, tests: &mut Vec<Check>) {
     if let Some(min) = constraints.min_properties {
         tests.push(Check {
             test: quote! { item.len() < #min },
-            message: format!("must hold {min} properties or more"),
+            message: format!("must hold {min} or more properties"),
         });
     }
     if let Some(max) = constraints.max_properties {
         tests.push(Check {
             test: quote! { item.len() > #max },
-            message: format!("must hold {max} properties or fewer"),
+            message: format!("must hold {max} or fewer properties"),
         });
     }
 }

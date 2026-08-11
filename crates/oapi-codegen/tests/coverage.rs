@@ -117,6 +117,11 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("unsupported_bound_out_of_range"),
     },
     Feature {
+        element: "schema.constraints.unreachable",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_constraint_reach"),
+    },
+    Feature {
         element: "schema.oneOf",
         status: Status::Supported,
         fixture: Some("oneof_untagged"),

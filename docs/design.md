@@ -391,6 +391,14 @@ serde attribute. The field that names the alias takes the checks instead. A
 target with an `enum` or an `x-rust-type` is left alone: there the name and the
 type below it are not the same thing.
 
+A rule that cannot reach its type is an error, not a silence. A `format` of
+`date`, `date-time`, `uuid`, or `binary` names a type that is no longer a string,
+so a `pattern` there reads nothing once the value is parsed. An `x-rust-type`
+does the same. `minProperties` on a schema that names its properties, and
+`uniqueItems` on a list of models, cannot run either. Each stops the run and
+names the way out, because a rule the document states and the code drops is worse
+than no rule at all.
+
 `readOnly` and `writeOnly` are read by nothing yet. They mark a direction, not a
 value, and one struct cannot be both.
 

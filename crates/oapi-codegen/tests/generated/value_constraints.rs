@@ -72,12 +72,12 @@ impl Account {
             let item = &value;
             if item.chars().nth(0usize).is_none() {
                 return Err(
-                    serde::de::Error::custom("`name` must hold 1 characters or more"),
+                    serde::de::Error::custom("`name` must hold 1 or more characters"),
                 );
             }
             if item.chars().nth(40usize).is_some() {
                 return Err(
-                    serde::de::Error::custom("`name` must hold 40 characters or fewer"),
+                    serde::de::Error::custom("`name` must hold 40 or fewer characters"),
                 );
             }
         }
@@ -131,20 +131,18 @@ impl Account {
         {
             let item = &value;
             if item.len() < 1usize {
-                return Err(serde::de::Error::custom("`tags` must hold 1 items or more"));
+                return Err(serde::de::Error::custom("`tags` must hold 1 or more items"));
             }
             if item.len() > 8usize {
                 return Err(
-                    serde::de::Error::custom("`tags` must hold 8 items or fewer"),
+                    serde::de::Error::custom("`tags` must hold 8 or fewer items"),
                 );
             }
             if {
                 let mut seen = std::collections::HashSet::with_capacity(item.len());
                 item.iter().any(|entry| return !seen.insert(entry))
             } {
-                return Err(
-                    serde::de::Error::custom("`tags` must hold no repeated item"),
-                );
+                return Err(serde::de::Error::custom("`tags` must not repeat an item"));
             }
         }
         return Ok(value);
@@ -180,7 +178,7 @@ impl Account {
             let item = &value;
             if item.len() > 4usize {
                 return Err(
-                    serde::de::Error::custom("`readings` must hold 4 items or fewer"),
+                    serde::de::Error::custom("`readings` must hold 4 or fewer items"),
                 );
             }
             if item
@@ -191,7 +189,7 @@ impl Account {
                 })
             {
                 return Err(
-                    serde::de::Error::custom("`readings` must hold no repeated item"),
+                    serde::de::Error::custom("`readings` must not repeat an item"),
                 );
             }
         }
@@ -212,12 +210,12 @@ impl Account {
             let item = &value;
             if item.len() < 1usize {
                 return Err(
-                    serde::de::Error::custom("`labels` must hold 1 properties or more"),
+                    serde::de::Error::custom("`labels` must hold 1 or more properties"),
                 );
             }
             if item.len() > 4usize {
                 return Err(
-                    serde::de::Error::custom("`labels` must hold 4 properties or fewer"),
+                    serde::de::Error::custom("`labels` must hold 4 or fewer properties"),
                 );
             }
         }
@@ -234,7 +232,7 @@ impl Account {
         if let Some(item) = value.as_ref() {
             if item.chars().nth(10usize).is_some() {
                 return Err(
-                    serde::de::Error::custom("`note` must hold 10 characters or fewer"),
+                    serde::de::Error::custom("`note` must hold 10 or fewer characters"),
                 );
             }
         }
@@ -251,12 +249,12 @@ impl Account {
         if let Some(item) = value.as_ref() {
             if item.chars().nth(2usize).is_none() {
                 return Err(
-                    serde::de::Error::custom("`email` must hold 3 characters or more"),
+                    serde::de::Error::custom("`email` must hold 3 or more characters"),
                 );
             }
             if item.chars().nth(60usize).is_some() {
                 return Err(
-                    serde::de::Error::custom("`email` must hold 60 characters or fewer"),
+                    serde::de::Error::custom("`email` must hold 60 or fewer characters"),
                 );
             }
         }

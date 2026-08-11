@@ -93,11 +93,6 @@ pub(crate) fn constraints_through_ref(target: &Schema) -> Option<Constraints> {
         SchemaKind::Type(Type::Number(nt)) if nt.enumeration.is_empty() => RustType::F64,
         _ => return None,
     };
-    // A `format` can name a foreign type, such as a date. Its rules are not
-    // ours to read.
-    if !checked_as.is_scalar() {
-        return None;
-    }
     found.checked_as = Some(checked_as);
     return Some(found);
 }
@@ -152,7 +147,58 @@ pub(crate) fn check_constraints(field: &Field) -> Result<()> {
             }
         }
     }
+    check_reach(constraints, checked, name, &mut diagnostics);
     return diagnostics.into_result();
+}
+
+/// Reject a keyword that cannot reach the type the field holds.
+///
+/// A `format` can name a type that is no longer a string, such as a date or a
+/// UUID, and a `pattern` has nothing to read once the value is parsed. Leaving
+/// the keyword alone would tell the reader of the document that a rule runs when
+/// none does, which is the fault this whole section removes. So say so, and name
+/// the way out.
+fn check_reach(
+    constraints: &Constraints,
+    checked: &RustType,
+    name: &str,
+    diagnostics: &mut crate::lower::validate::Diagnostics,
+) {
+    let mut unreachable = |keyword: &str| {
+        diagnostics.push(Error::UnsupportedSchema {
+            path: name.to_owned(),
+            reason: format!("the `{keyword}` rule does not reach the type this field holds"),
+        });
+    };
+    if !matches!(*checked, RustType::String) {
+        for (keyword, present) in [
+            ("pattern", constraints.pattern.is_some()),
+            ("minLength", constraints.min_length.is_some_and(|min| return min > 0)),
+            ("maxLength", constraints.max_length.is_some()),
+        ] {
+            if present {
+                unreachable(keyword);
+            }
+        }
+    }
+    if !matches!(*checked, RustType::Map(_)) {
+        for (keyword, present) in [
+            (
+                "minProperties",
+                constraints.min_properties.is_some_and(|min| return min > 0),
+            ),
+            ("maxProperties", constraints.max_properties.is_some()),
+        ] {
+            if present {
+                unreachable(keyword);
+            }
+        }
+    }
+    // A list of models can lose `PartialEq` to F.1, and the comparison needs it.
+    let comparable = matches!(*checked, RustType::Vec(ref element) if element.is_scalar());
+    if constraints.unique_items && !comparable {
+        unreachable("uniqueItems");
+    }
 }
 
 /// A bound as a message writes it.
