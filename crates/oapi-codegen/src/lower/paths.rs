@@ -254,7 +254,7 @@ impl Lowerer<'_> {
         operation: &OasOperation,
         shared_params: &[ReferenceOr<Parameter>],
     ) -> Result<Operation> {
-        let name = operation_name(path, method, operation);
+        let name = operation_name(path, method, operation)?;
         let response_enum = operations::response_enum_name(&name, self.response_type_suffix);
 
         let params = self.resolve_parameters(operation, shared_params)?;
@@ -1546,7 +1546,7 @@ impl Lowerer<'_> {
         })?;
         return Ok(RustType::External {
             module: module.clone(),
-            name: target.to_owned(),
+            name: self.spec.external_schema_name(&file, target, reference)?,
         });
     }
 }
@@ -1558,19 +1558,15 @@ impl Lowerer<'_> {
 /// `x-rust-name` is the escape hatch for two `operationId`s that collapse onto one
 /// Rust name. It takes precedence over `operationId`, the same way it does for a
 /// schema, so the author names the method and the generator does not.
-fn operation_name(path: &str, method: &str, operation: &OasOperation) -> crate::naming::RustIdent {
-    if let Some(name) = operation
-        .extensions
-        .get(X_RUST_NAME)
-        .and_then(|value| return value.as_str())
-    {
-        return operations::operation_method_name(name);
+fn operation_name(path: &str, method: &str, operation: &OasOperation) -> Result<crate::naming::RustIdent> {
+    let at = format!("{method} {path}");
+    if let Some(name) = crate::lower::extension::str_value(&operation.extensions, X_RUST_NAME, &at)? {
+        return Ok(operations::operation_method_name(name));
     }
     if let Some(id) = &operation.operation_id {
-        return operations::operation_method_name(id);
+        return Ok(operations::operation_method_name(id));
     }
-    let synthesised = format!("{method} {path}");
-    return operations::operation_method_name(&synthesised);
+    return Ok(operations::operation_method_name(&at));
 }
 
 /// Build the remedy text for an operation-name collision.

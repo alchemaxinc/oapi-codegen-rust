@@ -16,6 +16,24 @@ The generator ignores other keys, including `x-go-type`, `x-go-name`, and
 | `x-deprecated-reason`             | schema / property                      | Note for `#[deprecated]`. Used only when `deprecated: true`.                   |
 | `x-enum-varnames` / `x-enumNames` | enum schema                            | Override generated enum variant names by position.                             |
 
+## The kind of value a key needs
+
+| Extension                         | Value                 |
+| --------------------------------- | --------------------- |
+| `x-rust-type`                     | a string              |
+| `x-rust-name`                     | a string              |
+| `x-deprecated-reason`             | a string              |
+| `x-rust-serde-skip`               | `true` or `false`     |
+| `x-omitempty`                     | `true` or `false`     |
+| `x-order`                         | a whole number        |
+| `x-rust-derive`                   | a list of trait names |
+| `x-enum-varnames` / `x-enumNames` | a list of strings     |
+
+A key that carries a value of a different kind ends the run. The generator does
+not fall back to the default, because the author wrote the key to change
+something. A fallback would read the same as an absent key, so a typo such as
+`x-order: "first"` would stay hidden.
+
 ## Example
 
 ```yaml

@@ -1,0 +1,31 @@
+openapi: 3.0.3
+info:
+  title: models a second document composes with
+  version: "1"
+paths: {}
+components:
+  schemas:
+    # `multi_spec_compose.yaml` points a request body and a response at these
+    # schemas. Two runs of the generator make the composed crate: this file
+    # gives the models, and the other file gives the operations.
+    #
+    # `x-rust-name` sits here on purpose. Both runs read this document, so both
+    # must reach the same name. The run that emits the operations once used the
+    # schema name and the composed crate did not build.
+    Parcel:
+      type: object
+      x-rust-name: Shipment
+      required: [id, weight_kg]
+      properties:
+        id:
+          type: string
+        weight_kg:
+          type: number
+    ParcelReceipt:
+      type: object
+      required: [id, accepted]
+      properties:
+        id:
+          type: string
+        accepted:
+          type: boolean

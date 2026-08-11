@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: unsupported cross-file schema ref (two names give one Rust name)
+  version: "1"
+paths:
+  /parcels:
+    post:
+      operationId: acceptParcel
+      summary: Accept a parcel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "schemas/compose_clash.yaml#/components/schemas/parcel"
+      responses:
+        "201":
+          description: The parcel was accepted.

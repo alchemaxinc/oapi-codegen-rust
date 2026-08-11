@@ -388,6 +388,16 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("ext_vendor_extensions"),
     },
     Feature {
+        element: "compose.import-mapping",
+        status: Status::Supported,
+        fixture: Some("compose_shared"),
+    },
+    Feature {
+        element: "ext.wrong-value-kind",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_extension_value"),
+    },
+    Feature {
         element: "ext.x-go-*",
         status: Status::Ignored,
         fixture: None,
@@ -507,6 +517,7 @@ const SERVER_FIXTURES: &[&str] = &[
     "server_component_body_ref",
     "server_component_param_ref_pet",
     "server_xfile_refs",
+    "multi_spec_compose",
     "server_response_headers",
     "server_text_body",
     "server_form_body",
@@ -537,6 +548,8 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_xfile_body_ref",
     "server_unsupported_missing_schema_ref",
     "server_unsupported_xfile_missing_component",
+    "server_unsupported_xfile_missing_schema",
+    "server_unsupported_xfile_name_clash",
     "server_unsupported_xfile_no_import_mapping",
     "server_unsupported_xfile_object_path_param",
     "server_unsupported_object_response_header",
@@ -720,6 +733,7 @@ generated_tests!(
     oneof_discriminator,
     oneof_untagged,
     oneof_variant_naming,
+    compose_shared,
     primitive_scalars,
     recursive_schema,
     ref_local,
@@ -747,6 +761,16 @@ fn server_config() -> oapi_codegen::Config {
     let mut import_mapping = std::collections::BTreeMap::new();
     import_mapping.insert("schemas/widgets.yaml".to_owned(), "crate::apimodel".to_owned());
     import_mapping.insert("schemas/shared.yaml".to_owned(), "crate::apimodel".to_owned());
+    // The compose fixtures use no stand-in. `compose_shared.yaml` is generated
+    // by the same generator, so the two runs must agree on every name.
+    import_mapping.insert(
+        "compose_shared.yaml".to_owned(),
+        "crate::generated::compose_shared".to_owned(),
+    );
+    import_mapping.insert(
+        "schemas/compose_clash.yaml".to_owned(),
+        "crate::generated::compose_clash".to_owned(),
+    );
     return oapi_codegen::Config {
         generate: oapi_codegen::config::Generate {
             std_http_server: true,
@@ -817,6 +841,7 @@ server_generated_tests!(
     server_component_body_ref,
     server_component_param_ref_pet,
     server_xfile_refs,
+    multi_spec_compose,
     server_response_headers,
     server_text_body,
     server_form_body,

@@ -252,12 +252,23 @@ fn hints_for(err: &Error) -> Vec<String> {
                 "For a cross-file ref, the component must exist in the other file.".to_owned(),
             ];
         }
+        Error::UnsupportedRef { reason, .. } if reason.contains("the one Rust name") => {
+            return vec![
+                "The run that writes the models separates the two names with `output-options.type-name-suffix`, and this run cannot see that config. Give one of the two schemas an `x-rust-name` in the file that holds them. Both runs read that key, so both reach the same name."
+                    .to_owned(),
+            ];
+        }
         Error::UnsupportedRef { .. } => {
             return vec![
                 "A same-document `#/components/...` pointer is the supported form at any site.".to_owned(),
                 "A cross-file `<file>#/components/...` ref resolves at a response, a parameter, or a request body. Give the file an `import-mapping` entry. The path is relative to the spec.".to_owned(),
                 "Inside a schema, only a same-document ref resolves. This covers a property, `items`, `additionalProperties`, `allOf`, and a union member.".to_owned(),
             ];
+        }
+        Error::InvalidExtensionValue { key, expected, .. } => {
+            return vec![format!(
+                "An `x-` key changes what the generator emits, so a value it cannot read is a fault and not a default. Write `{key}` as {expected}."
+            )];
         }
         Error::UnsupportedSchema { reason, .. } if reason.contains("does not reach the type") => {
             if reason.contains("Properties") {
@@ -611,6 +622,40 @@ mod tests {
                 "`{reason}` should reach a hint holding `{wanted}`, got: {hints:?}",
             );
         }
+    }
+
+    /// The hint for a wrong extension value names both the key and the kind of
+    /// value the key needs, so the author can correct it without the docs.
+    #[test]
+    fn a_wrong_extension_value_hint_names_the_key_and_the_kind() {
+        let err = Error::InvalidExtensionValue {
+            key: "x-order".to_owned(),
+            at: "Widget.id".to_owned(),
+            expected: "a whole number".to_owned(),
+            found: "a string".to_owned(),
+        };
+        let hints = hints_for(&err);
+        assert!(
+            hints
+                .iter()
+                .any(|hint| return hint.contains("x-order") && hint.contains("a whole number")),
+            "the hint should name the key and the kind it needs, got: {hints:?}",
+        );
+    }
+
+    /// A cross-file name clash reaches its own hint, and not the general
+    /// `$ref` advice, which names no remedy for it.
+    #[test]
+    fn a_cross_file_name_clash_hint_names_the_remedy() {
+        let err = Error::UnsupportedRef {
+            reference: "shared.yaml#/components/schemas/parcel".to_owned(),
+            reason: "`shared.yaml` gives `parcel` and `Parcel` the one Rust name `Parcel`".to_owned(),
+        };
+        let hints = hints_for(&err);
+        assert!(
+            hints.iter().any(|hint| return hint.contains("x-rust-name")),
+            "the hint should name `x-rust-name` as the remedy, got: {hints:?}",
+        );
     }
 
     #[test]

@@ -10,6 +10,8 @@
 pub(crate) mod constraints;
 /// Lowering of a schema `default`. Used by [`schema`] and [`paths`] only.
 pub(crate) mod default;
+/// Readers for the `x-` extensions the generator understands.
+pub(crate) mod extension;
 pub mod paths;
 pub mod prune;
 pub mod recurse;

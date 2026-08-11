@@ -46,7 +46,7 @@ pub fn lower_server_urls(spec: &Spec) -> Result<Option<ServerUrls>> {
     let mut enums = Vec::new();
     let mut lowered = Vec::new();
     for server in servers {
-        let seed = deconflict(name_seed(server), &mut used_names);
+        let seed = deconflict(name_seed(server)?, &mut used_names);
         lowered.push(lower_server(server, &seed, &mut enums)?);
     }
     return Ok(Some(ServerUrls {
@@ -58,7 +58,7 @@ pub fn lower_server_urls(spec: &Spec) -> Result<Option<ServerUrls>> {
 /// Lower a single server into a constant or builder, pushing any enum types it
 /// needs onto `enums`.
 fn lower_server(server: &Server, seed: &str, enums: &mut Vec<ServerUrlEnum>) -> Result<ServerUrl> {
-    let label = label_of(server);
+    let label = label_of(server)?;
     let doc = Some(doc_of(server, &label));
     let placeholders = placeholders(&server.url);
     if placeholders.is_empty() {
@@ -150,21 +150,21 @@ fn build_enum(
 
 /// The identifier seed for a server: an explicit `x-rust-name`, else the
 /// description or URL prefixed with `server url`.
-fn name_seed(server: &Server) -> String {
-    if let Some(name) = extension_str(server, X_RUST_NAME) {
-        return name.to_owned();
+fn name_seed(server: &Server) -> Result<String> {
+    if let Some(name) = extension_str(server, X_RUST_NAME)? {
+        return Ok(name.to_owned());
     }
     let basis = server.description.as_deref().unwrap_or(&server.url);
-    return format!("{SERVER_PREFIX} {basis}");
+    return Ok(format!("{SERVER_PREFIX} {basis}"));
 }
 
 /// A human-facing label for docs: an explicit `x-rust-name`, else the
 /// description, else the URL.
-fn label_of(server: &Server) -> String {
-    if let Some(name) = extension_str(server, X_RUST_NAME) {
-        return name.to_owned();
+fn label_of(server: &Server) -> Result<String> {
+    if let Some(name) = extension_str(server, X_RUST_NAME)? {
+        return Ok(name.to_owned());
     }
-    return server.description.clone().unwrap_or_else(|| return server.url.clone());
+    return Ok(server.description.clone().unwrap_or_else(|| return server.url.clone()));
 }
 
 /// The doc comment for a server: its trimmed `description`, else a synthesised
@@ -222,8 +222,8 @@ fn placeholders(url: &str) -> Vec<String> {
 }
 
 /// Read a string-valued extension (for example `x-rust-name`) from a server object.
-fn extension_str<'a>(server: &'a Server, key: &str) -> Option<&'a str> {
-    return server.extensions.get(key)?.as_str();
+fn extension_str<'a>(server: &'a Server, key: &str) -> Result<Option<&'a str>> {
+    return crate::lower::extension::str_value(&server.extensions, key, &server.url);
 }
 
 #[cfg(test)]

@@ -424,6 +424,58 @@ impl Spec {
             });
         });
     }
+
+    /// The name a schema in a referenced file takes in the crate the
+    /// `import-mapping` points at.
+    ///
+    /// The two runs read the same document, so an `x-rust-name` there reaches
+    /// both. Without this the run that generates the models emits the name the
+    /// key gives, the run that generates the operations emits the schema name,
+    /// and the composed crate does not build.
+    ///
+    /// A miss is an error. The name would otherwise reach the output and name a
+    /// type the other crate never declares.
+    ///
+    /// Two names in the referenced file that give one Rust name are an error
+    /// too. The run that writes the models separates them with a
+    /// `type-name-suffix` it takes from its own config. This run cannot see that
+    /// config, so it emits the plain name and reaches whichever of the two
+    /// schemas kept it. That builds, and it carries the wrong type.
+    pub fn external_schema_name(&self, file: &str, name: &str, reference: &str) -> Result<String> {
+        let entry = self.component_schema(Some(file), reference, name)?;
+        let chosen = external_name_of(&entry, name)?;
+        let doc = self.document_for(file)?;
+        let schemas = doc.components.as_ref().map(|components| return &components.schemas);
+        for (other, other_entry) in schemas.into_iter().flatten() {
+            if other == name {
+                continue;
+            }
+            let taken = external_name_of(other_entry, other)?;
+            let ident = crate::naming::to_ident(&chosen, crate::naming::Case::Pascal);
+            if crate::naming::to_ident(&taken, crate::naming::Case::Pascal).logical() == ident.logical() {
+                return Err(Error::UnsupportedRef {
+                    reference: reference.to_owned(),
+                    reason: format!(
+                        "`{file}` gives `{name}` and `{other}` the one Rust name `{}`",
+                        ident.logical()
+                    ),
+                });
+            }
+        }
+        return Ok(chosen);
+    }
+}
+
+/// The name a schema in a referenced document declares for itself, honouring
+/// `x-rust-name`.
+fn external_name_of(entry: &ReferenceOr<Schema>, name: &str) -> Result<String> {
+    let renamed = match entry {
+        ReferenceOr::Item(schema) => {
+            crate::lower::extension::str_value(&schema.schema_data.extensions, crate::naming::X_RUST_NAME, name)?
+        }
+        ReferenceOr::Reference { .. } => None,
+    };
+    return Ok(renamed.unwrap_or(name).to_owned());
 }
 
 /// Reject a document whose `openapi:` value is not a patch release of a minor

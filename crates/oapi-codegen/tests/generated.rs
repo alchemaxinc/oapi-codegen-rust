@@ -61,6 +61,8 @@ mod generated {
     #[path = "object_deny_unknown_fields.rs"]
     pub mod object_deny_unknown_fields;
 
+    #[path = "compose_shared.rs"]
+    pub mod compose_shared;
     #[path = "object_nested_inline.rs"]
     pub mod object_nested_inline;
     #[path = "object_optional_required.rs"]
@@ -124,6 +126,8 @@ mod generated {
 
     #[path = "integer_enum.rs"]
     pub mod integer_enum;
+    #[path = "multi_spec_compose.rs"]
+    pub mod multi_spec_compose;
     #[path = "server_auth.rs"]
     pub mod server_auth;
     #[path = "server_xfile_refs.rs"]
@@ -505,6 +509,42 @@ fn generated_server_resolves_cross_file_param_ref() {
     }
 
     let _router: axum::Router = server_xfile_refs::router(Service);
+}
+
+/// Two runs of the generator compose one crate: `compose_shared.yaml` gives the
+/// models, and `multi_spec_compose.yaml` gives the operations that carry them.
+///
+/// No stand-in stands between the two. Both sides are generated, so the test
+/// fails to compile if the runs disagree on a name. `Parcel` carries an
+/// `x-rust-name` for that reason: the models run emits `Shipment`, and the
+/// operations run must reach the same name through the `import-mapping`.
+#[test]
+fn two_generator_runs_compose_one_crate() {
+    use generated::compose_shared;
+    use generated::multi_spec_compose;
+    use multi_spec_compose::AcceptParcelResponse;
+    use multi_spec_compose::Api;
+
+    #[derive(Clone)]
+    struct Service;
+
+    impl Api for Service {
+        async fn accept_parcel(&self, body: compose_shared::Shipment) -> AcceptParcelResponse {
+            return AcceptParcelResponse::Created(compose_shared::ParcelReceipt {
+                id: body.id,
+                accepted: true,
+            });
+        }
+    }
+
+    let _router: axum::Router = multi_spec_compose::router(Service);
+
+    // The body the handler takes is the type the other run wrote, so a payload
+    // the models crate reads is a payload the operations crate accepts.
+    let json = r#"{"id":"p-1","weight_kg":2.5}"#;
+    let parcel: compose_shared::Shipment = serde_json::from_str(json).expect("read a parcel");
+    assert_eq!(parcel.id, "p-1");
+    assert_eq!(parcel.weight_kg, 2.5_f64);
 }
 
 #[test]
