@@ -66,3 +66,19 @@ components:
           properties:
             note:
               type: string
+    # A member that holds one `enum` value stands for a constant, and the value
+    # names the variant. A document that writes a Rust enum as a `oneOf` gives
+    # every unit variant this shape.
+    Signal:
+      oneOf:
+        - enum: [red]
+          type: string
+        - enum: [amber]
+          type: string
+        - description: A signal the reader does not know.
+          x-rust-name: Other
+          type: object
+          required: [other]
+          properties:
+            other:
+              type: string

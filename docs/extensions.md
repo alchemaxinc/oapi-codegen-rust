@@ -162,9 +162,9 @@ components:
               type: string
 ```
 
-This gives `Pet::Cat(Cat)`. Without it the member has no name and generation
+This gives `Pet::Cat(PetCat)`. Without it the member has no name and generation
 stops. See [Union variants](#union-variants) for the members that do carry a name
-of their own.
+of their own, and for the name the hoisted type takes.
 
 The generator hoists an inline object to the crate root and names it after the
 property path that encloses it. The inline `bar` property of schema `Foo` therefore
@@ -205,11 +205,25 @@ and the name of that variant comes from the first rule below that applies.
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Carries `x-rust-name`                           | The name it gives                                                                             |
 | A `$ref`                                        | The name of the type it points to                                                             |
+| A string `enum` of one value                    | That value                                                                                    |
 | An inline member that hoists no type of its own | The type it holds: `String`, `I32`, `I64`, `F64`, `Bool`, `Date`, `DateTime`, `Uuid`, `Bytes` |
 | Any other inline member                         | None. Generation stops.                                                                       |
 
 A member that hoists no type is named by the type it holds. A union cannot hold
 one type twice, so these names stay unique.
+
+A member that holds one `enum` value stands for a constant, and that value says
+what the member is. A document that writes a Rust enum as a `oneOf` gives every
+unit variant this shape, so a list of constants needs no `x-rust-name`:
+
+```yaml
+Signal:
+  oneOf:
+    - { type: string, enum: [red] }
+    - { type: string, enum: [amber] }
+```
+
+This gives `Signal::Red` and `Signal::Amber`.
 
 Every other inline member must carry `x-rust-name`, or move into a component
 schema that a `$ref` points at. An object, a list, and a map each hoist a type
@@ -219,6 +233,17 @@ position carries no meaning, and it moves. Swapping two members of a `oneOf` wou
 point `Variant0` at the other shape and change what already-compiling code means.
 This follows the rule that
 [type-name collisions](design.md#type-name-collisions-fail-fast) already use.
+
+### The name of a hoisted member type
+
+A member that hoists puts its type at the crate root, and the union name goes in
+front of it. Member `Red` of union `Signal` therefore gives `SignalRed`. This is
+the rule an inline property already uses, where `Foo.bar` gives `FooBar`.
+
+The variant itself keeps the short name, because the enum in front of it already
+says which union it belongs to. `Signal::Red(SignalRed)` reads once at the use
+site and stays unique at the crate root. Two unions that both hold a member named
+`Unknown` would otherwise take one name and stop generation.
 
 Two members that lower to one type also end generation. Serde reads an untagged
 enum in order and takes the first variant that fits, so the second one never

@@ -36,8 +36,17 @@ impl Diagnostics {
     }
 
     /// Record a problem and continue.
+    ///
+    /// A problem that is itself a report opens and adds its problems one by one.
+    /// A check can collect on its own and give a report back, and a caller that
+    /// collects again would otherwise nest one report inside another. The reader
+    /// then gets a count that hides most of the list. [`Error::Validation`]
+    /// therefore holds leaf problems only, at one level.
     pub fn push(&mut self, problem: Error) {
-        self.problems.push(problem);
+        match problem {
+            Error::Validation { problems } => self.problems.extend(problems),
+            leaf => self.problems.push(leaf),
+        }
     }
 
     /// Record the error from a failed check and continue.
@@ -47,7 +56,7 @@ impl Diagnostics {
     /// pass.
     pub fn check(&mut self, outcome: Result<()>) {
         if let Err(problem) = outcome {
-            self.problems.push(problem);
+            self.push(problem);
         }
     }
 
@@ -138,6 +147,33 @@ mod tests {
         assert!(
             message.contains('2'),
             "message should say how many problems were found: {message}",
+        );
+    }
+
+    #[test]
+    fn a_report_pushed_into_a_report_does_not_nest() {
+        // A schema-level check collects on its own and gives a report back. The
+        // loop over schemas collects again. Without opening the inner report the
+        // reader sees "found 2 problems", and one of the two hides the rest.
+        let mut inner = Diagnostics::new();
+        inner.push(problem("Widget"));
+        inner.push(problem("Gadget"));
+        let report = inner.into_result().expect_err("two problems must fail");
+
+        let mut outer = Diagnostics::new();
+        outer.push(report);
+        outer.push(problem("Doohickey"));
+        assert_eq!(outer.len(), 3, "the inner problems should be counted one by one");
+
+        let err = outer.into_result().expect_err("three problems must fail");
+        let Error::Validation { problems } = &err else {
+            panic!("expected Validation, got: {err:?}");
+        };
+        assert!(
+            problems
+                .iter()
+                .all(|entry| return !matches!(*entry, Error::Validation { .. })),
+            "a report must hold leaf problems only, got: {problems:?}",
         );
     }
 }

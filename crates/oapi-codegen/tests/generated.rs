@@ -200,6 +200,26 @@ fn untagged_enum_round_trips_through_serde() {
 }
 
 #[test]
+fn a_constant_union_member_keeps_its_wire_value() {
+    // A `oneOf` of constants is how a document writes a Rust enum whose
+    // variants carry no data. The variant holds a hoisted single-value enum, so
+    // the untagged enum writes the constant itself and not `null`.
+    use generated::oneof_variant_naming;
+
+    let red = oneof_variant_naming::Signal::Red(oneof_variant_naming::SignalRed::Red);
+    let json = serde_json::to_string(&red).expect("serialize");
+    assert_eq!(json, r#""red""#);
+
+    // The member that carries data keeps the shape serde gives an externally
+    // tagged variant, so a reader sees no difference from a hand-written enum.
+    let other = oneof_variant_naming::Signal::Other(oneof_variant_naming::SignalOther {
+        other: "flashing".to_owned(),
+    });
+    let json = serde_json::to_string(&other).expect("serialize");
+    assert_eq!(json, r#"{"other":"flashing"}"#);
+}
+
+#[test]
 fn optional_field_is_skipped_when_none() {
     use generated::object_optional_required;
 
