@@ -157,7 +157,7 @@ file that holds the operations and points every cross-file `$ref` at the module
 the first run wrote.
 
 ```yaml
-# models.yaml — the run that writes the models
+# models.yaml — the run that reads `schemas/common.yaml` and writes the models
 package: apimodel
 output: src/apimodel.rs
 generate:
@@ -165,7 +165,7 @@ generate:
 ```
 
 ```yaml
-# server.yaml — the run that writes the operations
+# server.yaml — the run that reads the file holding the operations
 package: restapi
 output: src/restapi.rs
 generate:
@@ -173,6 +173,12 @@ generate:
 import-mapping:
   schemas/common.yaml: crate::apimodel
 ```
+
+The mapped value is the module path the crate mounts the first run's output at.
+The generator writes a file, and the crate decides the path, so the two runs agree
+only if the value matches what the crate declares. `src/apimodel.rs` mounted with
+`mod apimodel;` gives `crate::apimodel`. The same file mounted inside a `common`
+module gives `crate::apimodel::common`, which is the form the example above uses.
 
 A cross-file `$ref` resolves at a response, a parameter, or a request body. A
 `$ref` inside a schema — a property, `items`, `additionalProperties`, `allOf`, or
