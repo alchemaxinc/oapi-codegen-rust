@@ -223,7 +223,8 @@ Signal:
     - { type: string, enum: [amber] }
 ```
 
-This gives `Signal::Red` and `Signal::Amber`.
+This gives `Signal::Red(SignalRed)` and `Signal::Amber(SignalAmber)`. The next
+section says where those payload names come from.
 
 Every other inline member must carry `x-rust-name`, or move into a component
 schema that a `$ref` points at. An object, a list, and a map each hoist a type
