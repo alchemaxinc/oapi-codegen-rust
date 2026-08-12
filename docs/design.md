@@ -83,6 +83,30 @@ are emitted at the crate root in one file.
 If a generated per-operation type name conflicts with a component model name,
 generation fails. Use `x-rust-name` or `response-type-suffix` to resolve it.
 
+## One run reports every independent problem
+
+A run does not stop at the first fault it finds. Component schemas are independent
+of each other, so a fault in one says nothing about the next. The generator lowers
+them all and reports the faults together.
+
+```text
+error: found 3 problems in the spec.
+  1. `x-order` on `Alpha.id` needs a whole number, but the document gives a string
+  2. `x-order` on `Beta.id` needs a whole number, but the document gives a string
+  3. `x-order` on `Gamma.id` needs a whole number, but the document gives a string
+```
+
+Without this, a document with three faults costs three runs, because each run shows
+one fault and hides the rest.
+
+Two rules keep the report short and true.
+
+A check whose result the rest of the run needs still stops at once. An unresolved
+`$ref` is one example. A run that continues past it reports later faults that are
+only effects of the first one, and the author reads a list that is mostly noise.
+
+One fault is reported as itself. The count and the list appear for two or more.
+
 ## Type-name collisions fail fast
 
 - **Go:** `oapi-codegen` adds a numeric suffix when two names collapse onto one

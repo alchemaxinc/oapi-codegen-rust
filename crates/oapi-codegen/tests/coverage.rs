@@ -1569,14 +1569,23 @@ fn a_ref_to_a_missing_schema_fails() {
     let fixture = tests_dir().join("fixtures").join("unsupported_missing_schema_ref.yaml");
     let err = oapi_codegen::generate_models_string(&fixture).expect_err("a ref with no target must stop generation");
     let report = err.to_string();
+    let oapi_codegen::Error::Validation { problems } = &err else {
+        panic!("expected an aggregated Validation error, got: {err:?}");
+    };
+    // The fixture holds an absent target at a property, at an alias, and at a
+    // map value. One run reports all three, so the author fixes them together.
     assert!(
-        matches!(err, oapi_codegen::Error::UnresolvedRef(_)),
-        "an absent target is an unresolved ref, got: {err:?}"
+        problems
+            .iter()
+            .all(|problem| return matches!(*problem, oapi_codegen::Error::UnresolvedRef(_))),
+        "an absent target is an unresolved ref, got: {problems:?}"
     );
-    assert!(
-        report.contains("Absent"),
-        "the report must name the absent target, got: {report}"
-    );
+    for name in ["AbsentProperty", "AbsentAlias", "AbsentValue"] {
+        assert!(
+            report.contains(name),
+            "the report must name the absent target `{name}`, got: {report}"
+        );
+    }
 }
 
 /// The remedy must name a rename, because the prelude name is fixed.
