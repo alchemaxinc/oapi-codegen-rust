@@ -29,8 +29,8 @@ pub enum Formats {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Named {
-    Cat(Cat),
-    Dog(Dog),
+    Cat(NamedCat),
+    Dog(NamedDog),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
@@ -50,20 +50,46 @@ pub enum Referenced {
 pub enum Mixed {
     String(String),
     Widget(Widget),
-    Detail(Detail),
+    Detail(MixedDetail),
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Cat {
+#[serde(untagged)]
+pub enum Signal {
+    Red(SignalRed),
+    Amber(SignalAmber),
+    Other(SignalOther),
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct NamedCat {
     pub meow: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Dog {
+pub struct NamedDog {
     pub bark: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Detail {
+pub struct MixedDetail {
     pub note: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum SignalRed {
+    #[serde(rename = "red")]
+    Red,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum SignalAmber {
+    #[serde(rename = "amber")]
+    Amber,
+}
+
+/// A signal the reader does not know.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct SignalOther {
+    pub other: String,
 }

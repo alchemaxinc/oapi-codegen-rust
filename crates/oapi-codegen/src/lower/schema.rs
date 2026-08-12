@@ -525,9 +525,13 @@ impl Mapper<'_> {
                         });
                         continue;
                     };
-                    // The seed names the variant and any type the member hoists,
-                    // so the two agree.
-                    let ty = self.type_from_schema(&seed, schema)?;
+                    // The seed names the variant. A type the member hoists goes
+                    // to the crate root, where the seed alone says nothing about
+                    // where it came from and can meet the same name from another
+                    // union. The union name goes in front of it, as it does for
+                    // an inline property. The variant keeps the short name,
+                    // because the enum already says which union it belongs to.
+                    let ty = self.type_from_schema(&format!("{name}_{seed}"), schema)?;
                     UnionVariant {
                         name: crate::naming::deconflict_ident(to_ident(&seed, Case::Pascal), &mut seen),
                         ty,
@@ -828,21 +832,41 @@ fn integer_variant_name(value: i64) -> String {
 
 /// The name an inline union member gives its variant, if it gives one at all.
 ///
-/// `x-rust-name` names any member. Without it, only a member that hoists no type
-/// of its own can be named, and the type it holds gives that name.
+/// `x-rust-name` names any member. A member that holds one `enum` value is named
+/// by that value. Otherwise only a member that hoists no type of its own can be
+/// named, and the type it holds gives that name.
 ///
-/// A member that hoists — an object, a list, a map, an `enum` — needs a name for
-/// the hoisted type as well as for the variant. The position would give one, but
-/// a position carries no meaning and moves when the document changes, so the
-/// author gives the name instead.
+/// A member that hoists — an object, a list, a map, an `enum` of several values —
+/// needs a name for the hoisted type as well as for the variant. The position
+/// would give one, but a position carries no meaning and moves when the document
+/// changes, so the author gives the name instead.
 fn inline_variant_seed(schema: &Schema, at: &str) -> Result<Option<String>> {
     if let Some(custom) = extension_str(&schema.schema_data, X_RUST_NAME, at)? {
         return Ok(Some(custom.to_owned()));
+    }
+    if let Some(value) = single_enum_value(schema) {
+        return Ok(Some(value));
     }
     let Some(ty) = non_hoisting_type(schema) else {
         return Ok(None);
     };
     return Ok(type_variant_name(&ty).map(str::to_owned));
+}
+
+/// The one value a member holds, when the member is a string `enum` of one value.
+///
+/// Such a member stands for a constant. The value names the variant, because a
+/// constant says what it is and the position adds nothing. A document that lists
+/// a Rust enum as a `oneOf` writes every unit variant this way, so this shape is
+/// common.
+fn single_enum_value(schema: &Schema) -> Option<String> {
+    let SchemaKind::Type(Type::String(st)) = &schema.schema_kind else {
+        return None;
+    };
+    let [Some(value)] = st.enumeration.as_slice() else {
+        return None;
+    };
+    return Some(value.clone());
 }
 
 /// The type an inline union member holds when it hoists nothing.
@@ -1152,6 +1176,42 @@ mod tests {
         assert!(
             matches!(&err, Error::InvalidExtensionValue { at, .. } if at == "Alpha.id"),
             "one problem should stay unwrapped, got: {err:?}",
+        );
+    }
+
+    #[test]
+    fn a_union_member_holding_one_enum_value_is_named_by_that_value() {
+        // The shape a document gives a Rust enum whose variants carry no data.
+        // Before this rule every member needed an `x-rust-name`.
+        let out = emit_yaml(&format!(
+            "{PREAMBLE}    Signal:\n      oneOf:\n      - type: string\n        enum: [red]\n      - type: string\n        enum: [amber]\n"
+        ));
+        assert!(out.contains("Red(SignalRed)"), "expected a named variant, got: {out}");
+        assert!(
+            out.contains("Amber(SignalAmber)"),
+            "expected a named variant, got: {out}"
+        );
+        // The hoisted type carries the wire value, so the untagged enum writes
+        // the constant and not `null`.
+        assert!(
+            out.contains("rename = \"red\""),
+            "the hoisted type should keep the wire value, got: {out}"
+        );
+    }
+
+    #[test]
+    fn a_hoisted_union_member_type_carries_the_union_name() {
+        // Two unions can each hold a member named `Unknown`. Without the union
+        // name in front, both hoist to `Unknown` and generation stops.
+        let out = emit_yaml(&format!(
+            "{PREAMBLE}    Left:\n      oneOf:\n      - x-rust-name: Unknown\n        type: object\n        required: [a]\n        properties:\n          a:\n            type: string\n    Right:\n      oneOf:\n      - x-rust-name: Unknown\n        type: object\n        required: [b]\n        properties:\n          b:\n            type: string\n"
+        ));
+        assert!(out.contains("struct LeftUnknown"), "expected LeftUnknown, got: {out}");
+        assert!(out.contains("struct RightUnknown"), "expected RightUnknown, got: {out}");
+        // The variant keeps the short name; the enum already says which union.
+        assert!(
+            out.contains("Unknown(LeftUnknown)"),
+            "expected a short variant, got: {out}"
         );
     }
 
