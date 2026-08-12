@@ -148,3 +148,48 @@ generate:
 import-mapping:
   schemas/common.yaml: crate::apimodel::common
 ```
+
+## A spec split across files
+
+`import-mapping` composes one crate from two runs of the generator. One run reads
+the file that holds the schemas and writes the models. The other run reads the
+file that holds the operations and points every cross-file `$ref` at the module
+the first run wrote.
+
+```yaml
+# models.yaml — the run that reads `schemas/common.yaml` and writes the models
+package: apimodel
+output: src/apimodel.rs
+generate:
+  models: true
+```
+
+```yaml
+# server.yaml — the run that reads the file holding the operations
+package: restapi
+output: src/restapi.rs
+generate:
+  std-http-server: true
+import-mapping:
+  schemas/common.yaml: crate::apimodel
+```
+
+The mapped value is the module path the crate mounts the first run's output at.
+The generator writes a file, and the crate decides the path, so the two runs agree
+only if the value matches what the crate declares. `src/apimodel.rs` mounted with
+`mod apimodel;` gives `crate::apimodel`. The same file mounted inside a `common`
+module gives `crate::apimodel::common`, which is the form the example above uses.
+
+A cross-file `$ref` resolves at a response, a parameter, or a request body. A
+`$ref` inside a schema — a property, `items`, `additionalProperties`, `allOf`, or
+a union member — must stay in the same document, because the generator emits a
+cross-file schema as a name from the mapped module and does not read it inline.
+
+Both runs read the file that holds the schemas, so an `x-rust-name` there reaches
+both and the two names agree. The path a run writes is the mapped module plus the
+name the schema takes.
+
+Two schema names in that file which give one Rust name end the run. The models
+run separates them with `output-options.type-name-suffix`, and the run that
+reads the operations cannot see that config. Give one of the two an
+`x-rust-name`, which both runs read.

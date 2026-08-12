@@ -117,6 +117,21 @@ pub enum Error {
         reason: String,
     },
 
+    /// An `x-` extension carried a value of a kind the generator cannot read.
+    ///
+    /// The author wrote the key to change something. A silent fallback to the
+    /// default would hide that nothing changed.
+    InvalidExtensionValue {
+        /// The extension key, for example `x-rust-name`.
+        key: String,
+        /// The place the key sits, for example a schema or a server URL.
+        at: String,
+        /// The kind of value the key needs.
+        expected: String,
+        /// The kind of value the document gave.
+        found: String,
+    },
+
     /// A schema combined keywords in a way the generator cannot represent.
     UnsupportedSchema {
         /// Dotted path to the schema for diagnostics.
@@ -404,6 +419,14 @@ impl std::fmt::Display for Error {
             Error::UnsupportedRef { reference, reason } => {
                 return write!(f, "unsupported reference `{reference}`: {reason}");
             }
+            Error::InvalidExtensionValue {
+                key,
+                at,
+                expected,
+                found,
+            } => {
+                return write!(f, "`{key}` on `{at}` needs {expected}, but the document gives {found}");
+            }
             Error::UnsupportedSchema { path, reason } => {
                 return write!(f, "unsupported schema at `{path}`: {reason}");
             }
@@ -531,6 +554,7 @@ impl std::error::Error for Error {
             | Error::UnsupportedDefault { .. }
             | Error::UnresolvedRef(_)
             | Error::UnsupportedRef { .. }
+            | Error::InvalidExtensionValue { .. }
             | Error::UnsupportedSchema { .. }
             | Error::SchemaDepthExceeded { .. }
             | Error::TypeNameCollision { .. }

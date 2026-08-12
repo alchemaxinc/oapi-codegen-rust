@@ -1,0 +1,20 @@
+openapi: "3.0.3"
+info:
+  title: an extension that carries the wrong kind of value
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # `x-rust-name` renames the generated type, and it needs a string. A number
+    # cannot name a type, so the key changes nothing.
+    #
+    # The generator once read the key, found a number, and fell back to the
+    # schema name. That reads the same as an absent key, so a typo stayed
+    # hidden and the author saw a name they did not ask for.
+    Widget:
+      type: object
+      x-rust-name: 123
+      required: [id]
+      properties:
+        id:
+          type: string

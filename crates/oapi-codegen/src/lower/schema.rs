@@ -138,11 +138,11 @@ impl Mapper<'_> {
     fn named_to_item(&mut self, name: &str, schema: &Schema) -> Result<Item> {
         let data = &schema.schema_data;
 
-        if let Some(verbatim) = extension_str(data, X_RUST_TYPE) {
+        if let Some(verbatim) = extension_str(data, X_RUST_TYPE, name)? {
             return Ok(Item::Alias(Alias {
                 name: self.type_name_ident(name),
                 doc: doc_of(data),
-                deprecated: deprecation_of(data),
+                deprecated: deprecation_of(data, name)?,
                 ty: verbatim_type(data, verbatim, name)?,
             }));
         }
@@ -163,7 +163,7 @@ impl Mapper<'_> {
                 Some(target) => Item::Alias(Alias {
                     name: self.type_name_ident(name),
                     doc: doc_of(data),
-                    deprecated: deprecation_of(data),
+                    deprecated: deprecation_of(data, name)?,
                     ty: RustType::Named(target),
                 }),
                 None => Item::Struct(self.merge_all_of(name, all_of, data)?),
@@ -173,14 +173,14 @@ impl Mapper<'_> {
                 Item::Alias(Alias {
                     name: self.type_name_ident(name),
                     doc: doc_of(data),
-                    deprecated: deprecation_of(data),
+                    deprecated: deprecation_of(data, name)?,
                     ty,
                 })
             }
             SchemaKind::Any(_) => Item::Alias(Alias {
                 name: self.type_name_ident(name),
                 doc: doc_of(data),
-                deprecated: deprecation_of(data),
+                deprecated: deprecation_of(data, name)?,
                 ty: RustType::Value,
             }),
             SchemaKind::Not { .. } => {
@@ -201,7 +201,7 @@ impl Mapper<'_> {
             return Ok(Item::Alias(Alias {
                 name: self.type_name_ident(name),
                 doc: doc_of(data),
-                deprecated: deprecation_of(data),
+                deprecated: deprecation_of(data, name)?,
                 ty: RustType::Map(Box::new(element)),
             }));
         }
@@ -216,7 +216,7 @@ impl Mapper<'_> {
             let required = obj.required.iter().any(|r| {
                 return r == prop_name;
             });
-            let order = prop_order(prop);
+            let order = prop_order(prop, &format!("{name}.{prop_name}"))?;
             let field = self.field_from_prop(name, prop_name, prop, required)?;
             ordered.push((order, field));
         }
@@ -237,7 +237,7 @@ impl Mapper<'_> {
         return Ok(Struct {
             name: self.type_name_ident(name),
             doc: doc_of(data),
-            deprecated: deprecation_of(data),
+            deprecated: deprecation_of(data, name)?,
             fields,
             additional_properties,
             deny_unknown_fields,
@@ -253,6 +253,7 @@ impl Mapper<'_> {
         required: bool,
     ) -> Result<Field> {
         let hint = format!("{parent}_{wire}");
+        let at = format!("{parent}.{wire}");
         let mut ty = self.type_from_schema_ref(&hint, prop)?;
 
         let data = match prop {
@@ -295,13 +296,23 @@ impl Mapper<'_> {
         };
 
         let doc = data.and_then(doc_of);
-        let deprecated = data.and_then(deprecation_of);
-        let serde_skip = data
-            .and_then(|data| return extension_bool(data, X_RUST_SERDE_SKIP))
-            .unwrap_or(false);
-        let omit_empty = data.and_then(|data| return extension_bool(data, X_OMITEMPTY));
+        let deprecated = match data {
+            Some(data) => deprecation_of(data, &at)?,
+            None => None,
+        };
+        let serde_skip = match data {
+            Some(data) => extension_bool(data, X_RUST_SERDE_SKIP, &at)?.unwrap_or(false),
+            None => false,
+        };
+        let omit_empty = match data {
+            Some(data) => extension_bool(data, X_OMITEMPTY, &at)?,
+            None => None,
+        };
 
-        let rust_name = data.and_then(|data| return extension_str(data, X_RUST_NAME));
+        let rust_name = match data {
+            Some(data) => extension_str(data, X_RUST_NAME, &at)?,
+            None => None,
+        };
         let ident = match rust_name {
             Some(custom) => to_ident(custom, Case::Snake),
             None => to_ident(wire, Case::Snake),
@@ -379,7 +390,7 @@ impl Mapper<'_> {
             let required = merged.required.iter().any(|r| {
                 return r == wire;
             });
-            let order = prop_order(prop);
+            let order = prop_order(prop, &format!("{name}.{wire}"))?;
             let field = self.field_from_prop(name, wire, prop, required)?;
             ordered.push((order, field));
         }
@@ -388,7 +399,7 @@ impl Mapper<'_> {
         return Ok(Struct {
             name: self.type_name_ident(name),
             doc: doc_of(data),
-            deprecated: deprecation_of(data),
+            deprecated: deprecation_of(data, name)?,
             fields,
             additional_properties: None,
             // A merge does not read `additionalProperties` from any member. In
@@ -455,7 +466,7 @@ impl Mapper<'_> {
         return Ok(Enum {
             name: self.type_name_ident(name),
             doc: doc_of(data),
-            deprecated: deprecation_of(data),
+            deprecated: deprecation_of(data, name)?,
             kind: EnumKind::Union(variants),
         });
     }
@@ -497,7 +508,7 @@ impl Mapper<'_> {
                     }
                 }
                 ReferenceOr::Item(schema) => {
-                    let Some(seed) = inline_variant_seed(schema) else {
+                    let Some(seed) = inline_variant_seed(schema, &format!("{name}, member {index}"))? else {
                         diagnostics.push(Error::UnsupportedSchema {
                             path: name.to_owned(),
                             reason: format!("member {index} of the union gives the variant no name"),
@@ -527,8 +538,10 @@ impl Mapper<'_> {
     /// A repeated value is an error. The second variant would take the same
     /// `rename`, which leaves it unreachable and compiles only with a warning.
     fn string_enum(&self, name: &str, values: &[Option<String>], data: &SchemaData) -> Result<Enum> {
-        let varnames =
-            extension_str_array(data, X_ENUM_VARNAMES).or_else(|| return extension_str_array(data, X_ENUM_NAMES));
+        let varnames = match extension_str_array(data, X_ENUM_VARNAMES, name)? {
+            Some(names) => Some(names),
+            None => extension_str_array(data, X_ENUM_NAMES, name)?,
+        };
         let mut diagnostics = crate::lower::validate::Diagnostics::new();
         let mut variants = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -557,7 +570,7 @@ impl Mapper<'_> {
         return Ok(Enum {
             name: self.type_name_ident(name),
             doc: doc_of(data),
-            deprecated: deprecation_of(data),
+            deprecated: deprecation_of(data, name)?,
             kind: EnumKind::Strings(variants),
         });
     }
@@ -572,8 +585,10 @@ impl Mapper<'_> {
     /// discriminant (`E0081`). A value the `format` cannot hold is an error for
     /// the same reason: the literal does not fit the `repr`.
     fn integer_enum(&self, name: &str, values: &[Option<i64>], repr: &RustType, data: &SchemaData) -> Result<Enum> {
-        let varnames =
-            extension_str_array(data, X_ENUM_VARNAMES).or_else(|| return extension_str_array(data, X_ENUM_NAMES));
+        let varnames = match extension_str_array(data, X_ENUM_VARNAMES, name)? {
+            Some(names) => Some(names),
+            None => extension_str_array(data, X_ENUM_NAMES, name)?,
+        };
         let mut diagnostics = crate::lower::validate::Diagnostics::new();
         let mut variants = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -607,7 +622,7 @@ impl Mapper<'_> {
         return Ok(Enum {
             name: self.type_name_ident(name),
             doc: doc_of(data),
-            deprecated: deprecation_of(data),
+            deprecated: deprecation_of(data, name)?,
             kind: EnumKind::Integers {
                 repr: repr.clone(),
                 variants,
@@ -663,7 +678,7 @@ impl Mapper<'_> {
 
     fn type_from_schema_inner(&mut self, hint: &str, schema: &Schema) -> Result<RustType> {
         let data = &schema.schema_data;
-        if let Some(verbatim) = extension_str(data, X_RUST_TYPE) {
+        if let Some(verbatim) = extension_str(data, X_RUST_TYPE, hint)? {
             return verbatim_type(data, verbatim, hint);
         }
 
@@ -810,12 +825,14 @@ fn integer_variant_name(value: i64) -> String {
 /// the hoisted type as well as for the variant. The position would give one, but
 /// a position carries no meaning and moves when the document changes, so the
 /// author gives the name instead.
-fn inline_variant_seed(schema: &Schema) -> Option<String> {
-    if let Some(custom) = extension_str(&schema.schema_data, X_RUST_NAME) {
-        return Some(custom.to_owned());
+fn inline_variant_seed(schema: &Schema, at: &str) -> Result<Option<String>> {
+    if let Some(custom) = extension_str(&schema.schema_data, X_RUST_NAME, at)? {
+        return Ok(Some(custom.to_owned()));
     }
-    let ty = non_hoisting_type(schema)?;
-    return type_variant_name(&ty).map(str::to_owned);
+    let Some(ty) = non_hoisting_type(schema) else {
+        return Ok(None);
+    };
+    return Ok(type_variant_name(&ty).map(str::to_owned));
 }
 
 /// The type an inline union member holds when it hoists nothing.
@@ -885,28 +902,25 @@ pub(crate) fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat
 }
 
 /// Extract a string-valued extension (for example `x-rust-type`) from schema data.
-fn extension_str<'a>(data: &'a SchemaData, key: &str) -> Option<&'a str> {
-    let value = data.extensions.get(key)?;
-    return value.as_str();
+fn extension_str<'a>(data: &'a SchemaData, key: &str, at: &str) -> Result<Option<&'a str>> {
+    return crate::lower::extension::str_value(&data.extensions, key, at);
 }
 
 /// Extract a boolean-valued extension (for example `x-omitempty`) from schema data.
-fn extension_bool(data: &SchemaData, key: &str) -> Option<bool> {
-    let value = data.extensions.get(key)?;
-    return value.as_bool();
+fn extension_bool(data: &SchemaData, key: &str, at: &str) -> Result<Option<bool>> {
+    return crate::lower::extension::bool_value(&data.extensions, key, at);
 }
 
 /// Extract an integer-valued extension (for example `x-order`) from schema data.
-fn extension_i64(data: &SchemaData, key: &str) -> Option<i64> {
-    let value = data.extensions.get(key)?;
-    return value.as_i64();
+fn extension_i64(data: &SchemaData, key: &str, at: &str) -> Result<Option<i64>> {
+    return crate::lower::extension::i64_value(&data.extensions, key, at);
 }
 
 /// The `x-order` value of a property, if it carries one (only inline schemas can).
-fn prop_order(prop: &ReferenceOr<Box<Schema>>) -> Option<i64> {
+fn prop_order(prop: &ReferenceOr<Box<Schema>>, at: &str) -> Result<Option<i64>> {
     return match prop {
-        ReferenceOr::Item(schema) => extension_i64(&schema.schema_data, X_ORDER),
-        ReferenceOr::Reference { .. } => None,
+        ReferenceOr::Item(schema) => extension_i64(&schema.schema_data, X_ORDER, at),
+        ReferenceOr::Reference { .. } => Ok(None),
     };
 }
 
@@ -920,11 +934,9 @@ fn sort_by_order(mut fields: Vec<(Option<i64>, Field)>) -> Vec<Field> {
     return fields.into_iter().map(|(_, field)| return field).collect();
 }
 
-/// Extract a string-array extension (for example `x-enum-varnames`). `None` if the
-/// value is not an array of strings.
-fn extension_str_array<'a>(data: &'a SchemaData, key: &str) -> Option<Vec<&'a str>> {
-    let array = data.extensions.get(key)?.as_array()?;
-    return array.iter().map(|value| return value.as_str()).collect();
+/// Extract a string-array extension (for example `x-enum-varnames`).
+fn extension_str_array<'a>(data: &'a SchemaData, key: &str, at: &str) -> Result<Option<Vec<&'a str>>> {
+    return crate::lower::extension::str_list_value(&data.extensions, key, at);
 }
 
 /// The trait names `x-rust-derive` accepts, in the order the derive list emits
@@ -997,12 +1009,12 @@ fn verbatim_type(data: &SchemaData, verbatim: &str, path: &str) -> Result<RustTy
 /// Derive a `#[deprecated]` annotation from `deprecated: true` and an optional
 /// `x-deprecated-reason` note. Returns `None` unless the schema is deprecated,
 /// so a lone `x-deprecated-reason` is a no-op (matching `oapi-codegen`).
-fn deprecation_of(data: &SchemaData) -> Option<Deprecation> {
+fn deprecation_of(data: &SchemaData, at: &str) -> Result<Option<Deprecation>> {
     if !data.deprecated {
-        return None;
+        return Ok(None);
     }
-    let note = extension_str(data, X_DEPRECATED_REASON).map(str::to_owned);
-    return Some(Deprecation { note });
+    let note = extension_str(data, X_DEPRECATED_REASON, at)?.map(str::to_owned);
+    return Ok(Some(Deprecation { note }));
 }
 
 /// Trim and normalise a schema `description` into a doc comment.

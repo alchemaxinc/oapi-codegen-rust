@@ -152,11 +152,9 @@ pub fn type_renames(spec: &Spec, suffix: Option<&str>) -> Result<TypeNames> {
     let mut claimed: HashMap<String, String> = HashMap::new();
     for (name, entry) in spec.schemas() {
         let override_name = match entry {
-            ReferenceOr::Item(schema) => schema
-                .schema_data
-                .extensions
-                .get(X_RUST_NAME)
-                .and_then(|value| return value.as_str()),
+            ReferenceOr::Item(schema) => {
+                crate::lower::extension::str_value(&schema.schema_data.extensions, X_RUST_NAME, name)?
+            }
             ReferenceOr::Reference { .. } => None,
         };
         let effective = override_name.unwrap_or(name);
