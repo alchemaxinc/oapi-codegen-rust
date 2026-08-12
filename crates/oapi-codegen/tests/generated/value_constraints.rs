@@ -15,7 +15,7 @@ pub struct Account {
     #[serde(deserialize_with = "Account::validate_name")]
     pub name: String,
     #[serde(deserialize_with = "Account::validate_age")]
-    pub age: i64,
+    pub age: u64,
     #[serde(deserialize_with = "Account::validate_ratio")]
     pub ratio: f64,
     #[serde(deserialize_with = "Account::validate_tags")]
@@ -84,16 +84,13 @@ impl Account {
         return Ok(value);
     }
     /// The rules the document gives `age`, checked on the way in.
-    fn validate_age<'de, D>(deserializer: D) -> ::core::result::Result<i64, D::Error>
+    fn validate_age<'de, D>(deserializer: D) -> ::core::result::Result<u64, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = <i64 as serde::Deserialize>::deserialize(deserializer)?;
+        let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
         {
             let item = &value;
-            if *item < 0 {
-                return Err(serde::de::Error::custom("`age` must be 0 or more"));
-            }
             if *item > 130 {
                 return Err(serde::de::Error::custom("`age` must be 130 or less"));
             }

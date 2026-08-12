@@ -69,6 +69,14 @@ fn value_for(
             .as_i64()
             .filter(|number| return i32::try_from(*number).is_ok())
             .map(DefaultValue::Int),
+        // An unsigned type reads the value as unsigned. This refuses a negative
+        // default the signed types accept, and it reaches the whole range of
+        // `u64`, which is higher than `i64` goes.
+        RustType::U32 => json
+            .as_u64()
+            .filter(|number| return u32::try_from(*number).is_ok())
+            .map(DefaultValue::UInt),
+        RustType::U64 => json.as_u64().map(DefaultValue::UInt),
         // An integer is a valid floating-point default, and JSON writes `1`
         // rather than `1.0` for a whole number.
         RustType::F64 => json.as_f64().map(DefaultValue::Float),
@@ -115,6 +123,8 @@ fn describe(ty: &RustType) -> String {
         RustType::Bool => "a boolean".to_owned(),
         RustType::I32 => "a 32-bit integer".to_owned(),
         RustType::I64 => "an integer".to_owned(),
+        RustType::U32 => "a 32-bit integer of zero or more".to_owned(),
+        RustType::U64 => "an integer of zero or more".to_owned(),
         RustType::F64 => "a number".to_owned(),
         RustType::String => "a string".to_owned(),
         RustType::Vec(_) => "an array".to_owned(),
@@ -163,6 +173,22 @@ mod tests {
         for (json, ty, expected) in cases {
             assert_eq!(lowered(json, &ty), expected);
         }
+    }
+
+    #[test]
+    fn an_unsigned_default_reaches_the_whole_range_and_refuses_a_negative() {
+        // `u64` reaches above `i64::MAX`, and a document may use that room.
+        let above_signed = u64::MAX;
+        assert_eq!(
+            lowered(Value::from(above_signed), &RustType::U64),
+            DefaultValue::UInt(above_signed)
+        );
+        assert_eq!(lowered(Value::from(7_u64), &RustType::U32), DefaultValue::UInt(7));
+        // An unsigned type holds no value below zero, whatever its width.
+        assert!(lower(Value::from(-1_i64), &RustType::U32).is_err());
+        assert!(lower(Value::from(-1_i64), &RustType::U64).is_err());
+        // A `u32` still stops at its own width.
+        assert!(lower(Value::from(4_294_967_296_u64), &RustType::U32).is_err());
     }
 
     #[test]

@@ -132,6 +132,13 @@ pub struct Constraints {
     pub exclusive_minimum: bool,
     /// `exclusiveMaximum`: makes `maximum` a strict bound.
     pub exclusive_maximum: bool,
+    /// Whether `minimum` moved to absorb an `exclusiveMinimum`.
+    ///
+    /// The bound then holds a number the document does not write, and a message
+    /// about it must name the number the author wrote instead.
+    pub folded_minimum: bool,
+    /// Whether `maximum` moved to absorb an `exclusiveMaximum`.
+    pub folded_maximum: bool,
     /// `multipleOf`.
     pub multiple_of: Option<Bound>,
     /// `minItems`.
@@ -171,6 +178,12 @@ pub enum DefaultValue {
     Str(String),
     /// An integer literal.
     Int(i64),
+    /// An unsigned integer literal.
+    ///
+    /// An unsigned field takes this rather than [`Self::Int`], which keeps a
+    /// negative value out and reaches the whole range of `u64`, above where
+    /// `i64` stops.
+    UInt(u64),
     /// A floating-point literal.
     Float(f64),
     /// A `bool` literal.
@@ -205,7 +218,7 @@ pub enum EnumKind {
     /// The wire form is a bare number, so the emitted type carries
     /// `#[serde(try_from, into)]` and a `#[repr]` of [`Self::Integers::repr`].
     Integers {
-        /// The integer type the discriminants take, either `i32` or `i64`.
+        /// The integer type the discriminants take: `i32`, `i64`, `u32`, or `u64`.
         repr: RustType,
         /// The permitted values, in document order.
         variants: Vec<IntegerVariant>,
@@ -334,6 +347,10 @@ pub enum RustType {
     I32,
     /// `i64`.
     I64,
+    /// `u32`.
+    U32,
+    /// `u64`.
+    U64,
     /// `f64`.
     F64,
     /// `String`.
@@ -403,7 +420,13 @@ impl RustType {
     pub fn is_scalar(&self) -> bool {
         return matches!(
             self,
-            RustType::Bool | RustType::I32 | RustType::I64 | RustType::F64 | RustType::String
+            RustType::Bool
+                | RustType::I32
+                | RustType::I64
+                | RustType::U32
+                | RustType::U64
+                | RustType::F64
+                | RustType::String
         );
     }
 
@@ -417,6 +440,8 @@ impl RustType {
             RustType::Bool => "bool".to_owned(),
             RustType::I32 => "i32".to_owned(),
             RustType::I64 => "i64".to_owned(),
+            RustType::U32 => "u32".to_owned(),
+            RustType::U64 => "u64".to_owned(),
             RustType::F64 => "f64".to_owned(),
             RustType::String => "String".to_owned(),
             RustType::Value => "serde_json::Value".to_owned(),

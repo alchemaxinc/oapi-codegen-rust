@@ -81,7 +81,7 @@ use crate::loader::Spec;
 use crate::loader::ref_component_name;
 use crate::loader::ref_file_part;
 use crate::lower::default::lower_default;
-use crate::lower::schema::integer_format_type;
+use crate::lower::schema::integer_type;
 use crate::lower::schema::string_format_type;
 use crate::lower::security;
 use crate::naming::Case;
@@ -946,7 +946,7 @@ fn media_type_kind(name: &str) -> Option<BodyKind> {
 fn scalar_type(kind: &SchemaKind) -> Option<RustType> {
     let ty = match kind {
         SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
-        SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
+        SchemaKind::Type(Type::Integer(it)) => integer_type(it),
         SchemaKind::Type(Type::Number(_)) => RustType::F64,
         SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
         _ => return None,
@@ -1486,7 +1486,7 @@ impl Lowerer<'_> {
     fn inline_body_type(&self, path: &str, method: &str, origin: Option<&str>, schema: &Schema) -> Result<RustType> {
         let ty = match &schema.schema_kind {
             SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
-            SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
+            SchemaKind::Type(Type::Integer(it)) => integer_type(it),
             SchemaKind::Type(Type::Number(_)) => RustType::F64,
             SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
             SchemaKind::Type(Type::Array(at)) => {

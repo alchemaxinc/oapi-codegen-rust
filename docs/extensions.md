@@ -201,13 +201,13 @@ components:
 A `oneOf` or an `anyOf` becomes an untagged enum. Each member becomes a variant,
 and the name of that variant comes from the first rule below that applies.
 
-| Member                                          | Variant name                                                                                  |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Carries `x-rust-name`                           | The name it gives                                                                             |
-| A `$ref`                                        | The name of the type it points to                                                             |
-| A string `enum` of one value                    | That value                                                                                    |
-| An inline member that hoists no type of its own | The type it holds: `String`, `I32`, `I64`, `F64`, `Bool`, `Date`, `DateTime`, `Uuid`, `Bytes` |
-| Any other inline member                         | None. Generation stops.                                                                       |
+| Member                                          | Variant name                                                                                                |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Carries `x-rust-name`                           | The name it gives                                                                                           |
+| A `$ref`                                        | The name of the type it points to                                                                           |
+| A string `enum` of one value                    | That value                                                                                                  |
+| An inline member that hoists no type of its own | The type it holds: `String`, `I32`, `I64`, `U32`, `U64`, `F64`, `Bool`, `Date`, `DateTime`, `Uuid`, `Bytes` |
+| Any other inline member                         | None. Generation stops.                                                                                     |
 
 A member that hoists no type is named by the type it holds. A union cannot hold
 one type twice, so these names stay unique.

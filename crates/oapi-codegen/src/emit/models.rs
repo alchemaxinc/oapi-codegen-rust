@@ -282,6 +282,10 @@ fn emit_default_value(value: &DefaultValue, ty: &RustType) -> Result<TokenStream
             let literal = proc_macro2::Literal::i64_unsuffixed(*number);
             quote! { #literal }
         }
+        DefaultValue::UInt(number) => {
+            let literal = proc_macro2::Literal::u64_unsuffixed(*number);
+            quote! { #literal }
+        }
         DefaultValue::Float(number) => {
             let literal = proc_macro2::Literal::f64_unsuffixed(*number);
             quote! { #literal }

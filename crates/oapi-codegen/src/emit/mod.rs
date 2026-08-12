@@ -310,6 +310,8 @@ pub(crate) fn emit_type(ty: &RustType) -> Result<TokenStream> {
         RustType::Bool => quote! { bool },
         RustType::I32 => quote! { i32 },
         RustType::I64 => quote! { i64 },
+        RustType::U32 => quote! { u32 },
+        RustType::U64 => quote! { u64 },
         RustType::F64 => quote! { f64 },
         RustType::String => quote! { String },
         RustType::Value => quote! { serde_json::Value },
