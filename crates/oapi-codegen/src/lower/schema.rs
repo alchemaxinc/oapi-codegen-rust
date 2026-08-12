@@ -66,6 +66,12 @@ const MAX_SCHEMA_DEPTH: usize = 100;
 /// because it also applies them to the service and decides when to report an
 /// unresolved collision. A module built from unchecked `names` can hold two items
 /// with one name, so the caller must check `names` before the emit pass.
+///
+/// One bad schema does not stop the loop. Component schemas are independent of
+/// each other, so a fault in one says nothing about the next. The pass lowers
+/// them all and reports every fault together, and the author makes one pass over
+/// the document instead of one for each fault. A schema that fails contributes no
+/// item, and the module is dropped, because the collected faults end the run.
 pub fn generate_models(spec: &Spec, names: &crate::lower::rename::TypeNames) -> Result<Module> {
     let renames = names.renames();
     let mut mapper = Mapper {
@@ -75,23 +81,27 @@ pub fn generate_models(spec: &Spec, names: &crate::lower::rename::TypeNames) -> 
         depth: 0,
     };
     let mut items = Vec::new();
+    let mut diagnostics = crate::lower::validate::Diagnostics::new();
     for (name, entry) in spec.schemas() {
         match entry {
-            ReferenceOr::Item(schema) => {
-                let item = mapper.named_to_item(name, schema)?;
-                items.push(item);
-            }
+            ReferenceOr::Item(schema) => match mapper.named_to_item(name, schema) {
+                Ok(item) => items.push(item),
+                Err(problem) => diagnostics.push(problem),
+            },
             ReferenceOr::Reference { reference } => {
-                let target = mapper.schema_ref_target(reference, "a top-level schema alias")?;
-                items.push(Item::Alias(Alias {
-                    name: mapper.type_name_ident(name),
-                    doc: None,
-                    deprecated: None,
-                    ty: RustType::Named(target),
-                }));
+                match mapper.schema_ref_target(reference, "a top-level schema alias") {
+                    Ok(target) => items.push(Item::Alias(Alias {
+                        name: mapper.type_name_ident(name),
+                        doc: None,
+                        deprecated: None,
+                        ty: RustType::Named(target),
+                    })),
+                    Err(problem) => diagnostics.push(problem),
+                }
             }
         }
     }
+    diagnostics.into_result()?;
     items.append(&mut mapper.extra);
     let mut module = Module { items };
     crate::lower::rename::rewrite_module(&mut module, renames);
@@ -1100,6 +1110,49 @@ mod tests {
     fn schema_just_under_the_depth_limit_still_lowers() {
         let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH - 1));
         lower_models(&spec).expect("just under the limit should lower cleanly");
+    }
+
+    /// Lower an inline document and return the error it gives.
+    fn lower_error(yaml: &str) -> Error {
+        let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse spec");
+        let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
+        return lower_models(&spec).expect_err("the spec should not lower");
+    }
+
+    /// A schema whose `x-order` holds a string, which the extension rejects.
+    fn bad_order_schema(name: &str) -> String {
+        return format!(
+            "    {name}:\n      type: object\n      properties:\n        id:\n          type: string\n          x-order: 'first'\n"
+        );
+    }
+
+    #[test]
+    fn every_bad_schema_is_reported_in_one_run() {
+        // Component schemas are independent, so a fault in one says nothing about
+        // the next. Reporting the first alone costs the author one run for each
+        // fault.
+        let alpha = bad_order_schema("Alpha");
+        let beta = bad_order_schema("Beta");
+        let gamma = bad_order_schema("Gamma");
+        let err = lower_error(&format!("{PREAMBLE}{alpha}{beta}{gamma}"));
+        let Error::Validation { problems } = &err else {
+            panic!("expected Validation, got: {err:?}");
+        };
+        assert_eq!(problems.len(), 3, "every bad schema should be reported");
+        let message = err.to_string();
+        for name in ["Alpha", "Beta", "Gamma"] {
+            assert!(message.contains(name), "message should name `{name}`: {message}");
+        }
+    }
+
+    #[test]
+    fn a_good_schema_beside_a_bad_one_does_not_add_a_problem() {
+        let alpha = bad_order_schema("Alpha");
+        let err = lower_error(&format!("{PREAMBLE}{alpha}    Beta:\n      type: string\n"));
+        assert!(
+            matches!(&err, Error::InvalidExtensionValue { at, .. } if at == "Alpha.id"),
+            "one problem should stay unwrapped, got: {err:?}",
+        );
     }
 
     /// Lower a spec whose one schema carries an `x-rust-derive` and return the
