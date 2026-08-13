@@ -8,6 +8,19 @@ dist/
 
 # Rust
 target/
+output/
+
+# A consumer of this generator does not commit its output, so the default is to
+# ignore it. This repository is the exception: it commits golden files and the
+# example output, and the tests compare against them. The rule matches at any
+# depth, so those two directories need an explicit exception, or a new file in
+# them is dropped without a message. Git applies an ignore rule to an untracked
+# file only, so the files already committed stayed visible and hid this.
+generated/
+!crates/oapi-codegen/tests/generated/
+!crates/oapi-codegen/tests/generated/**
+!examples/bookstore/generated/
+!examples/bookstore/generated/**
 
 # Node (Prettier / Commitlint installed in CI)
 node_modules/

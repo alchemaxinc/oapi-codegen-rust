@@ -1,0 +1,26 @@
+openapi: 3.0.3
+info:
+  title: unsupported multipart combined with another content type
+  version: "1"
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Meta"
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Meta"
+      responses:
+        "204":
+          description: No content.
+components:
+  schemas:
+    Meta:
+      type: object
+      properties:
+        name:
+          type: string

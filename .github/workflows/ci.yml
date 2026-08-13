@@ -4,19 +4,31 @@ on:
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
 
 env:
   # Pinned Prettier version — kept in env so the install + cache key stay in
   # sync. Bump together with any prettier-config changes.
-  PRETTIER_VERSION: "3.3.3"
+  PRETTIER_VERSION: "3.9.5"
 
   # Pinned linker / test-runner versions for the manual installs below.
   # Pinning avoids surprise breakage from upstream releases and lets the
   # Swatinem cache stay valid (RUSTFLAGS is part of the cache key).
   MOLD_VERSION: "2.41.0"
   NEXTEST_VERSION: "0.9.133"
+  CARGO_DENY_VERSION: "0.20.2"
+
+  # `.rustfmt.toml` sets three nightly-only options: `ignore`, which keeps
+  # rustfmt away from the generated files, plus `imports_granularity` and
+  # `group_imports`. Stable rustfmt drops an unstable option with a warning and
+  # a zero exit code, so it reformats what nightly skips and disagrees on
+  # imports. `make lint` and `make format` both use `+nightly`, so this uses the
+  # same channel and the two cannot drift apart.
+  RUSTFMT_NIGHTLY: "nightly"
 
   # Force ANSI colour in cargo/rustc output so GitHub Actions renders the
   # terminal output in colour rather than as a wall of plain text.
@@ -39,7 +51,7 @@ env:
   # default back and avoids the much slower git-based index protocol.
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
-  # Strip full DWARF debuginfo from dev and test builds; keep just enough
+  # Strip full DWARF debuginfo from dev and test builds. keep just enough
   # (line tables) for panic backtraces to show the failing line. Saves
   # roughly 20-30% on compile + link time and shrinks `target/` substantially,
   # which in turn makes the rust-cache save/restore much faster. We don't
@@ -61,12 +73,12 @@ jobs:
     steps:
       - &checkout-code
         name: Checkout code (shallow)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - &cache-prettier
         name: Cache Prettier
         id: cache-prettier
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: node_modules
           key: v1-prettier-${{ env.PRETTIER_VERSION }}
@@ -81,28 +93,21 @@ jobs:
     steps:
       - *checkout-code
 
-      - &read-rust-version
-        name: Read Rust toolchain version
-        id: rust-version
-        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
-
-      - &install-rust
-        name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
-          toolchain: ${{ steps.rust-version.outputs.version }}
           components: clippy, rustfmt
 
       # mold is a drop-in linker that links Rust binaries roughly an order of
-      # magnitude faster than ld; significant win on a workspace with three
-      # binaries that all link openssl/rusqlite/etc. Installed manually into
+      # magnitude faster than ld. It is a significant win for a workspace with three
+      # binaries that all link openssl/rusqlite/and more. Install it manually into
       # ~/.local/mold (rather than /usr/local) so the install tree can be
       # cached as a single directory keyed on MOLD_VERSION — same pattern as
       # the Prettier cache above.
       - &cache-mold
         name: Cache mold linker
         id: cache-mold
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.local/mold
           key: v1-mold-${{ env.MOLD_VERSION }}-x86_64-linux
@@ -144,7 +149,7 @@ jobs:
       # importantly removes a network dependency from the hot path).
       - name: Cache cargo-nextest
         id: cache-nextest
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-nextest
           key: v1-cargo-nextest-${{ env.NEXTEST_VERSION }}-x86_64-linux
@@ -160,18 +165,53 @@ jobs:
       - name: Verify cargo-nextest
         run: cargo nextest --version
 
+      # The `rustfmt` component of the pinned stable toolchain cannot read
+      # `.rustfmt.toml`, so this installs the nightly one beside it. The stable
+      # toolchain stays the default, so every other step is unaffected.
+      - name: Install nightly rustfmt
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # v-nobody-knows until https://github.com/dtolnay/rust-toolchain/issues/180 is fixed
+        with:
+          toolchain: ${{ env.RUSTFMT_NIGHTLY }}
+          components: rustfmt
+
       - name: Check formatting
-        run: cargo fmt -- --check
+        run: cargo "+${RUSTFMT_NIGHTLY}" fmt -- --check
 
       - name: Run clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
+      # Fail on broken or private intra-doc links so doc comments can't rot.
+      - name: Check rustdoc links
+        env:
+          RUSTDOCFLAGS: "-D warnings -D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links"
+        run: cargo doc --no-deps --workspace --locked
+
       - name: Run unit tests
-        if: ${{ !startsWith(github.event.pull_request.title, 'chore:') }}
+        if: ${{ !startsWith(github.event.pull_request.title, 'chore:') && !startsWith(github.event.pull_request.title, 'chore(') && !startsWith(github.event.pull_request.title, 'docs:') && !startsWith(github.event.pull_request.title, 'docs(') }}
         # nextest is faster than `cargo test` (parallel process model, smarter
         # scheduling) and reuses the artifacts clippy just produced because
         # both invocations target the same `target/` directory.
         run: cargo nextest run --workspace --all-targets --locked --no-fail-fast
+
+      # Regenerate the committed example + fixtures and fail on any diff, so a
+      # change to the generator or a spec cannot land without its regenerated
+      # output. Runs unconditionally (no chore: skip) because drift is cheap to
+      # check and must never slip through. Reuses the target/ built above.
+      - name: Check generated code is up to date
+        run: make verify-generated
+
+      # `include` in the crate manifest is an allowlist, so a new source file
+      # under a path it does not name would be dropped from the package and the
+      # release would be the first thing to notice. Package here instead, with
+      # the same `--locked` the deploy workflow publishes with. The step runs
+      # after the drift check, which leaves a clean tree, because `cargo
+      # package` refuses a dirty one.
+      #
+      # The step also runs the packaged binary once. `cargo package` rewrites
+      # the manifest, so code that reads it can work in the workspace and fail
+      # only once published. Building alone does not find that.
+      - name: Check the published package builds, runs, and stays trim
+        run: make verify-package
 
   lint-prettier:
     runs-on: ubuntu-latest
@@ -183,17 +223,54 @@ jobs:
       - name: Run Prettier
         run: npx prettier --check .
 
+  cargo-deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - *checkout-code
+
+      # Needed because cargo-deny shells out to `cargo metadata`.
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      # Self-install + cache the pinned binary, same pattern as mold/nextest.
+      # Policy lives in deny.toml. Key hardcodes musl since this job is x86_64
+      # ubuntu-latest. revisit the key and URL together if that changes.
+      - name: Cache cargo-deny
+        id: cache-cargo-deny
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/cargo-deny
+          key: v1-cargo-deny-${{ env.CARGO_DENY_VERSION }}-x86_64-linux-musl
+
+      - name: Install cargo-deny
+        if: steps.cache-cargo-deny.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/cargo-deny"
+          curl -fsSL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C "$HOME/.local/cargo-deny" --strip-components=1
+
+      - name: Verify cargo-deny
+        run: |
+          echo "$HOME/.local/cargo-deny" >> "$GITHUB_PATH"
+          "$HOME/.local/cargo-deny/cargo-deny" --version
+
+      - name: Check advisories, bans, licenses and sources
+        run: "$HOME/.local/cargo-deny/cargo-deny --locked check --hide-inclusion-graph"
+
   ci-passed:
     name: CI Passed
     runs-on: ubuntu-latest
     if: always()
-    needs: [rust-checks, lint-prettier]
+    needs: [rust-checks, lint-prettier, cargo-deny]
     steps:
       - name: Verify all jobs passed or were skipped
         run: |
           results=(
             "${{ needs.rust-checks.result }}"
             "${{ needs.lint-prettier.result }}"
+            "${{ needs.cargo-deny.result }}"
           )
           for result in "${results[@]}"; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then

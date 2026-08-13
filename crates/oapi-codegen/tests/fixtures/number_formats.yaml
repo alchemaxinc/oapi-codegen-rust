@@ -1,0 +1,19 @@
+openapi: "3.0.3"
+info:
+  title: Number formats
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    NumberFormats:
+      type: object
+      required: [plain, single, wide]
+      properties:
+        plain:
+          type: number
+        single:
+          type: number
+          format: float
+        wide:
+          type: number
+          format: double

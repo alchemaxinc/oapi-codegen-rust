@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: Two operations that each produce a per-operation type collision
+  version: 1.0.0
+paths:
+  # With `response-type-suffix: Query`, the response enum of each operation takes
+  # the name of that operation's own query-parameter struct. Both operations
+  # therefore clash, and one run must report both.
+  /a:
+    get:
+      operationId: a
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /b:
+    get:
+      operationId: b
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK

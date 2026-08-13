@@ -1,0 +1,18 @@
+openapi: "3.0.3"
+info:
+  title: Unsupported bound
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # `int32` holds -2147483648 to 2147483647. A bound outside it writes a
+    # literal the field cannot hold, and the file does not build.
+    Counter:
+      type: object
+      required:
+        - total
+      properties:
+        total:
+          type: integer
+          format: int32
+          minimum: -5000000000

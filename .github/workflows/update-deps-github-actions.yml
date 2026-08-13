@@ -21,9 +21,9 @@ jobs:
         with:
           token: ${{ steps.app.outputs.token }}
           auto-merge: "true"
-          merge-method: "squash"
           base-branch: "develop"
+          merge-method: "squash"
           file-glob: ".github/**/*.yml"
           branch-prefix: "update-actions"
-          pr-title: "chore: update github actions"
-          commit-message: "chore: update github actions"
+          pr-title: "chore(ci): update github actions"
+          commit-message: "chore(ci): update github actions"

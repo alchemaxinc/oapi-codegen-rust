@@ -1,4 +1,4 @@
-name: PR Title Lint
+name: PR
 
 # Lints the PR title against Conventional Commits.
 #
@@ -11,22 +11,25 @@ on:
     types: [opened, edited, reopened, synchronize]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
 
 env:
   COMMITLINT_CLI_VERSION: "20.5.0"
 
 jobs:
-  lint-pr-title:
+  lint-title:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code (shallow)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Cache Commitlint
         id: cache-commitlint
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: node_modules
           key: v1-commitlint-${{ env.COMMITLINT_CLI_VERSION }}

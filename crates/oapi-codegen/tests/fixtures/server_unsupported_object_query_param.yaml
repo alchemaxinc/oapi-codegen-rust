@@ -1,0 +1,21 @@
+openapi: 3.0.3
+info:
+  title: Unsupported object query parameter
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      summary: Reject an object-typed query parameter.
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+      responses:
+        "200":
+          description: Results.

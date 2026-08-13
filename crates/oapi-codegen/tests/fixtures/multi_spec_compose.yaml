@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: a document composed from two files
+  version: "1"
+paths:
+  /parcels:
+    post:
+      operationId: acceptParcel
+      summary: Accept a parcel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "compose_shared.yaml#/components/schemas/Parcel"
+      responses:
+        "201":
+          description: The parcel was accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "compose_shared.yaml#/components/schemas/ParcelReceipt"

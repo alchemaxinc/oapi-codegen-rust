@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: Operation name collision that a filter removes
+  version: 1.0.0
+paths:
+  # `list-widgets` and `listWidgets` collide, but `exclude-operation-ids` removes
+  # the second one before lowering. Only one operation then claims the name, so
+  # generation must succeed. A check that ran over the unfiltered document would
+  # report a collision between an operation that the file holds and one that it
+  # does not.
+  /widgets:
+    get:
+      operationId: list-widgets
+      responses:
+        "200":
+          description: ok
+  /gadgets:
+    get:
+      operationId: listWidgets
+      responses:
+        "200":
+          description: ok

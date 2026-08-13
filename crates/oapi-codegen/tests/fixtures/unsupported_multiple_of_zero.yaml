@@ -1,0 +1,18 @@
+openapi: "3.0.3"
+info:
+  title: Unsupported multipleOf
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # A step of zero divides by zero. An integer then panics, and a float reads
+    # `inf`, which makes the check pass every value in silence. JSON Schema asks
+    # for a step above zero, so the generator stops here.
+    Meter:
+      type: object
+      required:
+        - reading
+      properties:
+        reading:
+          type: integer
+          multipleOf: 0

@@ -3,19 +3,28 @@ name: Semantic Versioning and Release
 on:
   push:
     branches:
+      # main -> full stable releases (+ crates.io). develop -> `-dev.N`
+      # prereleases via the semantic-release prerelease channel in .releaserc.json.
       - main
       - develop
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
 
 permissions:
   issues: write
   contents: write
   id-token: write
+  attestations: write
   pull-requests: write
+
+env:
+  # Pin cargo-edit so the version bump is reproducible. bump this to adopt a
+  # newer release. Used by the build and publish jobs to stamp the tag version
+  # into Cargo.toml before building/publishing.
+  CARGO_EDIT_VERSION: "0.13.13"
 
 jobs:
   semantic-release:
@@ -46,36 +55,6 @@ jobs:
         with:
           token: ${{ steps.app.outputs.token }}
 
-      - name: Check for Cargo.toml changes
-        id: check_changes
-        uses: alchemaxinc/composite-toolbox/check-changes@v1
-        with:
-          files: "Cargo.toml"
-
-      - name: Create Pull Request for version bump
-        id: open-pr
-        if: steps.check_changes.outputs.has_changes == 'true'
-        uses: alchemaxinc/composite-toolbox/create-pr@v1
-        with:
-          token: ${{ steps.app.outputs.token }}
-          base-branch: "main"
-          branch-prefix: "chore/auto/semantic-release"
-          files: "Cargo.toml"
-          commit-message: "chore(semantic-release): bump version in Cargo.toml"
-          pr-title: "chore: semantic release version bump"
-          pr-body: |
-            This PR updates the version in Cargo.toml after semantic-release created a new release.
-
-            This is an automated PR created by the semantic release workflow.
-
-      - name: Auto-merge Pull Request
-        if: steps.open-pr.outcome == 'success'
-        uses: alchemaxinc/composite-toolbox/merge-pr@v1
-        with:
-          token: ${{ steps.app.outputs.token }}
-          merge-method: "merge"
-          pull-request-number: ${{ steps.open-pr.outputs.pr_number }}
-
   build-and-upload:
     name: Build ${{ matrix.target }}
     needs: semantic-release
@@ -89,15 +68,19 @@ jobs:
             runner: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-latest
           - target: aarch64-apple-darwin
             runner: macos-latest
     env:
-      # Force ANSI colour in cargo/rustc output so GitHub Actions renders
-      # release-build logs in colour.
+      # Force ANSI color in cargo/rustc output so GitHub Actions renders
+      # release-build logs in color.
       CARGO_TERM_COLOR: always
-      # Incremental compilation is a net loss in CI: extra small files bloat
+      # Incremental compilation is a net loss in CI: tiny files bloat
       # the cache while CI never reuses incremental state across runs.
       CARGO_INCREMENTAL: "0"
       # Retry transient registry / network failures up to 10 times before
@@ -109,16 +92,17 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Read Rust toolchain version
-        id: rust-version
-        run: echo "version=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: actions/checkout@v7
         with:
-          toolchain: ${{ steps.rust-version.outputs.version }}
+          # semantic-release tags the released commit. Check it out so we build
+          # from the released sources, then stamp the tag version into the
+          # workspace manifests below (set-version keeps Cargo.lock consistent,
+          # so the build still runs --locked).
+          ref: ${{ needs.semantic-release.outputs.tag }}
+
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
+        with:
           targets: ${{ matrix.target }}
 
       - name: Cache Cargo dependencies
@@ -127,8 +111,32 @@ jobs:
           shared-key: release-${{ matrix.target }}
           key: ${{ matrix.target }}
 
+      - name: Cache cargo-edit
+        id: cache-cargo-edit
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-set-version
+          key: cargo-edit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_EDIT_VERSION }}-${{ hashFiles('rust-toolchain.toml') }}
+
+      - name: Install cargo-edit
+        if: steps.cache-cargo-edit.outputs.cache-hit != 'true'
+        run: cargo install cargo-edit --locked --version "${CARGO_EDIT_VERSION}" --bin cargo-set-version
+
+      - name: Stamp the released version into Cargo.toml
+        # The tag is authoritative. write its version into the workspace so the
+        # built binary reports it via CARGO_PKG_VERSION.
+        env:
+          TAG: ${{ needs.semantic-release.outputs.tag }}
+        run: cargo set-version --workspace "${TAG#v}"
+
       - name: Build binary
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        # Link the musl targets with the toolchain's bundled rust-lld so a fully
+        # static binary builds without installing a musl C toolchain. Each var is
+        # scoped to its triple, so the gnu/darwin builds keep their default linker.
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+        run: cargo build --release --locked -p oapi-codegen --bin oapi-codegen --target ${{ matrix.target }}
 
       - name: Rename binary and generate checksum
         run: |
@@ -141,6 +149,12 @@ jobs:
             shasum -a 256 oapi-codegen-${{ matrix.target }} > oapi-codegen-${{ matrix.target }}.sha256
           fi
 
+      # FIXME: Enable when we open-source the repo
+      #- name: Attest build provenance
+      #  uses: actions/attest-build-provenance@v4
+      #  with:
+      #    subject-path: "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}"
+
       - *create-app-token
 
       - name: Upload release assets
@@ -150,7 +164,8 @@ jobs:
         run: |
           gh release upload "$TAG" \
             "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}" \
-            "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}.sha256"
+            "target/${{ matrix.target }}/release/oapi-codegen-${{ matrix.target }}.sha256" \
+            --clobber
 
   publish:
     name: Publish release
@@ -166,30 +181,96 @@ jobs:
           TAG: ${{ needs.semantic-release.outputs.tag }}
         run: gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false
 
-      - name: Checkout and configure identity for backmerge
-        if: github.ref == 'refs/heads/main'
+  publish-crate:
+    name: Publish to crates.io
+    needs: [semantic-release, publish]
+    # crates.io is immutable and prereleases live on develop, so only the stable
+    # main channel publishes. develop `-dev.N` builds never reach crates.io.
+    if: >-
+      needs.semantic-release.outputs.tag != '' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.semantic-release.outputs.tag }}
+
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - name: Cache cargo-edit
+        id: cache-cargo-edit
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-set-version
+          key: cargo-edit-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_EDIT_VERSION }}-${{ hashFiles('rust-toolchain.toml') }}
+
+      - name: Install cargo-edit
+        if: steps.cache-cargo-edit.outputs.cache-hit != 'true'
+        run: cargo install cargo-edit --locked --version "${CARGO_EDIT_VERSION}" --bin cargo-set-version
+
+      - name: Stamp the released version into Cargo.toml
+        # The tag is authoritative for the version. Stamp it into the manifests
+        # and make an ephemeral local commit (never pushed) so `cargo publish`
+        # sees a clean tree and we avoid `--allow-dirty` — which will otherwise
+        # silently bundle any unrelated dirty file. Committing only these two
+        # paths keeps Cargo's own dirty check as a guard against that.
+        env:
+          TAG: ${{ needs.semantic-release.outputs.tag }}
+        run: |
+          cargo set-version --workspace "${TAG#v}"
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m "chore(release): ${TAG#v}" -- Cargo.toml Cargo.lock
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps --locked \
+            | jq -r '.packages[] | select(.name == "oapi-codegen") | .version')
+
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'User-Agent: oapi-codegen release pipeline (github.com/alchemaxinc/oapi-codegen-rust)' \
+            "https://crates.io/api/v1/crates/oapi-codegen/${version}")
+
+          if [ "$status" = "200" ]; then
+            echo "oapi-codegen ${version} is already on crates.io; skipping publish."
+            exit 0
+          fi
+
+          echo "Publishing oapi-codegen ${version} to crates.io."
+          cargo publish -p oapi-codegen --locked
+
+  backmerge:
+    name: Backmerge main into develop
+    # Runs as its own job so a backmerge conflict cannot block the release
+    # itself — by the time we get here the tag, GitHub release and crates.io
+    # publish have already succeeded. Merges main into develop so the next
+    # prerelease builds on the release rather than diverging from it.
+    needs: [semantic-release, publish, publish-crate]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - *create-app-token
+
+      - name: Checkout and setup
         uses: alchemaxinc/composite-toolbox/checkout-and-setup@v1
         with:
+          shallow: false
           token: ${{ steps.app.outputs.token }}
-          shallow: "false"
 
       - name: Backmerge main into develop
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           set -e
           git fetch origin develop
-          git checkout develop
-
-          if git merge main --no-edit; then
-            git push origin develop
-          else
-            echo "Merge conflict detected, creating PR instead"
-            git merge --abort
-            gh pr create \
-              --title "chore: backmerge main into develop" \
-              --body "Automatic backmerge from main into develop failed due to conflicts. Please resolve manually." \
-              --head main \
-              --base develop || echo "PR already exists"
-          fi
+          git checkout -B develop origin/develop
+          git merge main --no-edit
+          git push origin develop

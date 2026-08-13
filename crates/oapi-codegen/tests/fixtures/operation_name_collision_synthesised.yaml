@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: Operation name collision from synthesised names
+  version: 1.0.0
+paths:
+  # Neither operation declares an `operationId`, so each name comes from the method
+  # and the path. `/widgets/list` and `/widgets-list` both give `get_widgets_list`.
+  # The remedy differs here, because there is no `operationId` to change.
+  /widgets/list:
+    get:
+      responses:
+        "200":
+          description: ok
+  /widgets-list:
+    get:
+      responses:
+        "200":
+          description: ok

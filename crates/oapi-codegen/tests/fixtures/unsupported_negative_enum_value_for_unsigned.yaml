@@ -1,0 +1,16 @@
+openapi: "3.0.3"
+info:
+  title: Negative enum value for an unsigned repr
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # A `minimum` of zero gives a `repr` of `u32`, which holds no negative
+    # value. The `enum` and the `minimum` disagree, so the document is at fault.
+    Offset:
+      type: integer
+      format: int32
+      minimum: 0
+      enum:
+        - -1
+        - 5

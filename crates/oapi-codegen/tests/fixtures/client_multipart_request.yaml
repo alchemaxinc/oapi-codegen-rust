@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: Client multipart request
+  version: 1.0.0
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - image
+                - attempts
+              properties:
+                image:
+                  type: string
+                  format: binary
+                caption:
+                  type: string
+                attempts:
+                  type: integer
+      responses:
+        "204":
+          description: Stored.

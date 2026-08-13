@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: Client requiring a $ref security scheme (unsupported)
+  version: 1.0.0
+paths:
+  /thing:
+    get:
+      operationId: getThing
+      summary: Fetch a thing, authenticated by a `$ref` security scheme.
+      security:
+        - aliasedAuth: []
+      responses:
+        "200":
+          description: The thing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    aliasedAuth:
+      $ref: "#/components/securitySchemes/bearerAuth"
+  schemas:
+    Message:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string

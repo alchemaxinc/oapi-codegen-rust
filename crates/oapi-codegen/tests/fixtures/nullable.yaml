@@ -1,0 +1,17 @@
+openapi: "3.0.3"
+info:
+  title: Nullable properties
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Account:
+      type: object
+      required: [id, deactivated_at]
+      properties:
+        id:
+          type: string
+        deactivated_at:
+          type: string
+          format: date-time
+          nullable: true

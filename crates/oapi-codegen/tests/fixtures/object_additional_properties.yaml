@@ -1,0 +1,15 @@
+openapi: "3.0.3"
+info:
+  title: Object with typed additionalProperties
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Counters:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+      additionalProperties:
+        type: integer

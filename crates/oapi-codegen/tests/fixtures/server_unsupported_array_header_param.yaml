@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: Unsupported array header parameter
+  version: 1.0.0
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      summary: Reject an array-typed header parameter.
+      parameters:
+        - name: X-Tags
+          in: header
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        "200":
+          description: Results.

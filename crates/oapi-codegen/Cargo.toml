@@ -4,6 +4,20 @@ description = "Generate client and server boilerplate from OpenAPI 3 specificati
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
+license.workspace = true
+homepage = "https://github.com/alchemaxinc/oapi-codegen-rust"
+documentation = "https://docs.rs/oapi-codegen"
+rust-version = "1.88"
+keywords = ["openapi", "codegen", "swagger", "axum", "rest"]
+categories = [
+  "development-tools",
+  "command-line-utilities",
+  "web-programming",
+  "api-bindings",
+]
+
+include = ["src/**/*.rs", "README.md", "LICENSE"]
+readme = "README.md"
 
 [[bin]]
 name = "oapi-codegen"
@@ -11,3 +25,32 @@ path = "src/main.rs"
 
 [lints]
 workspace = true
+
+[dependencies]
+anstream = "1.0.0"
+clap = { version = "4.6.4", features = ["derive"] }
+http = "1.4.2"
+indexmap = "2.14.0"
+openapiv3 = "2.2.0"
+owo-colors = "4.3.0"
+prettyplease = "0.3.0"
+proc-macro2 = "1.0.107"
+quote = "1.0.47"
+regex = { version = "1.13.1", default-features = false, features = ["std", "perf", "unicode"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_yaml = "0.9.34"
+syn = { version = "3.0.3", features = ["full"] }
+
+[dev-dependencies]
+axum = { version = "0.8.9", features = ["multipart"] }
+axum-extra = { version = "0.12.6", features = ["query", "cookie"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+clap-markdown = "0.1.5"
+openapiv3 = "2.2.0"
+percent-encoding = "2.3.2"
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "multipart", "query", "form"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_urlencoded = "0.7.1"
+trycmd = "1.2.1"
+uuid = { version = "1.24.0", features = ["serde"] }

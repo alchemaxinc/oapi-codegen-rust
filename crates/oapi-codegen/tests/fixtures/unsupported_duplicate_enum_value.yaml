@@ -1,0 +1,13 @@
+openapi: "3.0.3"
+info:
+  title: Duplicate enum value
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # Two variants cannot share one discriminant, so this is `E0081`.
+    Priority:
+      type: integer
+      enum:
+        - 1
+        - 1

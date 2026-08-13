@@ -1,0 +1,16 @@
+openapi: 3.0.3
+info:
+  title: widget models
+  version: "1"
+paths: {}
+components:
+  schemas:
+    # `server_refs.yaml` points a request body at this schema, and the
+    # `import-mapping` sends it to the crate that holds the generated models.
+    # The generator reads this file to learn the name the other crate declares.
+    CreateWidget:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string

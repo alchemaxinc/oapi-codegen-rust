@@ -1,0 +1,61 @@
+openapi: 3.0.3
+info:
+  title: Combined Orders API
+  version: 1.0.0
+paths:
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Fetch a single order by identifier.
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The requested order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          description: No order has that identifier.
+    put:
+      operationId: replaceOrder
+      summary: Replace an order in full.
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Order"
+      responses:
+        "200":
+          description: The updated order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+components:
+  schemas:
+    Order:
+      type: object
+      required:
+        - id
+        - total
+      properties:
+        id:
+          type: string
+        total:
+          type: number
+          format: double
+        note:
+          type: string

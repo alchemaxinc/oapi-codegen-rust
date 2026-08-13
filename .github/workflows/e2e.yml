@@ -1,0 +1,23 @@
+name: E2E
+
+on:
+  pull_request:
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  docker-e2e:
+    name: test
+    runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.event.pull_request.title, 'chore:') && !startsWith(github.event.pull_request.title, 'chore(') && !startsWith(github.event.pull_request.title, 'docs:') && !startsWith(github.event.pull_request.title, 'docs(') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Run Docker e2e (server + client over HTTP)
+        run: make test-e2e

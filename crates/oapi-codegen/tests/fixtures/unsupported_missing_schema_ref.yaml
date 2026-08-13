@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: A schema ref with no target
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # Each `$ref` below points at a schema this document does not declare. The
+    # generator once took the name from the pointer and wrote it into the
+    # output, which gave a file that does not compile. Every schema site must
+    # report the absent target instead.
+    Holder:
+      type: object
+      properties:
+        direct: { $ref: "#/components/schemas/AbsentProperty" }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AbsentItem" }
+    Alias: { $ref: "#/components/schemas/AbsentAlias" }
+    Map:
+      type: object
+      additionalProperties: { $ref: "#/components/schemas/AbsentValue" }

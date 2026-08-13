@@ -1,0 +1,15 @@
+openapi: "3.0.3"
+info:
+  title: Duplicate string enum value
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    # Both variants would take `#[serde(rename = "red")]`, which leaves the
+    # second unreachable. That compiles, so only this check catches it.
+    Colour:
+      type: string
+      enum:
+        - red
+        - red
+        - blue

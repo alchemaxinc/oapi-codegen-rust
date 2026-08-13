@@ -1,0 +1,44 @@
+openapi: 3.0.3
+info:
+  title: Type name collisions
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # Two distinct schema names that collapse onto one Rust identifier
+    # (`OrderItem`). Such a collision is an error by default, so the second
+    # schema names the type that it wants with `x-rust-name`.
+    order-item:
+      type: object
+      properties:
+        sku:
+          type: string
+    orderItem:
+      x-rust-name: order-item-quantity
+      type: object
+      properties:
+        quantity:
+          type: integer
+    # A reference to the renamed schema. This reference proves that references
+    # resolve to the `x-rust-name` identifier and not to the schema name.
+    cart:
+      type: object
+      properties:
+        item:
+          $ref: "#/components/schemas/orderItem"
+    # A `oneOf` whose members reference both schemas. This exercises union
+    # variant naming and variant-type resolution.
+    reference:
+      oneOf:
+        - $ref: "#/components/schemas/order-item"
+        - $ref: "#/components/schemas/orderItem"
+    # A string enum whose values collapse onto one variant identifier
+    # (`InProgress`). A variant name still takes a numeric suffix, because a
+    # variant has no per-variant override yet. `#[serde(rename)]` keeps the
+    # wire values.
+    stage:
+      type: string
+      enum:
+        - in-progress
+        - in_progress
+        - done

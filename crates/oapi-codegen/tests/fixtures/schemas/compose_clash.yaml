@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: shared models that give one Rust name
+  version: "1"
+paths: {}
+components:
+  schemas:
+    # `Parcel` and `parcel` both give the Rust name `Parcel`.
+    #
+    # The run that writes the models separates them with a `type-name-suffix`
+    # from its own config. The run that writes the operations cannot see that
+    # config, so it would emit `Parcel` and reach whichever of the two kept the
+    # plain name. That builds, and it carries the wrong type.
+    Parcel:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+    parcel:
+      type: object
+      required: [weight_kg]
+      properties:
+        weight_kg:
+          type: number

@@ -1,0 +1,24 @@
+openapi: 3.0.3
+info:
+  title: colliding response header idents (unsupported)
+  version: "1"
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      responses:
+        "200":
+          description: two headers whose names collapse to the same Rust field
+          headers:
+            X-Foo:
+              required: true
+              schema:
+                type: string
+            X_Foo:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: string

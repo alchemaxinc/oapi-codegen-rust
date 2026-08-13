@@ -3,5 +3,18 @@
 
 edition = "2024"
 max_width = 120
+
+# The three options below are nightly-only, so run rustfmt as `cargo +nightly
+# fmt`. Stable rustfmt drops an unstable option with a warning and then exits 0,
+# so it silently formats to different rules.
 imports_granularity = "Item"
 group_imports = "StdExternalCrate"
+
+# Generated output is formatted by prettyplease inside the generator, and the
+# fixture tests compare against that exact text. A `#[path]` module makes rustfmt
+# walk these files, so it must leave them alone or every fixture drifts.
+#
+# The patterns match the path rustfmt reaches a file by, and not the path on disk.
+# A `#[path]` that climbs out of the module directory keeps the `..` hop, so the
+# glob has to allow one.
+ignore = ["**/generated/**", "**/generated"]

@@ -1,0 +1,47 @@
+openapi: 3.0.3
+info:
+  title: Prelude value names
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    # `Ok`, `Err`, `Some`, and `None` name values, not types. A *braced* `struct`
+    # takes a type name only, so these four leave the prelude variants alone and
+    # `Holder` below keeps its `Option`. A tuple or unit `struct` would take the
+    # value name too, which `every_generated_struct_is_braced` rules out.
+    #
+    # This fixture is models-only. `combined_prelude_value_names` carries the
+    # harder case, where a server and a client write `Ok(..)` and `None` as well.
+    Ok:
+      type: object
+      properties:
+        id:
+          type: string
+    Err:
+      type: object
+      properties:
+        message:
+          type: string
+    Some:
+      type: object
+      properties:
+        value:
+          type: string
+    None:
+      type: object
+      properties:
+        note:
+          type: string
+    Holder:
+      type: object
+      required:
+        - certain
+      properties:
+        certain:
+          type: string
+        maybe:
+          type: string
+        many:
+          type: array
+          items:
+            type: string

@@ -1,0 +1,14 @@
+openapi: 3.0.3
+info:
+  title: cross-file object path param (unsupported)
+  version: "1"
+paths:
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      summary: Fetch a widget by a cross-file structured key.
+      parameters:
+        - $ref: "schemas/shared.yaml#/components/parameters/ObjectKey"
+      responses:
+        "200":
+          description: ok

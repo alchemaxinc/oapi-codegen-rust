@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: unsupported multipart response
+  version: "1"
+paths:
+  /bundle:
+    get:
+      operationId: getBundle
+      responses:
+        "200":
+          description: axum has a multipart extractor but no multipart response writer
+          content:
+            multipart/form-data:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string

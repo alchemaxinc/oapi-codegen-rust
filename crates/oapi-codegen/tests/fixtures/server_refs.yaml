@@ -1,0 +1,63 @@
+openapi: 3.0.3
+info:
+  title: Widget server
+  version: 1.0.0
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      summary: Create a widget.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "schemas/widgets.yaml#/components/schemas/CreateWidget"
+      responses:
+        "201":
+          description: The widget was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /widgets/{id}/raw:
+    get:
+      operationId: getWidgetRaw
+      summary: Fetch a widget as free-form JSON.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: An opaque widget document.
+          content:
+            application/json:
+              schema: {}
+components:
+  responses:
+    Unauthorized:
+      description: Authentication failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+  schemas:
+    Widget:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    ErrorBody:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string

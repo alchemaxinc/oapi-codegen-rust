@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: cookie params
+  version: "1"
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      parameters:
+        - name: session
+          in: cookie
+          required: true
+          schema:
+            type: string
+          description: The caller's session token.
+        - name: page_size
+          in: cookie
+          required: false
+          schema:
+            type: integer
+            format: int32
+          description: Optional page size hint.
+      responses:
+        "200":
+          description: The widgets.

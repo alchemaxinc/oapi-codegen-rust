@@ -1,0 +1,17 @@
+openapi: 3.0.3
+info:
+  title: unsupported scalar form body
+  version: "1"
+paths:
+  /f:
+    post:
+      operationId: f
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+      responses:
+        "204":
+          description: ok

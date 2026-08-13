@@ -1,0 +1,12 @@
+openapi: 3.0.3
+info:
+  title: Unsupported unknown status code
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: Reject a response keyed by an unrecognised HTTP status code.
+      responses:
+        "299":
+          description: 299 is not a registered HTTP status code.

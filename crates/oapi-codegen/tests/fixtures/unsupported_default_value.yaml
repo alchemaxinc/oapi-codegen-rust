@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: Unsupported default
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Widget:
+      type: object
+      properties:
+        # A non-empty array has no literal form here. Dropping the default would
+        # leave the document promising a value the code never supplies.
+        tags:
+          type: array
+          items:
+            type: string
+          default:
+            - first

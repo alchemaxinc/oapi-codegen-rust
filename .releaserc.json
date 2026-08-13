@@ -1,15 +1,14 @@
 {
-  "branches": [
-    "main",
-    {
-      "name": "develop",
-      "prerelease": "dev"
-    }
-  ],
+  "branches": ["main", { "name": "develop", "prerelease": "dev" }],
   "plugins": [
     "@semantic-release/commit-analyzer",
     "@semantic-release/release-notes-generator",
-    ["@semantic-release/github", { "draftRelease": true }]
+    [
+      "@semantic-release/github",
+      {
+        "draftRelease": true
+      }
+    ]
   ],
   "tagFormat": "v${version}"
 }

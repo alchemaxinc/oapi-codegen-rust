@@ -1,0 +1,29 @@
+openapi: 3.0.3
+info:
+  title: json charset
+  version: "1"
+paths:
+  /things:
+    post:
+      operationId: createThing
+      requestBody:
+        required: true
+        content:
+          "application/json; charset=utf-8":
+            schema:
+              $ref: "#/components/schemas/Thing"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thing"
+components:
+  schemas:
+    Thing:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string

@@ -1,0 +1,21 @@
+openapi: 3.0.3
+info:
+  title: multipart cross-file field (unsupported)
+  version: "1"
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [tag]
+              properties:
+                tag:
+                  $ref: "shared.yaml#/components/schemas/Tag"
+      responses:
+        "204":
+          description: The file was stored.

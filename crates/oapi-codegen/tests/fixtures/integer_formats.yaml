@@ -1,0 +1,19 @@
+openapi: "3.0.3"
+info:
+  title: Integer formats
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    IntegerFormats:
+      type: object
+      required: [plain, small, big]
+      properties:
+        plain:
+          type: integer
+        small:
+          type: integer
+          format: int32
+        big:
+          type: integer
+          format: int64

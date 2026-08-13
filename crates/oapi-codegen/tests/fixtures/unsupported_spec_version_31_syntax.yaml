@@ -1,0 +1,15 @@
+openapi: 3.1.0
+info:
+  title: a 3.1 document that holds a construct 3.0 cannot parse
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Widget:
+      type: object
+      properties:
+        # A type array is 3.1 syntax. A 3.0 parser rejects it with a message
+        # about a sequence where it wants a string, which names no version. The
+        # version gate must report this document before that parse runs.
+        name:
+          type: [string, "null"]

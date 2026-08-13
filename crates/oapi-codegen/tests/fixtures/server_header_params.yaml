@@ -1,0 +1,59 @@
+openapi: 3.0.3
+info:
+  title: Header parameters
+  version: 1.0.0
+components:
+  schemas:
+    Locale:
+      type: string
+paths:
+  /widgets:
+    parameters:
+      - name: X-Tenant
+        in: header
+        required: false
+        description: Path-item tenant; the operation-level definition wins.
+        schema:
+          type: string
+    get:
+      operationId: getWidgets
+      summary: List widgets using typed request headers.
+      parameters:
+        - name: X-Tenant
+          in: header
+          required: true
+          description: Tenant that owns the widgets.
+          schema:
+            type: string
+        - name: X-Request-Id
+          in: header
+          required: true
+          description: Correlation id echoed back in logs.
+          schema:
+            type: string
+        - name: X-Max-Items
+          in: header
+          required: false
+          description: Cap on the number of widgets returned.
+          schema:
+            type: integer
+            format: int32
+        - name: X-Debug
+          in: header
+          required: false
+          schema:
+            type: boolean
+        - name: X-Locale
+          in: header
+          required: false
+          schema:
+            $ref: "#/components/schemas/Locale"
+        - name: Authorization
+          in: header
+          required: true
+          description: Reserved by OpenAPI; must be ignored by the generator.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The matching widgets.

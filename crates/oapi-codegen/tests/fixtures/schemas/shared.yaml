@@ -1,0 +1,38 @@
+openapi: 3.0.3
+info:
+  title: shared components
+  version: "1"
+paths: {}
+components:
+  parameters:
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: Maximum number of items to return.
+      schema:
+        type: integer
+        format: int32
+    ObjectKey:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/NewThing"
+  requestBodies:
+    CreateThing:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/NewThing"
+  responses:
+    NotFound:
+      description: The thing was not found.
+  schemas:
+    NewThing:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string

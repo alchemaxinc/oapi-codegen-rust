@@ -1,0 +1,24 @@
+openapi: "3.0.3"
+info:
+  title: Object with additionalProperties false
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Closed:
+      description: An explicit `false` rejects an unknown key.
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+      additionalProperties: false
+    Open:
+      description: An absent key permits an unknown key and drops it.
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string

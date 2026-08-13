@@ -1,0 +1,13 @@
+openapi: 3.0.3
+info:
+  title: unsupported cross-file ref (referenced file exists, component missing)
+  version: "1"
+paths:
+  /widgets:
+    get:
+      operationId: getWidgets
+      parameters:
+        - $ref: "schemas/shared.yaml#/components/parameters/DoesNotExist"
+      responses:
+        "200":
+          description: ok

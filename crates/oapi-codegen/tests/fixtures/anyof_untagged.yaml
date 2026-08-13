@@ -1,0 +1,23 @@
+openapi: "3.0.3"
+info:
+  title: anyOf without discriminator
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    TextNote:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+    NumberNote:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: integer
+    Note:
+      anyOf:
+        - $ref: "#/components/schemas/TextNote"
+        - $ref: "#/components/schemas/NumberNote"

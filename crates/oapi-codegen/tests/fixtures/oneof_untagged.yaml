@@ -1,0 +1,23 @@
+openapi: "3.0.3"
+info:
+  title: oneOf without discriminator
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Cat:
+      type: object
+      required: [meow]
+      properties:
+        meow:
+          type: string
+    Dog:
+      type: object
+      required: [bark]
+      properties:
+        bark:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: "#/components/schemas/Cat"
+        - $ref: "#/components/schemas/Dog"
