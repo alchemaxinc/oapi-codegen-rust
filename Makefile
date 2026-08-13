@@ -111,7 +111,8 @@ verify-package: ## Fail when the published package does not build or run, or whe
 	cp -R $(CURDIR)/examples/bookstore "$$work/example"; \
 	cd "$$work/example" && \
 		"$$work/oapi-codegen-$$version/target/debug/oapi-codegen" \
-			--config-file oapi-codegen-catalog.yaml schemas/catalog.yaml; \
+			--config-file oapi-codegen-catalog.yaml schemas/catalog.yaml \
+			< /dev/null; \
 	diff -u $(CURDIR)/examples/bookstore/generated/apimodel/catalog.rs \
 		"$$work/example/generated/apimodel/catalog.rs"
 	@echo "The package builds, runs, and carries no tests."
