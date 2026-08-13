@@ -191,6 +191,13 @@ jobs:
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
+    permissions:
+      # `id-token: write` lets crates-io-auth-action mint the GitHub OIDC token
+      # that crates.io Trusted Publishing exchanges for a short-lived (30 min)
+      # publish token. `contents: read` is only for the checkout below.
+      contents: read
+      id-token: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -225,9 +232,19 @@ jobs:
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               commit -m "chore(release): ${TAG#v}" -- Cargo.toml Cargo.lock
 
+      - name: Authenticate to crates.io via Trusted Publishing
+        # Exchanges this job's GitHub OIDC token for a temporary crates.io token,
+        # so no long-lived CARGO_REGISTRY_TOKEN secret is stored in the repo. The
+        # action's post step revokes the token when the job ends. Requires a
+        # trusted publisher for `oapi-codegen` on crates.io configured with this
+        # repository and workflow filename (deploy.yml) — renaming this file
+        # breaks publishing until the crates.io config is updated to match.
+        id: crates-io-auth
+        uses: rust-lang/crates-io-auth-action@v1
+
       - name: Publish to crates.io
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
         run: |
           version=$(cargo metadata --format-version 1 --no-deps --locked \
             | jq -r '.packages[] | select(.name == "oapi-codegen") | .version')
