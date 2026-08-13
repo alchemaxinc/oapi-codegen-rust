@@ -5,15 +5,19 @@ version.workspace = true
 edition.workspace = true
 repository.workspace = true
 license.workspace = true
+homepage = "https://github.com/alchemaxinc/oapi-codegen-rust"
+documentation = "https://docs.rs/oapi-codegen"
+rust-version = "1.88"
+keywords = ["openapi", "codegen", "swagger", "axum", "rest"]
+categories = [
+  "development-tools",
+  "command-line-utilities",
+  "web-programming",
+  "api-bindings",
+]
 
-# An allowlist, not an `exclude`. A new directory in the crate then stays out of
-# a publish until someone names it here. `include` overrides `exclude`, so the
-# manifest carries one of the two and not both.
-#
-# The `tests` directory holds the fixtures and their generated files, which is
-# almost the whole of the package. A consumer builds the crate and does not run
-# its suite, so the files stay in the repository only.
-include = ["src/**/*.rs"]
+include = ["src/**/*.rs", "README.md", "LICENSE"]
+readme = "README.md"
 
 [[bin]]
 name = "oapi-codegen"
