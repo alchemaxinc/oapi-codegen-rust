@@ -589,6 +589,25 @@ names the scheme and leaves the rest to the implementation.
 YAML config keys mirror `oapi-codegen`.
 Unknown keys are ignored.
 
+## Output types are `non_exhaustive`, input types are not
+
+The types the generator hands back carry `#[non_exhaustive]`: every public type
+in `ir`, and `Error`. A caller of the library reads these types and matches on
+them, so a new IR node or a new error must not break that caller's build. The
+attribute makes the compiler ask for a catch-all arm, and a later variant then
+lands without a major version.
+
+The types the caller hands in stay open: `Config`, `Generate`, `OutputOptions`
+and `Targets`. `#[non_exhaustive]` stops a struct expression outside the crate
+altogether, even with `..Default::default()`, so it would leave no way to build
+a config at all. These types derive `Default` instead. Build them with
+`..Default::default()` and a new field costs you nothing.
+
+The attribute has no effect inside the crate, so the generator's own matches on
+`Error` and on the IR stay exhaustive and still fail to compile when a variant
+arrives. Only the `hints_for` match in the binary takes a catch-all, because the
+binary is a separate crate.
+
 ## Explicit invocation
 
 - **Go:** A bare command can generate output from defaults.

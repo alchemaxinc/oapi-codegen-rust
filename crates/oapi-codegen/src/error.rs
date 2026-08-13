@@ -2,6 +2,7 @@
 
 /// Errors that can occur while loading a spec or generating code.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// The spec file cannot be read from disk.
     ReadSpec {

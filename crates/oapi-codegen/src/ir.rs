@@ -9,6 +9,7 @@ use crate::naming::RustIdent;
 
 /// A generated Rust source module: an ordered list of top-level items.
 #[derive(Debug, Default, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Module {
     /// Top-level type declarations, in deterministic emission order.
     pub items: Vec<Item>,
@@ -16,6 +17,7 @@ pub struct Module {
 
 /// A top-level item declaration.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Item {
     /// A `struct` declaration.
     Struct(Struct),
@@ -39,6 +41,7 @@ impl Item {
 
 /// A generated `struct`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Struct {
     /// Type name.
     pub name: RustIdent,
@@ -65,6 +68,7 @@ pub struct Struct {
 
 /// A single struct field.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Field {
     /// Rust field identifier.
     pub name: RustIdent,
@@ -106,6 +110,7 @@ pub struct Field {
 /// A bound holds one number, so it copies. `f64` has no `Eq`, so the list stops
 /// at `PartialEq`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum Bound {
     /// A bound on an `integer` schema.
     Int(i64),
@@ -117,6 +122,7 @@ pub enum Bound {
 ///
 /// A field with no keyword carries `None`, so the common schema costs nothing.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
 pub struct Constraints {
     /// `pattern`: the value must match this regular expression.
     pub pattern: Option<String>,
@@ -173,6 +179,7 @@ impl Constraints {
 /// field and `1.0` for a number field. `"active"` is a string for a `String`
 /// field and a variant path for an enum.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum DefaultValue {
     /// A string literal.
     Str(String),
@@ -197,6 +204,7 @@ pub enum DefaultValue {
 
 /// A generated `enum`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Enum {
     /// Type name.
     pub name: RustIdent,
@@ -210,6 +218,7 @@ pub struct Enum {
 
 /// The flavour of a generated enum.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum EnumKind {
     /// A C-like string enum: unit variants mapped to wire strings.
     Strings(Vec<StringVariant>),
@@ -234,6 +243,7 @@ pub enum EnumKind {
 
 /// A unit variant of a string enum.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct StringVariant {
     /// Rust variant identifier.
     pub name: RustIdent,
@@ -245,6 +255,7 @@ pub struct StringVariant {
 
 /// A unit variant of an integer enum.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct IntegerVariant {
     /// Rust variant identifier.
     pub name: RustIdent,
@@ -256,6 +267,7 @@ pub struct IntegerVariant {
 
 /// A newtype variant of a union enum.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct UnionVariant {
     /// Rust variant identifier.
     pub name: RustIdent,
@@ -265,6 +277,7 @@ pub struct UnionVariant {
 
 /// A generated `type X = Y;` alias.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Alias {
     /// Alias name.
     pub name: RustIdent,
@@ -279,6 +292,7 @@ pub struct Alias {
 /// A `#[deprecated]` annotation derived from `deprecated: true`, optionally
 /// carrying the `x-deprecated-reason` text as the `note`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Deprecation {
     /// The `x-deprecated-reason` text, emitted as `#[deprecated(note = "...")]`.
     pub note: Option<String>,
@@ -299,6 +313,7 @@ pub struct Deprecation {
 /// domain type all derive the three. A target that does not is the case worth one
 /// line of specification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ForeignDerives {
     /// The target implements [`std::fmt::Debug`].
     pub debug: bool,
@@ -340,6 +355,7 @@ impl ForeignDerives {
 
 /// A Rust type expression usable in field/alias position.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RustType {
     /// `bool`.
     Bool,
@@ -473,6 +489,7 @@ impl RustType {
 /// A request or response body: its Rust type plus the wire content type that
 /// selects the axum extractor / response wrapper.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Body {
     /// The Rust type of the decoded body.
     pub ty: RustType,
@@ -482,6 +499,7 @@ pub struct Body {
 
 /// The supported request/response content type for a [`Body`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BodyKind {
     /// `application/json` (and `+json` / charset variants) → `axum::Json`.
     Json,
@@ -504,6 +522,7 @@ pub enum BodyKind {
 /// `axum::extract::Multipart`, reads each declared field, and returns a
 /// `400 Bad Request` on a missing required field or an unparseable value.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Multipart {
     /// Struct name (`<Op>Multipart`), doubling as the generated `FromRequest`
     /// extractor type and the `Api` method's `body` argument type.
@@ -514,6 +533,7 @@ pub struct Multipart {
 
 /// A single field of a [`Multipart`] body.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct MultipartField {
     /// Wire field name (the part's `Content-Disposition` `name`).
     pub wire_name: String,
@@ -537,6 +557,7 @@ pub struct MultipartField {
 /// The three cases are mutually exclusive by construction, replacing what will
 /// otherwise be several mutually-exclusive `Option` fields on [`Operation`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum RequestPayload {
     /// A single supported content type (JSON, `text/plain`, or form), extracted
     /// directly by the matching axum extractor.
@@ -559,6 +580,7 @@ pub enum RequestPayload {
 /// representation from, which the generated `IntoResponse` renders with the
 /// matching `Content-Type`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct NegotiatedBody {
     /// Enum name — `<Op>RequestBody` for a request, `<Response><Variant>Body`
     /// for a response — doubling as the argument/field type on the generated
@@ -571,6 +593,7 @@ pub struct NegotiatedBody {
 
 /// One content-type representation within a [`NegotiatedBody`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct BodyVariant {
     /// Variant identifier, named after the content kind (`Json`, `Form`,
     /// `Text`).
@@ -581,6 +604,7 @@ pub struct BodyVariant {
 
 /// The body of a response variant, when it declares supported content.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ResponseBody {
     /// A single supported content type, rendered by the matching axum response
     /// wrapper.
@@ -593,6 +617,7 @@ pub enum ResponseBody {
 /// A generated axum server interface: the `Api` trait plus the operations that
 /// back its `Router`.
 #[derive(Debug, Default, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Service {
     /// Operations in deterministic (document) order.
     pub operations: Vec<Operation>,
@@ -610,6 +635,7 @@ pub struct Service {
 /// [`SecuritySchemeKind::Unsupported`] catch-all so an operation that *requires*
 /// an unmodelled scheme (for example OAuth2) can be rejected with a clear message.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct SecurityScheme {
     /// The scheme's key in `components.securitySchemes`, matched against each
     /// [`Operation::security`] entry.
@@ -625,6 +651,7 @@ pub struct SecurityScheme {
 
 /// How a [`SecurityScheme`]'s credential is applied to a request.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum SecuritySchemeKind {
     /// `type: http, scheme: bearer` — `Authorization: Bearer <token>`.
     HttpBearer,
@@ -644,6 +671,7 @@ pub enum SecuritySchemeKind {
 
 /// A single HTTP operation lowered for code generation.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Operation {
     /// `Api` trait method name (`snake_case`).
     pub name: RustIdent,
@@ -686,6 +714,7 @@ pub struct Operation {
 
 /// A typed operation parameter (path parameter in the current slice).
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Param {
     /// Rust argument identifier.
     pub name: RustIdent,
@@ -697,6 +726,7 @@ pub struct Param {
 /// `axum::extract::FromRequestParts` implementation rather than serde, since
 /// header values are read and parsed individually from the request parts.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Headers {
     /// Struct name (`<Op>Headers`), doubling as the extractor type and the
     /// `Api` method's `headers` argument type.
@@ -707,6 +737,7 @@ pub struct Headers {
 
 /// A single header parameter within a [`Headers`] struct.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct HeaderParam {
     /// Rust field identifier (`snake_case`).
     pub name: RustIdent,
@@ -727,6 +758,7 @@ pub struct HeaderParam {
 /// `axum::extract::FromRequestParts` implementation backed by `axum_extra`'s
 /// `CookieJar`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Cookies {
     /// Struct name (`<Op>Cookies`), doubling as the extractor type and the
     /// `Api` method's `cookies` argument type.
@@ -737,6 +769,7 @@ pub struct Cookies {
 
 /// A single cookie parameter within a [`Cookies`] struct.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct CookieParam {
     /// Rust field identifier (`snake_case`).
     pub name: RustIdent,
@@ -753,6 +786,7 @@ pub struct CookieParam {
 
 /// One arm of an operation's response enum.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ResponseCase {
     /// Variant identifier, named after the status reason phrase (fixed codes),
     /// the response-range class, or `Default`.
@@ -771,6 +805,7 @@ pub struct ResponseCase {
 
 /// A single declared response header written by the generated `IntoResponse`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ResponseHeader {
     /// Rust field identifier (`snake_case`).
     pub name: RustIdent,
@@ -791,6 +826,7 @@ pub struct ResponseHeader {
 /// responses have no single code, so the variant instead carries an
 /// `axum::http::StatusCode` the handler supplies at runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ResponseStatus {
     /// A concrete status code (for example `200`), emitted as a `StatusCode` constant.
     Fixed(u16),
@@ -808,6 +844,7 @@ pub enum ResponseStatus {
 /// `{placeholder}` becomes a `const`. one with placeholders becomes a builder
 /// function that substitutes each variable and validates the result.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ServerUrls {
     /// Enum types for the enum-constrained server variables, emitted before the
     /// builder functions that reference them.
@@ -818,6 +855,7 @@ pub struct ServerUrls {
 
 /// A single lowered server URL: either a constant or a builder function.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ServerUrl {
     /// A server URL with no variables: `pub const <NAME>: &str = "<url>";`.
     Const(ServerUrlConst),
@@ -827,6 +865,7 @@ pub enum ServerUrl {
 
 /// A variable-free server URL emitted as a string constant.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ServerUrlConst {
     /// `SCREAMING_SNAKE_CASE` constant name.
     pub name: RustIdent,
@@ -839,6 +878,7 @@ pub struct ServerUrlConst {
 /// A server URL with `{placeholder}`s emitted as a builder function that
 /// substitutes each variable and returns the resulting URL.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ServerUrlBuilder {
     /// `snake_case` function name.
     pub name: RustIdent,
@@ -852,6 +892,7 @@ pub struct ServerUrlBuilder {
 
 /// One parameter of a [`ServerUrlBuilder`], bound to a URL placeholder.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ServerUrlParam {
     /// `snake_case` parameter identifier.
     pub ident: RustIdent,
@@ -863,6 +904,7 @@ pub struct ServerUrlParam {
 
 /// The type of a [`ServerUrlParam`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ServerUrlParamType {
     /// A free-form `&str` parameter (a non-enum or undeclared variable).
     Str,
@@ -872,6 +914,7 @@ pub enum ServerUrlParamType {
 
 /// An enum type generated for an enum-constrained server variable.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ServerUrlEnum {
     /// `PascalCase` enum type name (`<Server><Variable>`).
     pub name: RustIdent,
@@ -886,6 +929,7 @@ pub struct ServerUrlEnum {
 
 /// One variant of a [`ServerUrlEnum`]: a Rust identifier and its wire value.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ServerUrlEnumVariant {
     /// `PascalCase` variant identifier.
     pub name: RustIdent,

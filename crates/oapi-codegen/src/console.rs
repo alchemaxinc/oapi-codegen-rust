@@ -398,6 +398,11 @@ fn hints_for(err: &Error) -> Vec<String> {
         Error::Validation { .. } => {
             return Vec::new();
         }
+        // `Error` is `non_exhaustive`, so a later version can add a variant this
+        // build has never seen. Such an error shows its message with no hint.
+        _ => {
+            return Vec::new();
+        }
     }
 }
 
