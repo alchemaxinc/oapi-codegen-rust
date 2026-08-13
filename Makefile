@@ -102,8 +102,8 @@ verify-package: ## Fail when the published package does not build or run, or whe
 	fi
 	cargo package -p oapi-codegen --locked
 	@set -euo pipefail; \
-	version="$$(cargo metadata --format-version 1 --no-deps \
-		| sed -n 's/.*"name":"oapi-codegen","version":"\([^"]*\)".*/\1/p')"; \
+	version="$$(cargo metadata --format-version 1 --no-deps --locked \
+		| jq -er '.packages[] | select(.name == "oapi-codegen") | .version')"; \
 	work="$$(mktemp -d)"; \
 	trap 'rm -rf "$$work"' EXIT; \
 	tar xzf target/package/oapi-codegen-$$version.crate -C "$$work"; \
