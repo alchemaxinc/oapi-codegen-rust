@@ -62,7 +62,7 @@ See [design decisions vs. Go](docs/design.md) for the rationale.
 Otherwise, the project strives to be a faithful drop-in from the Go-based version in as idiomatic Rust as possible, with
 similar command-line interface and configuration options.
 
-### OpenAPI Version Support
+### OpenAPI Version Support [^openapi-versions]
 
 Adding full support to all OpenAPI versions is not trivial, and is done in iterations which all require various design
 decisions to support.
@@ -73,10 +73,7 @@ decisions to support.
 | v3.1.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/65).                   |
 | v3.2.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/66).                   |
 
-This table and the tracking issues are maintained automatically by the
-[OpenAPI version check workflow](.github/workflows/check-openapi-versions.yml),
-which probes the [upstream spec releases](https://github.com/OAI/OpenAPI-Specification/releases)
-against [`.github/openapi-versions.json`](.github/openapi-versions.json).
+[^openapi-versions]: This table and the tracking issues are maintained automatically by the [OpenAPI version check workflow](.github/workflows/check-openapi-versions.yml), which probes the [upstream spec releases](https://github.com/OAI/OpenAPI-Specification/releases) against [`.github/openapi-versions.json`](.github/openapi-versions.json).
 
 ## Documentation
 
