@@ -206,7 +206,11 @@ jobs:
       # the same `--locked` the deploy workflow publishes with. The step runs
       # after the drift check, which leaves a clean tree, because `cargo
       # package` refuses a dirty one.
-      - name: Check the published package builds and stays trim
+      #
+      # The step also runs the packaged binary once. `cargo package` rewrites
+      # the manifest, so code that reads it can work in the workspace and fail
+      # only once published. Building alone does not find that.
+      - name: Check the published package builds, runs, and stays trim
         run: make verify-package
 
   lint-prettier:

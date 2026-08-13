@@ -44,9 +44,28 @@ fn manifest_version(crate_name: &str) -> &'static str {
 
 /// Find the version requirement declared for `crate_name` in `manifest`, or
 /// `None` when it is not declared.
+///
+/// Two layouts have to work: the one-line form the repository manifest uses,
+/// and the `[dependencies.name]` table that `cargo package` rewrites it into.
+/// The published binary reads the second.
 fn parse_manifest_version<'a>(manifest: &'a str, crate_name: &str) -> Option<&'a str> {
+    let mut inside_table_for_crate = false;
     for line in manifest.lines() {
         let line = line.trim();
+
+        if let Some(header) = line.strip_prefix('[').and_then(|rest| return rest.strip_suffix(']')) {
+            inside_table_for_crate = is_dependency_table_for(header, crate_name);
+            continue;
+        }
+
+        if inside_table_for_crate
+            && let Some(rest) = line.strip_prefix("version")
+            && let Some(value) = rest.trim_start().strip_prefix('=')
+            && let Some(version) = first_quoted(value)
+        {
+            return Some(version);
+        }
+
         let Some(rest) = line.strip_prefix(crate_name) else {
             continue;
         };
@@ -69,14 +88,30 @@ fn parse_manifest_version<'a>(manifest: &'a str, crate_name: &str) -> Option<&'a
             },
             None => value,
         };
-        if let Some(open) = scan.find('"') {
-            let after = &scan[open + 1..];
-            if let Some(close) = after.find('"') {
-                return Some(&after[..close]);
-            }
+        if let Some(version) = first_quoted(scan) {
+            return Some(version);
         }
     }
     return None;
+}
+
+/// Whether `header` names the dependency table for `crate_name`, in any of the
+/// three dependency scopes `cargo package` can write.
+fn is_dependency_table_for(header: &str, crate_name: &str) -> bool {
+    for scope in ["dependencies.", "dev-dependencies.", "build-dependencies."] {
+        if let Some(name) = header.strip_prefix(scope)
+            && name == crate_name
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The text between the first pair of double quotes in `text`.
+fn first_quoted(text: &str) -> Option<&str> {
+    let after = text.split_once('"')?.1;
+    return after.split_once('"').map(|(value, _)| return value);
 }
 
 /// A crate the generated code references, with the version requirement and Cargo
@@ -242,6 +277,63 @@ mod tests {
         // the `conversion` feature contains "version" but must not be matched.
         let manifest = include_str!("../tests/fixtures/manifests/reordered_version_key.toml");
         assert_eq!(parse_manifest_version(manifest, "axum"), Some("0.8.9"));
+    }
+
+    #[test]
+    fn a_version_is_found_in_the_layout_cargo_publishes() {
+        // The shape `cargo package` writes: a table per dependency, rather than
+        // the one line per dependency the repository manifest uses. The crates
+        // are invented, so no dependency bump reaches this.
+        let manifest = r#"
+            [package]
+            name = "specimen"
+            version = "9.9.9"
+
+            [dependencies.plain]
+            version = "1.2.3"
+
+            [dependencies.with-features]
+            version = "4.5.6"
+            features = ["one", "two"]
+
+            [dependencies.multi-line-features]
+            version = "7.8.9"
+            features = [
+                "one",
+                "two",
+            ]
+
+            [dependencies.prefix]
+            version = "0.1.0"
+
+            [dependencies.prefix_extended]
+            version = "0.2.0"
+
+            [dev-dependencies.only-for-tests]
+            version = "5.0.0"
+
+            [build-dependencies.only-for-build]
+            version = "6.0.0"
+        "#;
+
+        for (crate_name, expected) in [
+            ("plain", Some("1.2.3")),
+            ("with-features", Some("4.5.6")),
+            ("multi-line-features", Some("7.8.9")),
+            ("prefix", Some("0.1.0")),
+            ("prefix_extended", Some("0.2.0")),
+            ("only-for-tests", Some("5.0.0")),
+            ("only-for-build", Some("6.0.0")),
+            ("absent", None),
+            // The package table carries a `version` of its own.
+            ("specimen", None),
+        ] {
+            assert_eq!(
+                parse_manifest_version(manifest, crate_name),
+                expected,
+                "the published layout should report `{crate_name}` as {expected:?}"
+            );
+        }
     }
 
     #[test]

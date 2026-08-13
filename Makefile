@@ -92,7 +92,7 @@ verify-generated: ## Regenerate all generated files and fail when they differ fr
 	@echo "Generated files are up to date."
 
 .PHONY: verify-package
-verify-package: ## Fail when the published package does not build, or when it carries the test suite
+verify-package: ## Fail when the published package does not build or run, or when it carries the test suite
 	@set -euo pipefail; \
 	files="$$(cargo package -p oapi-codegen --locked --list)"; \
 	if grep -q '^tests/' <<< "$$files"; then \
@@ -101,7 +101,21 @@ verify-package: ## Fail when the published package does not build, or when it ca
 		exit 1; \
 	fi
 	cargo package -p oapi-codegen --locked
-	@echo "The package builds and carries no tests."
+	@set -euo pipefail; \
+	version="$$(cargo metadata --format-version 1 --no-deps --locked \
+		| jq -er '.packages[] | select(.name == "oapi-codegen") | .version')"; \
+	work="$$(mktemp -d)"; \
+	trap 'rm -rf "$$work"' EXIT; \
+	tar xzf target/package/oapi-codegen-$$version.crate -C "$$work"; \
+	cd "$$work/oapi-codegen-$$version" && cargo build --locked -q; \
+	cp -R $(CURDIR)/examples/bookstore "$$work/example"; \
+	cd "$$work/example" && \
+		"$$work/oapi-codegen-$$version/target/debug/oapi-codegen" \
+			--config-file oapi-codegen-catalog.yaml schemas/catalog.yaml \
+			< /dev/null; \
+	diff -u $(CURDIR)/examples/bookstore/generated/apimodel/catalog.rs \
+		"$$work/example/generated/apimodel/catalog.rs"
+	@echo "The package builds, runs, and carries no tests."
 
 .PHONY: docs
 docs: ## Generate and open Rust documentation
