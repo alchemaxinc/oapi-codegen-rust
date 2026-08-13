@@ -591,17 +591,20 @@ Unknown keys are ignored.
 
 ## Output types are `non_exhaustive`, input types are not
 
-The types the generator hands back carry `#[non_exhaustive]`: every public type
-in `ir`, and `Error`. A caller of the library reads these types and matches on
-them, so a new IR node or a new error must not break that caller's build. The
-attribute makes the compiler ask for a catch-all arm, and a later variant then
-lands without a major version.
+`#[non_exhaustive]` stops a struct expression outside the crate altogether, even
+one with `..Default::default()`. On an enum it costs much less: variant
+construction stays open, and only an exhaustive `match` must add a catch-all
+arm. The two cases therefore get different answers.
 
-The types the caller hands in stay open: `Config`, `Generate`, `OutputOptions`
-and `Targets`. `#[non_exhaustive]` stops a struct expression outside the crate
-altogether, even with `..Default::default()`, so it would leave no way to build
-a config at all. These types derive `Default` instead. Build them with
-`..Default::default()` and a new field costs you nothing.
+The IR enums and `Error` carry the attribute. A caller reads these and matches
+on them, so a new IR node or a new error must not break that caller's build.
+
+The IR structs do not carry it, and neither do `Config`, `Generate`,
+`OutputOptions` and `Targets`. A caller builds all of these: the config types
+name a run, and `emit_module` takes an IR, so a hand-built `Module` is a
+supported input. The attribute would leave these functions with no reachable
+input at all. They derive `Default` instead, so `..Default::default()` absorbs a
+new field. `tests/api_stability.rs` holds both halves of this rule.
 
 The attribute has no effect inside the crate, so the generator's own matches on
 `Error` and on the IR stay exhaustive and still fail to compile when a variant
