@@ -115,7 +115,10 @@ fn checks(constraints: &Constraints, ty: &RustType) -> Vec<Check> {
     if matches!(*ty, RustType::String) {
         string_checks(constraints, &mut tests);
     }
-    if matches!(*ty, RustType::I32 | RustType::I64 | RustType::F64) {
+    if matches!(
+        *ty,
+        RustType::I32 | RustType::I64 | RustType::U32 | RustType::U64 | RustType::F64
+    ) {
         number_checks(constraints, ty, &mut tests);
     }
     if matches!(*ty, RustType::Vec(_)) {
@@ -178,36 +181,69 @@ fn string_checks(constraints: &Constraints, tests: &mut Vec<Check>) {
     }
 }
 
+/// The lowest and highest value a type holds, where a bound keyword can name it.
+///
+/// `None` says a bound cannot reach that end. `u64` holds values above
+/// `i64::MAX`, and no bound keyword writes a number that high, so a `maximum`
+/// never covers the whole type.
+fn type_limits(ty: &RustType) -> (Option<i64>, Option<i64>) {
+    return match *ty {
+        RustType::I32 => (Some(i64::from(i32::MIN)), Some(i64::from(i32::MAX))),
+        RustType::I64 => (Some(i64::MIN), Some(i64::MAX)),
+        RustType::U32 => (Some(0), Some(i64::from(u32::MAX))),
+        RustType::U64 => (Some(0), None),
+        _ => (None, None),
+    };
+}
+
 /// `minimum`, `maximum`, and `multipleOf`, with the two `exclusive` flags.
 fn number_checks(constraints: &Constraints, ty: &RustType, tests: &mut Vec<Check>) {
+    let (lowest, highest) = type_limits(ty);
     if let Some(min) = constraints.minimum {
         let literal = bound_literal(min);
         let text = bound_text(min);
-        if constraints.exclusive_minimum {
-            tests.push(Check {
+        // A type that already refuses every value below the bound makes a test
+        // no value fails. Rust reads `x < 0` on an unsigned type as a warning,
+        // and the reader gains nothing from it.
+        let no_value_fails = !constraints.exclusive_minimum
+            && matches!(min, Bound::Int(value) if lowest.is_some_and(|lowest| return value <= lowest));
+        let test = if constraints.exclusive_minimum {
+            Some(Check {
                 test: quote! { *item <= #literal },
                 message: format!("must be more than {text}"),
-            });
+            })
+        } else if no_value_fails {
+            None
         } else {
-            tests.push(Check {
+            Some(Check {
                 test: quote! { *item < #literal },
                 message: format!("must be {text} or more"),
-            });
+            })
+        };
+        if let Some(check) = test {
+            tests.push(check);
         }
     }
     if let Some(max) = constraints.maximum {
         let literal = bound_literal(max);
         let text = bound_text(max);
-        if constraints.exclusive_maximum {
-            tests.push(Check {
+        let no_value_fails = !constraints.exclusive_maximum
+            && matches!(max, Bound::Int(value) if highest.is_some_and(|highest| return value >= highest));
+        let test = if constraints.exclusive_maximum {
+            Some(Check {
                 test: quote! { *item >= #literal },
                 message: format!("must be less than {text}"),
-            });
+            })
+        } else if no_value_fails {
+            None
         } else {
-            tests.push(Check {
+            Some(Check {
                 test: quote! { *item > #literal },
                 message: format!("must be {text} or less"),
-            });
+            })
+        };
+        if let Some(check) = test {
+            tests.push(check);
         }
     }
     if let Some(step) = constraints.multiple_of {

@@ -16,6 +16,7 @@ pub struct Module {
 
 /// A top-level item declaration.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Item {
     /// A `struct` declaration.
     Struct(Struct),
@@ -106,6 +107,7 @@ pub struct Field {
 /// A bound holds one number, so it copies. `f64` has no `Eq`, so the list stops
 /// at `PartialEq`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum Bound {
     /// A bound on an `integer` schema.
     Int(i64),
@@ -132,6 +134,13 @@ pub struct Constraints {
     pub exclusive_minimum: bool,
     /// `exclusiveMaximum`: makes `maximum` a strict bound.
     pub exclusive_maximum: bool,
+    /// Whether `minimum` moved to absorb an `exclusiveMinimum`.
+    ///
+    /// The bound then holds a number the document does not write, and a message
+    /// about it must name the number the author wrote instead.
+    pub folded_minimum: bool,
+    /// Whether `maximum` moved to absorb an `exclusiveMaximum`.
+    pub folded_maximum: bool,
     /// `multipleOf`.
     pub multiple_of: Option<Bound>,
     /// `minItems`.
@@ -166,11 +175,18 @@ impl Constraints {
 /// field and `1.0` for a number field. `"active"` is a string for a `String`
 /// field and a variant path for an enum.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum DefaultValue {
     /// A string literal.
     Str(String),
     /// An integer literal.
     Int(i64),
+    /// An unsigned integer literal.
+    ///
+    /// An unsigned field takes this rather than [`Self::Int`], which keeps a
+    /// negative value out and reaches the whole range of `u64`, above where
+    /// `i64` stops.
+    UInt(u64),
     /// A floating-point literal.
     Float(f64),
     /// A `bool` literal.
@@ -197,6 +213,7 @@ pub struct Enum {
 
 /// The flavour of a generated enum.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum EnumKind {
     /// A C-like string enum: unit variants mapped to wire strings.
     Strings(Vec<StringVariant>),
@@ -205,7 +222,7 @@ pub enum EnumKind {
     /// The wire form is a bare number, so the emitted type carries
     /// `#[serde(try_from, into)]` and a `#[repr]` of [`Self::Integers::repr`].
     Integers {
-        /// The integer type the discriminants take, either `i32` or `i64`.
+        /// The integer type the discriminants take: `i32`, `i64`, `u32`, or `u64`.
         repr: RustType,
         /// The permitted values, in document order.
         variants: Vec<IntegerVariant>,
@@ -327,6 +344,7 @@ impl ForeignDerives {
 
 /// A Rust type expression usable in field/alias position.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RustType {
     /// `bool`.
     Bool,
@@ -334,6 +352,10 @@ pub enum RustType {
     I32,
     /// `i64`.
     I64,
+    /// `u32`.
+    U32,
+    /// `u64`.
+    U64,
     /// `f64`.
     F64,
     /// `String`.
@@ -403,7 +425,13 @@ impl RustType {
     pub fn is_scalar(&self) -> bool {
         return matches!(
             self,
-            RustType::Bool | RustType::I32 | RustType::I64 | RustType::F64 | RustType::String
+            RustType::Bool
+                | RustType::I32
+                | RustType::I64
+                | RustType::U32
+                | RustType::U64
+                | RustType::F64
+                | RustType::String
         );
     }
 
@@ -417,6 +445,8 @@ impl RustType {
             RustType::Bool => "bool".to_owned(),
             RustType::I32 => "i32".to_owned(),
             RustType::I64 => "i64".to_owned(),
+            RustType::U32 => "u32".to_owned(),
+            RustType::U64 => "u64".to_owned(),
             RustType::F64 => "f64".to_owned(),
             RustType::String => "String".to_owned(),
             RustType::Value => "serde_json::Value".to_owned(),
@@ -457,6 +487,7 @@ pub struct Body {
 
 /// The supported request/response content type for a [`Body`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BodyKind {
     /// `application/json` (and `+json` / charset variants) → `axum::Json`.
     Json,
@@ -512,6 +543,7 @@ pub struct MultipartField {
 /// The three cases are mutually exclusive by construction, replacing what will
 /// otherwise be several mutually-exclusive `Option` fields on [`Operation`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum RequestPayload {
     /// A single supported content type (JSON, `text/plain`, or form), extracted
     /// directly by the matching axum extractor.
@@ -556,6 +588,7 @@ pub struct BodyVariant {
 
 /// The body of a response variant, when it declares supported content.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ResponseBody {
     /// A single supported content type, rendered by the matching axum response
     /// wrapper.
@@ -600,6 +633,7 @@ pub struct SecurityScheme {
 
 /// How a [`SecurityScheme`]'s credential is applied to a request.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum SecuritySchemeKind {
     /// `type: http, scheme: bearer` — `Authorization: Bearer <token>`.
     HttpBearer,
@@ -766,6 +800,7 @@ pub struct ResponseHeader {
 /// responses have no single code, so the variant instead carries an
 /// `axum::http::StatusCode` the handler supplies at runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ResponseStatus {
     /// A concrete status code (for example `200`), emitted as a `StatusCode` constant.
     Fixed(u16),
@@ -793,6 +828,7 @@ pub struct ServerUrls {
 
 /// A single lowered server URL: either a constant or a builder function.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ServerUrl {
     /// A server URL with no variables: `pub const <NAME>: &str = "<url>";`.
     Const(ServerUrlConst),
@@ -838,6 +874,7 @@ pub struct ServerUrlParam {
 
 /// The type of a [`ServerUrlParam`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ServerUrlParamType {
     /// A free-form `&str` parameter (a non-enum or undeclared variable).
     Str,

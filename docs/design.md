@@ -403,6 +403,54 @@ carries no meaning and it moves: swapping two members would point one name at th
 other shape and change what already-compiling code means. This is the argument
 that [type-name collisions](#type-name-collisions-fail-fast) already make.
 
+## A `minimum` of zero or more gives an unsigned type
+
+OpenAPI has no unsigned format. `format` gives the width of an integer, and
+`int32` and `int64` are both signed. So a document that holds a count, a
+percentage, or an identifier has one place to say the value is never negative:
+`minimum`.
+
+The generator reads it. `format: int32` with a `minimum` of zero or more gives
+`u32`, `int64` gives `u64`, and an integer with no `format` gives `u64` where it
+gave `i64`. A negative `minimum`, or no `minimum` at all, leaves the type signed.
+Any bound at zero or above says the same thing about the sign, so `minimum: 5`
+gives an unsigned type too. `exclusiveMinimum` counts as well: a whole number
+above `-1` is zero or more, so the generator folds the flag into the bound
+beside it and reads the result.
+
+The type then states the rule, and a reader needs no check to know it. This also
+carries a round trip: a code-first generator writes `minimum: 0` because the Rust
+type was unsigned, so reading it back returns the type the author started with.
+
+The bound stays a bound. It still becomes a check where the value comes in,
+except where the type already refuses every value the check would reject: a
+`minimum` of zero on an unsigned type writes nothing, because no value fails it.
+This is the rule `minLength: 0` already follows. The same holds at the other
+end, so a `maximum` of 2147483647 on `i32` writes nothing. A bound with values
+left to reject still writes its check.
+
+A value below zero is still rejected, by serde rather than by a generated check,
+so the message names the type instead of the bound.
+
+Folding a flag into the bound beside it can carry that bound past the end of the
+type. `maximum: -2147483648` with `exclusiveMaximum` on `int32` asks for a value
+below where `i32` starts, and no value answers. The generator refuses the
+document, because the code it would write refuses every request. A `minimum`
+above a `maximum` reads the same way and gets the same answer, as does a pair of
+bounds that meet on one value an `exclusive` flag then leaves out. These two last
+readings need no type, so a `number` takes them as an `integer` does. A bound the
+author writes out of range is a separate fault, and it keeps the message about
+width.
+
+An integer `enum` takes its `repr` the same way, so `format: int32` with a
+`minimum` of zero gives `#[repr(u32)]`. A negative value in that `enum` and a
+`minimum` of zero disagree, and no Rust type holds both, so the generator names
+the fault instead of writing a file that does not build.
+
+A `default` follows the type. An unsigned field reads its `default` as unsigned,
+which refuses a negative value and reaches the whole range of `u64`, above where
+`i64` stops.
+
 ## Value constraints are checked when the value comes in
 
 A schema can narrow the values it accepts with `pattern`, `minimum`, `minItems`,
@@ -540,6 +588,28 @@ names the scheme and leaves the rest to the implementation.
 
 YAML config keys mirror `oapi-codegen`.
 Unknown keys are ignored.
+
+## Output types are `non_exhaustive`, input types are not
+
+`#[non_exhaustive]` stops a struct expression outside the crate altogether, even
+one with `..Default::default()`. On an enum it costs much less: variant
+construction stays open, and only an exhaustive `match` must add a catch-all
+arm. The two cases therefore get different answers.
+
+The IR enums and `Error` carry the attribute. A caller reads these and matches
+on them, so a new IR node or a new error must not break that caller's build.
+
+The IR structs do not carry it, and neither do `Config`, `Generate`,
+`OutputOptions` and `Targets`. A caller builds all of these: the config types
+name a run, and `emit_module` takes an IR, so a hand-built `Module` is a
+supported input. The attribute would leave these functions with no reachable
+input at all. They derive `Default` instead, so `..Default::default()` absorbs a
+new field. `tests/api_stability.rs` holds both halves of this rule.
+
+The attribute has no effect inside the crate, so the generator's own matches on
+`Error` and on the IR stay exhaustive and still fail to compile when a variant
+arrives. Only the `hints_for` match in the binary takes a catch-all, because the
+binary is a separate crate.
 
 ## Explicit invocation
 

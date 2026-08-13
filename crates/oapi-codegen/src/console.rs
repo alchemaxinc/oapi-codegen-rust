@@ -289,9 +289,32 @@ fn hints_for(err: &Error) -> Vec<String> {
         Error::UnsupportedSchema { reason, .. } if reason.contains("is not above zero") => {
             return vec!["JSON Schema asks for a `multipleOf` above zero. A step of zero divides by zero.".to_owned()];
         }
+        Error::UnsupportedSchema { reason, .. } if reason.contains("accept no value") => {
+            return vec![
+                "No value passes these bounds, so the generated code would refuse every request. An `exclusiveMinimum` or an `exclusiveMaximum` moves the bound by one, which can carry it past the end of the type."
+                    .to_owned(),
+            ];
+        }
         Error::UnsupportedSchema { reason, .. } if reason.contains("does not fit `i32`") => {
             return vec![
                 "A bound must fit the type the `format` chooses. `int32` holds -2147483648 to 2147483647. Drop the `format` to get `i64`."
+                    .to_owned(),
+            ];
+        }
+        Error::UnsupportedSchema { reason, .. }
+            if reason.contains("does not fit `u32`") || reason.contains("does not fit `u64`") =>
+        {
+            // A `minimum` of zero or more makes the type unsigned, so a bound
+            // fails here for one of two reasons: it is negative, or it is above
+            // the width. Each one takes a different fix.
+            if reason.contains("value `-") {
+                return vec![
+                    "A `minimum` of zero or more gives an unsigned type, which holds no negative bound. Remove the `minimum` to keep a signed type, or correct the negative bound."
+                        .to_owned(),
+                ];
+            }
+            return vec![
+                "A bound must fit the type the `format` and the `minimum` choose. `u32` holds 0 to 4294967295. Drop the `format` to get `u64`."
                     .to_owned(),
             ];
         }
@@ -304,6 +327,24 @@ fn hints_for(err: &Error) -> Vec<String> {
         Error::UnsupportedSchema { reason, .. } if reason.contains("the union holds") => {
             return vec![
                 "A `oneOf` becomes an untagged enum. Serde reads the variants in order and takes the first that fits, so a repeated type is unreachable. Remove the repeated member."
+                    .to_owned(),
+            ];
+        }
+        Error::UnsupportedSchema { reason, .. }
+            if reason.contains("cannot hold") && (reason.contains("`u32`") || reason.contains("`u64`")) =>
+        {
+            // The reason reads "the `enum` gives `-1`, which `u32` cannot
+            // hold", so a minus sign after the backtick marks a negative value.
+            // A negative value and a value above the width are separate faults,
+            // and each one takes a different fix.
+            if reason.contains("gives `-") {
+                return vec![
+                    "A `minimum` of zero or more gives an unsigned type, which holds no negative value. Remove the `minimum`, or drop the negative `enum` value."
+                        .to_owned(),
+                ];
+            }
+            return vec![
+                "An unsigned `enum` value must fit the width the `format` chooses. `u32` holds 0 to 4294967295. Drop the `format` to get `u64`."
                     .to_owned(),
             ];
         }
@@ -355,6 +396,11 @@ fn hints_for(err: &Error) -> Vec<String> {
         // `report_error` renders each collected problem on its own, with that
         // problem's own hints, so the aggregate itself adds no hint.
         Error::Validation { .. } => {
+            return Vec::new();
+        }
+        // `Error` is `non_exhaustive`, so a later version can add a variant this
+        // build has never seen. Such an error shows its message with no hint.
+        _ => {
             return Vec::new();
         }
     }
@@ -461,6 +507,50 @@ mod tests {
     fn empty_detects_the_real_header_followed_by_an_item() {
         let code = format!("{}pub struct Foo;\n", oapi_codegen::emit::HEADER);
         assert!(!is_effectively_empty(&code));
+    }
+
+    /// A negative value and a value above the width are separate faults, so the
+    /// advice for one must not reach the other.
+    #[test]
+    fn an_unsigned_enum_fault_gets_the_hint_that_matches_it() {
+        let fault = |reason: &str| {
+            return hints_for(&Error::UnsupportedSchema {
+                path: "A".to_owned(),
+                reason: reason.to_owned(),
+            });
+        };
+        let negative = fault("the `enum` gives `-1`, which `u32` cannot hold");
+        assert_eq!(negative.len(), 1, "{negative:?}");
+        assert!(negative[0].contains("no negative value"), "{negative:?}");
+
+        let wide = fault("the `enum` gives `5000000000`, which `u32` cannot hold");
+        assert_eq!(wide.len(), 1, "{wide:?}");
+        assert!(wide[0].contains("fit the width"), "{wide:?}");
+        assert!(!wide[0].contains("negative"), "{wide:?}");
+    }
+
+    /// A bound that is negative and a bound that is too wide are separate
+    /// faults, and the advice for one must not reach the other. Neither one may
+    /// fall back to the generic message, because an author can fix both.
+    #[test]
+    fn an_unsigned_bound_fault_gets_the_hint_that_matches_it() {
+        let fault = |reason: &str| {
+            return hints_for(&Error::UnsupportedSchema {
+                path: "count".to_owned(),
+                reason: reason.to_owned(),
+            });
+        };
+        let wide = fault("the `maximum` value `5000000000` does not fit `u32`");
+        assert_eq!(wide.len(), 1, "{wide:?}");
+        assert!(wide[0].contains("0 to 4294967295"), "{wide:?}");
+
+        let negative = fault("the `maximum` value `-5` does not fit `u32`");
+        assert_eq!(negative.len(), 1, "{negative:?}");
+        assert!(negative[0].contains("no negative bound"), "{negative:?}");
+
+        // The signed bound keeps the hint it already had.
+        let signed = fault("the `maximum` value `5000000000` does not fit `i32`");
+        assert!(signed[0].contains("-2147483648"), "{signed:?}");
     }
 
     #[test]
@@ -581,6 +671,10 @@ mod tests {
     fn each_constraint_fault_reaches_its_own_hint() {
         let cases = [
             ("the `multipleOf` value `0` is not above zero", "divides by zero"),
+            (
+                "the bounds accept no value: they allow `10` to `5`",
+                "refuse every request",
+            ),
             ("the `multipleOf` value `5000000000` does not fit `i32`", "-2147483648"),
             ("the `minimum` value `-5000000000` does not fit `i32`", "-2147483648"),
             (

@@ -102,6 +102,11 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("unsupported_enum_value_out_of_range"),
     },
     Feature {
+        element: "schema.type.integer.enum.negative-for-unsigned",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_negative_enum_value_for_unsigned"),
+    },
+    Feature {
         element: "schema.constraints",
         status: Status::Supported,
         fixture: Some("value_constraints"),

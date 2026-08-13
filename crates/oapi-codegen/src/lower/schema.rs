@@ -3,6 +3,7 @@
 use openapiv3::AdditionalProperties;
 use openapiv3::Discriminator;
 use openapiv3::IntegerFormat;
+use openapiv3::IntegerType;
 use openapiv3::ObjectType;
 use openapiv3::ReferenceOr;
 use openapiv3::Schema;
@@ -162,7 +163,7 @@ impl Mapper<'_> {
                 Item::Enum(self.string_enum(name, &st.enumeration, data)?)
             }
             SchemaKind::Type(Type::Integer(it)) if !it.enumeration.is_empty() => {
-                let repr = integer_format_type(&it.format);
+                let repr = integer_type(it);
                 Item::Enum(self.integer_enum(name, &it.enumeration, &repr, data)?)
             }
             SchemaKind::Type(Type::Object(obj)) => self.object_to_item(name, obj, data)?,
@@ -704,12 +705,12 @@ impl Mapper<'_> {
             }
             SchemaKind::Type(Type::String(st)) => string_format_type(&st.format),
             SchemaKind::Type(Type::Integer(it)) if !it.enumeration.is_empty() => {
-                let repr = integer_format_type(&it.format);
+                let repr = integer_type(it);
                 let enom = self.integer_enum(hint, &it.enumeration, &repr, data)?;
                 self.extra.push(Item::Enum(enom));
                 RustType::Named(hint.to_owned())
             }
-            SchemaKind::Type(Type::Integer(it)) => integer_format_type(&it.format),
+            SchemaKind::Type(Type::Integer(it)) => integer_type(it),
             SchemaKind::Type(Type::Number(_)) => RustType::F64,
             SchemaKind::Type(Type::Boolean(_)) => RustType::Bool,
             SchemaKind::Type(Type::Array(at)) => {
@@ -806,20 +807,27 @@ pub(crate) fn string_format_type(format: &VariantOrUnknownOrEmpty<StringFormat>)
     return ty;
 }
 
-/// Whether an integer enum value fits the `repr` its `format` chooses.
+/// Whether an integer enum value fits the `repr` its `format` and `minimum` choose.
+///
+/// An unsigned `repr` holds no negative value, so a `minimum` of zero with a
+/// negative `enum` value is a document that disagrees with itself.
 fn fits_repr(value: i64, repr: &RustType) -> bool {
-    if matches!(*repr, RustType::I32) {
-        return i32::try_from(value).is_ok();
-    }
-    return true;
+    return match *repr {
+        RustType::I32 => i32::try_from(value).is_ok(),
+        RustType::U32 => u32::try_from(value).is_ok(),
+        RustType::U64 => u64::try_from(value).is_ok(),
+        _ => true,
+    };
 }
 
 /// The Rust name of an integer enum `repr`, for a diagnostic.
 fn repr_name(repr: &RustType) -> &'static str {
-    if matches!(*repr, RustType::I32) {
-        return "i32";
-    }
-    return "i64";
+    return match *repr {
+        RustType::I32 => "i32",
+        RustType::U32 => "u32",
+        RustType::U64 => "u64",
+        _ => "i64",
+    };
 }
 
 /// The default name for an integer enum variant, from its value.
@@ -875,7 +883,7 @@ fn single_enum_value(schema: &Schema) -> Option<String> {
 fn non_hoisting_type(schema: &Schema) -> Option<RustType> {
     return match &schema.schema_kind {
         SchemaKind::Type(Type::String(st)) if st.enumeration.is_empty() => Some(string_format_type(&st.format)),
-        SchemaKind::Type(Type::Integer(it)) if it.enumeration.is_empty() => Some(integer_format_type(&it.format)),
+        SchemaKind::Type(Type::Integer(it)) if it.enumeration.is_empty() => Some(integer_type(it)),
         SchemaKind::Type(Type::Number(_)) => Some(RustType::F64),
         SchemaKind::Type(Type::Boolean(_)) => Some(RustType::Bool),
         _ => None,
@@ -890,6 +898,8 @@ fn type_variant_name(ty: &RustType) -> Option<&'static str> {
         RustType::Bool => Some("Bool"),
         RustType::I32 => Some("I32"),
         RustType::I64 => Some("I64"),
+        RustType::U32 => Some("U32"),
+        RustType::U64 => Some("U64"),
         RustType::F64 => Some("F64"),
         RustType::String => Some("String"),
         RustType::Date => Some("Date"),
@@ -925,12 +935,26 @@ fn check_variant_types(name: &str, variants: &[UnionVariant]) -> Result<()> {
     return diagnostics.into_result();
 }
 
-/// Map an integer `format` to a Rust type.
-pub(crate) fn integer_format_type(format: &VariantOrUnknownOrEmpty<IntegerFormat>) -> RustType {
-    let ty = match format {
-        VariantOrUnknownOrEmpty::Item(IntegerFormat::Int32) => RustType::I32,
-        VariantOrUnknownOrEmpty::Item(IntegerFormat::Int64) => RustType::I64,
-        VariantOrUnknownOrEmpty::Unknown(_) | VariantOrUnknownOrEmpty::Empty => RustType::I64,
+/// Map an integer schema to a Rust type.
+///
+/// `format` gives the width. A lowest value of zero or more gives the sign: the
+/// document states the value is never negative, so an unsigned type says the
+/// same thing in the type system, and the reader of the field needs no check to
+/// know it. OpenAPI has no unsigned format, so the bound is the only place a
+/// document can put this. `exclusiveMinimum` counts too, because a whole number
+/// above `-1` is zero or more.
+///
+/// The bound stays a bound. It still becomes a check where the value comes in,
+/// unless the type already refuses every value it would reject.
+pub(crate) fn integer_type(it: &IntegerType) -> RustType {
+    let unsigned = matches!(crate::lower::constraints::inclusive_minimum(it), Some(minimum) if minimum >= 0);
+    let ty = match (&it.format, unsigned) {
+        (VariantOrUnknownOrEmpty::Item(IntegerFormat::Int32), false) => RustType::I32,
+        (VariantOrUnknownOrEmpty::Item(IntegerFormat::Int32), true) => RustType::U32,
+        (VariantOrUnknownOrEmpty::Item(IntegerFormat::Int64), false)
+        | (VariantOrUnknownOrEmpty::Unknown(_) | VariantOrUnknownOrEmpty::Empty, false) => RustType::I64,
+        (VariantOrUnknownOrEmpty::Item(IntegerFormat::Int64), true)
+        | (VariantOrUnknownOrEmpty::Unknown(_) | VariantOrUnknownOrEmpty::Empty, true) => RustType::U64,
     };
     return ty;
 }
@@ -1073,6 +1097,13 @@ mod tests {
         let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
         let module = lower_models(&spec).expect("map schemas");
         return crate::emit::emit_module(&module, None).expect("emit module");
+    }
+
+    /// Lower a spec and give back the outcome, so a test can check a rejection.
+    fn lower_yaml(yaml: &str) -> Result<Module> {
+        let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse spec");
+        let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
+        return lower_models(&spec);
     }
 
     /// Lower every schema with no configured suffix. None of the specs below
@@ -1302,6 +1333,227 @@ mod tests {
         assert!(out.contains("pub id: uuid::Uuid"), "{out}");
         assert!(out.contains("pub blob: Vec<u8>"), "{out}");
         assert!(out.contains("pub big: i64"), "{out}");
+    }
+
+    #[test]
+    fn an_unsigned_field_keeps_every_check_the_type_does_not_already_make() {
+        let yaml = format!(
+            "{PREAMBLE}    Thing:\n      type: object\n      required: [count]\n      properties:\n        count:\n          type: integer\n          format: int32\n          minimum: 0\n          maximum: 130\n"
+        );
+        let out = emit_yaml(&yaml);
+        assert!(out.contains("pub count: u32"), "{out}");
+        // The upper bound still has values to reject, so it stays.
+        assert!(out.contains("`count` must be 130 or less"), "{out}");
+        // `u32` refuses a value below zero on its own, so the lower bound
+        // writes a test no value fails. Rust reads `x < 0` on an unsigned type
+        // as a warning.
+        assert!(!out.contains("must be 0 or more"), "{out}");
+        assert!(!out.contains("*item < 0"), "{out}");
+    }
+
+    #[test]
+    fn an_exclusive_bound_moves_onto_the_whole_number_beside_it() {
+        // A whole number above `-1` is zero or more, so the field takes an
+        // unsigned type and needs no check. Each case gives the keyword, the
+        // bound, the expected type, and the text the message holds.
+        let cases: [(&str, &str, &str, Option<&str>); 5] = [
+            ("minimum: -1\n          exclusiveMinimum: true", "int32", "u32", None),
+            (
+                "minimum: 0\n          exclusiveMinimum: true",
+                "int32",
+                "u32",
+                Some("must be 1 or more"),
+            ),
+            (
+                "minimum: -2\n          exclusiveMinimum: true",
+                "int32",
+                "i32",
+                Some("must be -1 or more"),
+            ),
+            (
+                "maximum: 2147483648\n          exclusiveMaximum: true",
+                "int32",
+                "i32",
+                None,
+            ),
+            ("minimum: -1\n          exclusiveMinimum: true", "int64", "u64", None),
+        ];
+        for (bound, format, ty, message) in cases {
+            let yaml = format!(
+                "{PREAMBLE}    Thing:\n      type: object\n      required: [count]\n      properties:\n        count:\n          type: integer\n          format: {format}\n          {bound}\n"
+            );
+            let out = emit_yaml(&yaml);
+            assert!(out.contains(&format!("pub count: {ty}")), "{bound}: {out}");
+            match message {
+                Some(text) => assert!(out.contains(text), "{bound}: {out}"),
+                None => assert!(!out.contains("must be"), "{bound}: {out}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_bound_that_lands_on_the_limit_of_the_type_writes_no_check() {
+        // `i32` refuses every value above 2147483647 on its own, so the test
+        // would never fail, and Rust reads it as a useless comparison.
+        let yaml = format!(
+            "{PREAMBLE}    Thing:\n      type: object\n      required: [count]\n      properties:\n        count:\n          type: integer\n          format: int32\n          minimum: -2147483648\n          maximum: 2147483647\n"
+        );
+        let out = emit_yaml(&yaml);
+        assert!(out.contains("pub count: i32"), "{out}");
+        assert!(!out.contains("must be"), "{out}");
+    }
+
+    #[test]
+    fn bounds_that_meet_nowhere_are_refused() {
+        // A field whose bounds accept no value would refuse every request, so
+        // the fault belongs at generation. A bound the author writes out of
+        // range is a different fault, and it keeps the message about width.
+        // Each case gives the `format`, the bounds, and the text of the fault.
+        let cases: [(&str, &str, Option<&str>); 13] = [
+            (
+                "integer\n          format: int32",
+                "maximum: -2147483648\n          exclusiveMaximum: true",
+                Some("nothing lies below `-2147483648`, where `i32` starts"),
+            ),
+            (
+                "integer\n          format: int32",
+                "maximum: -2147483647\n          exclusiveMaximum: true",
+                None,
+            ),
+            (
+                "integer",
+                "minimum: 10\n          maximum: 5",
+                Some("they allow `10` to `5`"),
+            ),
+            ("integer", "minimum: 5\n          maximum: 5", None),
+            (
+                "integer",
+                "maximum: -9223372036854775808\n          exclusiveMaximum: true",
+                Some("nothing lies below `-9223372036854775808`, where `i64` starts"),
+            ),
+            (
+                "integer\n          format: int32",
+                "minimum: 4294967295\n          exclusiveMinimum: true",
+                Some("nothing lies above `4294967295`, where `u32` stops"),
+            ),
+            (
+                "integer\n          format: int32",
+                "minimum: 2147483647\n          maximum: 2147483647",
+                None,
+            ),
+            // `u64` reaches above where `i64` stops, so this bound is reachable.
+            (
+                "integer\n          format: int64",
+                "minimum: 9223372036854775807\n          exclusiveMinimum: true",
+                None,
+            ),
+            // `u32` stops first, so the same bound reaches nothing.
+            (
+                "integer\n          format: int32",
+                "minimum: 9223372036854775807\n          exclusiveMinimum: true",
+                Some("nothing lies above `9223372036854775807`, where `u32` stops"),
+            ),
+            // A float folds no flag, so both readings run on the bounds as written.
+            (
+                "number",
+                "minimum: 10\n          maximum: 5",
+                Some("they allow `10` to `5`"),
+            ),
+            (
+                "number",
+                "minimum: 5\n          maximum: 5\n          exclusiveMinimum: true",
+                Some("they meet at `5`, which an `exclusive` flag then leaves out"),
+            ),
+            (
+                "number",
+                "minimum: 0\n          maximum: 1\n          exclusiveMaximum: true",
+                None,
+            ),
+            // Written out of range, not folded there: `i64` holds this bound.
+            (
+                "integer\n          format: int32",
+                "maximum: -5000000000",
+                Some("the `maximum` value `-5000000000` does not fit `i32`"),
+            ),
+        ];
+        for (kind, bounds, fault) in cases {
+            let yaml = format!(
+                "{PREAMBLE}    Thing:\n      type: object\n      required: [count]\n      properties:\n        count:\n          type: {kind}\n          {bounds}\n"
+            );
+            let outcome = lower_yaml(&yaml);
+            match fault {
+                Some(text) => {
+                    let error = outcome.expect_err(bounds).to_string();
+                    assert!(error.contains(text), "{bounds}: {error}");
+                }
+                None => assert!(outcome.is_ok(), "{bounds}: got {outcome:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_negative_multiple_of_reports_one_fault_only() {
+        // An unsigned type holds no negative value, so the width check would
+        // report the step a second time. The step is not above zero whatever the
+        // width, so widening the type is the wrong fix and the wrong hint.
+        let yaml = format!(
+            "{PREAMBLE}    Thing:\n      type: object\n      required: [count]\n      properties:\n        count:\n          type: integer\n          format: int32\n          minimum: 0\n          multipleOf: -1\n"
+        );
+        let fault = lower_yaml(&yaml).expect_err("refuse the step").to_string();
+        assert!(fault.contains("is not above zero"), "{fault}");
+        assert!(!fault.contains("does not fit"), "{fault}");
+    }
+
+    #[test]
+    fn an_enum_value_must_fit_the_repr_the_format_and_the_minimum_choose() {
+        // Each case gives the `format`, the `minimum`, the value, and whether
+        // the value fits. A `minimum` of zero makes the `repr` unsigned, and an
+        // unsigned `repr` holds no negative value.
+        let cases: [(&str, &str, i64, bool); 8] = [
+            ("int32", "", -1, true),
+            ("int32", "", 4_294_967_296, false),
+            ("int32", "\n      minimum: 0", -1, false),
+            ("int32", "\n      minimum: 0", 5, true),
+            ("int32", "\n      minimum: 0", 4_294_967_296, false),
+            ("int64", "\n      minimum: 0", -1, false),
+            ("int64", "\n      minimum: 0", 4_294_967_296, true),
+            ("int64", "", -1, true),
+        ];
+        for (format, minimum, value, fits) in cases {
+            let yaml = format!(
+                "{PREAMBLE}    Offset:\n      type: integer\n      format: {format}{minimum}\n      enum:\n        - {value}\n"
+            );
+            let outcome = lower_yaml(&yaml);
+            assert_eq!(
+                outcome.is_ok(),
+                fits,
+                "format `{format}`, minimum `{minimum}`, value `{value}`: got {outcome:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_minimum_of_zero_or_more_gives_an_unsigned_type() {
+        let yaml = format!(
+            "{PREAMBLE}    Thing:\n      type: object\n      required: [count, total, plain, signed, above]\n      properties:\n        count:\n          type: integer\n          format: int32\n          minimum: 0\n        total:\n          type: integer\n          format: int64\n          minimum: 0\n        plain:\n          type: integer\n          minimum: 0\n        signed:\n          type: integer\n          format: int32\n          minimum: -1\n        above:\n          type: integer\n          format: int32\n          minimum: 5\n"
+        );
+        let out = emit_yaml(&yaml);
+        assert!(out.contains("pub count: u32"), "{out}");
+        assert!(out.contains("pub total: u64"), "{out}");
+        assert!(out.contains("pub plain: u64"), "{out}");
+        // A negative bound leaves the value able to go below zero.
+        assert!(out.contains("pub signed: i32"), "{out}");
+        // Any bound at zero or above says the same thing about the sign.
+        assert!(out.contains("pub above: u32"), "{out}");
+    }
+
+    #[test]
+    fn an_integer_without_a_minimum_stays_signed() {
+        let yaml = format!(
+            "{PREAMBLE}    Thing:\n      type: object\n      required: [count]\n      properties:\n        count:\n          type: integer\n          format: int32\n          maximum: 10\n"
+        );
+        let out = emit_yaml(&yaml);
+        assert!(out.contains("pub count: i32"), "{out}");
     }
 
     #[test]
