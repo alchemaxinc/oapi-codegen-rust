@@ -32,15 +32,14 @@ jobs:
       - name: Check for changes between develop and main
         id: check_changes
         run: |
-          git fetch origin main
-          DIFF_OUTPUT=$(git diff origin/main...origin/develop)
+          git fetch origin main develop
 
-          if [ -z "$DIFF_OUTPUT" ]; then
+          if git diff --quiet origin/main...origin/develop; then
             echo "No changes detected between develop and main"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
             echo "Changes detected between develop and main"
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create Pull Request
@@ -50,11 +49,11 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           # Check if PR already exists
-          EXISTING_PR=$(gh pr list --base main --head develop --json number --jq '.[0].number')
+          EXISTING_PR=$(gh pr list --base main --head develop --json number --jq '.[0].number // empty')
 
           if [ -n "$EXISTING_PR" ]; then
             echo "Pull request already exists: #$EXISTING_PR"
-            echo "pr_number=$EXISTING_PR" >> $GITHUB_OUTPUT
+            echo "pr_number=$EXISTING_PR" >> "$GITHUB_OUTPUT"
           else
             echo "Creating pull request from develop to main"
             PR_URL=$(gh pr create \
@@ -64,7 +63,7 @@ jobs:
 
             echo "Pull request created at: $PR_URL"
             PR_NUMBER=$(gh pr view "$PR_URL" --json number --jq .number)
-            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Enable auto-merge
