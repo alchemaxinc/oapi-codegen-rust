@@ -4,8 +4,8 @@ on:
   pull_request:
 
   # Do not remove this trigger as redundant with `pull_request`: it exists to
-  # populate the cache, not to re-run checks.
-  #
+  # seed the shared cache on the default branch after merges; the checks already
+  # ran for the change in the pull request workflow.
   # GitHub scopes every cache entry to the ref that wrote it, and a run may
   # only read entries from its own ref, its base ref, or the default branch.
   # A `pull_request`-only workflow therefore writes every entry into a
