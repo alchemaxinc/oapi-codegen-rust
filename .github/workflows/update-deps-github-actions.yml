@@ -14,6 +14,7 @@ jobs:
         with:
           owner: ${{ github.repository_owner }}
           client-id: ${{ vars.HOUSEKEEPING_BOT_APP_ID }}
+          repositories: ${{ github.event.repository.name }}
           private-key: ${{ secrets.HOUSEKEEPING_BOT_PRIVATE_KEY }}
 
       - name: Update GitHub Actions
