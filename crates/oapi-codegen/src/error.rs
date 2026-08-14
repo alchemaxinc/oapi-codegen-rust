@@ -76,6 +76,38 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// The companion directory beside the output file holds a file the
+    /// generator did not write.
+    ///
+    /// The generator owns that directory: it deletes the files an earlier run
+    /// left there and this run no longer produces. A file without the generated
+    /// marker is somebody's work, so the run stops rather than delete it.
+    UnownedOutput {
+        /// Path of the file the generator does not own.
+        path: String,
+    },
+
+    /// A generated file lies outside the directory the run owns.
+    ///
+    /// Every file of a package belongs under the companion directory, which is
+    /// the only place a run writes to and deletes from.
+    OutsideOutput {
+        /// The offending file path, relative to the root file's directory.
+        path: String,
+        /// The companion directory the file has to be under.
+        directory: String,
+    },
+
+    /// The output path cannot carry a companion directory beside it.
+    ///
+    /// A run with operations writes a root file plus a directory named after
+    /// its stem. An output path with no stem, or one whose stem equals the file
+    /// name, would put the directory and the root file at the same path.
+    UnsplittableOutput {
+        /// The output path that cannot be split.
+        path: String,
+    },
+
     /// The document declares an OpenAPI version the generator does not read.
     ///
     /// Only `3.0.x` is supported. A newer document is rejected and not read as a
@@ -406,6 +438,21 @@ impl std::fmt::Display for Error {
             Error::ReadOutput { path, source } => {
                 return write!(f, "failed to read output `{path}`: {source}");
             }
+            Error::OutsideOutput { path, directory } => {
+                return write!(f, "generated file `{path}` lies outside `{directory}`");
+            }
+            Error::UnsplittableOutput { path } => {
+                return write!(
+                    f,
+                    "output path `{path}` needs a file extension: a run with operations writes a directory beside the file, named after its stem"
+                );
+            }
+            Error::UnownedOutput { path } => {
+                return write!(
+                    f,
+                    "`{path}` sits in the generated output directory but was not generated"
+                );
+            }
             // The remedy is a hint, which the console prints under the message.
             // `Display` therefore states the problem only.
             Error::UnsupportedSpecVersion { document, version, .. } => {
@@ -549,6 +596,9 @@ impl std::error::Error for Error {
             // It has no single `source`. `Display` shows the problems instead.
             Error::Validation { .. }
             | Error::Unimplemented(_)
+            | Error::UnownedOutput { .. }
+            | Error::UnsplittableOutput { .. }
+            | Error::OutsideOutput { .. }
             | Error::UnsupportedSpecVersion { .. }
             | Error::UnsupportedSpecKey { .. }
             | Error::UnsupportedContentType { .. }

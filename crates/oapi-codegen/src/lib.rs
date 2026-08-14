@@ -15,6 +15,7 @@ pub mod ir;
 pub mod loader;
 pub mod lower;
 pub mod naming;
+pub mod package;
 
 use std::path::Path;
 
@@ -22,17 +23,44 @@ pub use crate::config::Config;
 pub use crate::error::Error;
 pub use crate::error::Result;
 use crate::ir::Module;
+use crate::ir::ServerUrls;
+use crate::ir::Service;
 use crate::loader::Spec;
+pub use crate::package::GeneratedFile;
+pub use crate::package::GeneratedPackage;
+pub use crate::package::PackageDrift;
+pub use crate::package::check_package;
+pub use crate::package::write_package;
 
-/// Generate Rust from a spec file according to `configuration`, returning the source.
+/// Everything one run lowers from a spec, ready for either output layout.
+enum Lowered {
+    /// The run emits models, and optionally server-URL constants, only.
+    Models {
+        /// The component models to emit.
+        module: Module,
+        /// The server-URL items, when the feature is enabled.
+        server_urls: Option<ServerUrls>,
+    },
+    /// The run emits a service: models, per-operation types, and at least one
+    /// of the server and client interfaces.
+    Service {
+        /// The component models the service references.
+        module: Module,
+        /// The lowered operations.
+        service: Service,
+        /// The server-URL items, when the feature is enabled.
+        server_urls: Option<ServerUrls>,
+        /// Which generator interfaces the configuration asked for.
+        targets: emit::Targets,
+    },
+}
+
+/// Load a spec and lower it according to `config`, stopping before emission.
 ///
-/// Models are emitted when `generate.models` is set, or implicitly when the
-/// server or client is generated (so referenced types are in scope). The axum
-/// server interface is appended when `generate.std-http-server` is set. The
-/// blocking `reqwest` client is appended when `generate.client` is set. Models,
-/// per-operation types, and both generators are emitted flat at the crate root,
-/// so server and client can share one file.
-pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
+/// Both output layouts run exactly the same pipeline, so this holds every step
+/// between loading and emitting: filtering, name resolution, lowering, pruning,
+/// and the validation passes that reject a spec the emitter cannot express.
+fn lower_spec(spec_path: &Path, config: &Config) -> Result<Lowered> {
     if config.generate.embedded_spec {
         return Err(Error::Unimplemented("embedded-spec".to_owned()));
     }
@@ -50,7 +78,10 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     // report a collision between two schemas that it never looks at. This matches
     // `response-type-suffix`, which only a server or client run reads.
     if !(config.generate.models || want_server || want_client) {
-        return emit::emit_module(&Module::default(), server_urls.as_ref());
+        return Ok(Lowered::Models {
+            module: Module::default(),
+            server_urls,
+        });
     }
     // A set but useless suffix is an error, and not silently "unset". The
     // resolution checks it, so every caller of `type_renames` gets the check.
@@ -88,7 +119,12 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
         };
         lower::check_type_name_collisions(&service, &module, &emit::reserved_type_names(targets))?;
         lower::check_prelude_shadowing(&module, targets)?;
-        return emit::emit_flat(&module, &service, server_urls.as_ref(), targets);
+        return Ok(Lowered::Service {
+            module,
+            service,
+            server_urls,
+            targets,
+        });
     }
     // Models-only generation prunes nothing, so the module holds every schema and
     // every collision reports.
@@ -96,7 +132,71 @@ pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
     lower::check_duplicate_models(&module)?;
     lower::check_prelude_shadowing(&module, emit::Targets::default())?;
     lower::box_recursive_types(&mut module)?;
-    return emit::emit_module(&module, server_urls.as_ref());
+    return Ok(Lowered::Models { module, server_urls });
+}
+
+/// Generate Rust from a spec file according to `configuration`, returning the source.
+///
+/// Models are emitted when `generate.models` is set, or implicitly when the
+/// server or client is generated (so referenced types are in scope). The axum
+/// server interface is appended when `generate.std-http-server` is set. The
+/// blocking `reqwest` client is appended when `generate.client` is set. Models,
+/// per-operation types, and both generators are emitted flat at the crate root,
+/// so server and client can share one file.
+///
+/// Use [`generate_package`] for the layout the CLI writes, which splits the same
+/// items across a module tree.
+pub fn generate(spec_path: &Path, config: &Config) -> Result<String> {
+    return match lower_spec(spec_path, config)? {
+        Lowered::Models { module, server_urls } => emit::emit_module(&module, server_urls.as_ref()),
+        Lowered::Service {
+            module,
+            service,
+            server_urls,
+            targets,
+        } => emit::emit_flat(&module, &service, server_urls.as_ref(), targets),
+    };
+}
+
+/// Generate Rust from a spec file according to `configuration`, returning every
+/// file the run produces.
+///
+/// A run that lowers operations splits its output across a module tree: the file
+/// at `output_path` becomes a facade of re-exports, and a companion directory
+/// named after that file's stem holds one module per concern (`models`,
+/// `operations`, `server`, `client`, `server_urls`) with one file per operation
+/// underneath. Every generated name stays reachable from the root file, so a
+/// consumer that already mounts it needs no change.
+///
+/// `output_path` is read for its file stem only, which names that companion
+/// directory. Nothing is read from or written to disk here; see
+/// [`write_package`] and [`check_package`].
+///
+/// A models-only run has no operations to split, so it produces the single file
+/// it always has.
+pub fn generate_package(spec_path: &Path, config: &Config, output_path: &Path) -> Result<GeneratedPackage> {
+    return match lower_spec(spec_path, config)? {
+        Lowered::Models { module, server_urls } => Ok(GeneratedPackage::new(
+            emit::emit_module(&module, server_urls.as_ref())?,
+            Vec::new(),
+        )),
+        Lowered::Service {
+            module,
+            service,
+            server_urls,
+            targets,
+        } => {
+            let stem = package::companion_of(output_path)?
+                .file_name()
+                .map(|stem| return stem.to_string_lossy().into_owned())
+                .ok_or_else(|| {
+                    return Error::UnsplittableOutput {
+                        path: output_path.display().to_string(),
+                    };
+                })?;
+            emit::emit_package(&module, &service, server_urls.as_ref(), targets, &stem)
+        }
+    };
 }
 
 /// Generate Rust from a spec file according to `configuration` and write it to

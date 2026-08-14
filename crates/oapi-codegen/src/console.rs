@@ -127,9 +127,23 @@ pub fn report_empty_output(spec: &Path, stats: &SpecStats, generate: &Generate) 
     }
 }
 
-/// Report a successful write to `path`.
-pub fn report_wrote(path: &Path) {
-    eprintln!("{} wrote {}", "✓".green().bold(), path.display());
+/// Report that generation wrote its output.
+///
+/// A run that splits its output names the root file and counts the rest: the
+/// root is the file a consumer mounts, and the count says the tree beside it is
+/// part of the same artifact.
+pub fn report_wrote(path: &Path, files: usize) {
+    let modules = files.saturating_sub(1);
+    if modules == 0 {
+        eprintln!("{} wrote {}", "✓".green().bold(), path.display());
+        return;
+    }
+    let plural = if modules == 1 { "module" } else { "modules" };
+    eprintln!(
+        "{} wrote {} and {modules} {plural} beside it",
+        "✓".green().bold(),
+        path.display()
+    );
 }
 
 /// Report that `--check` found `path` up to date.
@@ -137,24 +151,35 @@ pub fn report_check_passed(path: &Path) {
     eprintln!("{} {} is up to date", "✓".green().bold(), path.display());
 }
 
+/// What `--check` found at the file it stopped on.
+#[derive(Debug, Clone, Copy)]
+pub enum DriftKind {
+    /// Generation writes the file, and it is not there.
+    Absent,
+    /// The file is there and holds different content.
+    Differs,
+    /// An earlier run wrote the file, and this run does not produce it.
+    Stale,
+}
+
 /// Report that `--check` found drift, and name the command that resolves it.
 ///
-/// The message states which of the two cases holds, because an absent file and a
-/// stale file need the reader to look at different things. Both have one remedy,
-/// which is a run with no `--check`.
-pub fn report_drift(path: &Path, absent: bool) {
-    if absent {
-        eprintln!(
-            "{} {} does not exist.",
-            "error:".red().bold(),
-            path.display().to_string().bold()
-        );
-    } else {
-        eprintln!(
-            "{} {} is out of date with the spec.",
-            "error:".red().bold(),
-            path.display().to_string().bold()
-        );
+/// The message states which of the three cases holds, because a missing file, a
+/// stale file, and a leftover file each need the reader to look at something
+/// different. All three have one remedy, which is a run with no `--check`.
+pub fn report_drift(path: &Path, kind: DriftKind) {
+    let path = path.display().to_string();
+    let name = path.bold();
+    match kind {
+        DriftKind::Absent => {
+            eprintln!("{} {name} does not exist.", "error:".red().bold());
+        }
+        DriftKind::Differs => {
+            eprintln!("{} {name} is out of date with the spec.", "error:".red().bold());
+        }
+        DriftKind::Stale => {
+            eprintln!("{} {name} is left over from an earlier run.", "error:".red().bold());
+        }
     }
     eprintln!(
         "  {} run the same command without `--check` to update it, and commit the result.",
@@ -241,6 +266,22 @@ fn hints_for(err: &Error) -> Vec<String> {
         // that exists and that the process cannot read.
         Error::ReadOutput { path, .. } => {
             return vec![format!("Check that `{path}` is a readable file and not a directory.")];
+        }
+        Error::UnownedOutput { path } => {
+            return vec![
+                format!("Move `{path}` out of the generated directory, or delete it."),
+                "The generator owns that directory and removes the files it no longer produces, so it never deletes a file it did not write.".to_owned(),
+            ];
+        }
+        Error::OutsideOutput { directory, .. } => {
+            return vec![format!(
+                "This is an internal bug in oapi-codegen. Every generated file belongs under `{directory}`."
+            )];
+        }
+        Error::UnsplittableOutput { path } => {
+            return vec![format!(
+                "Give the output path a `.rs` extension, for example `{path}.rs`."
+            )];
         }
         Error::Unimplemented(_) => {
             return vec!["This generation mode is not supported yet.".to_owned()];

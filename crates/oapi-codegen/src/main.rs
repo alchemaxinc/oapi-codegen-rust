@@ -14,8 +14,8 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use oapi_codegen::Config;
-use oapi_codegen::Drift;
 use oapi_codegen::Error;
+use oapi_codegen::PackageDrift;
 use oapi_codegen::Result;
 use oapi_codegen::cli::Cli;
 use oapi_codegen::config::Generate;
@@ -45,10 +45,10 @@ enum CliFailure {
     /// `--check` found the output file missing or out of date. Nothing was
     /// written, because the flag asks for a comparison only.
     Drift {
-        /// The output file that was compared.
-        output: PathBuf,
-        /// Whether the file is absent, as opposed to present and different.
-        absent: bool,
+        /// The file the comparison stopped at.
+        path: PathBuf,
+        /// What the comparison found there.
+        kind: console::DriftKind,
     },
 }
 
@@ -68,8 +68,8 @@ impl CliFailure {
             CliFailure::EmptyOutput { spec, stats, generate } => {
                 console::report_empty_output(spec, stats, generate);
             }
-            CliFailure::Drift { output, absent } => {
-                console::report_drift(output, *absent);
+            CliFailure::Drift { path, kind } => {
+                console::report_drift(path, *kind);
             }
         }
     }
@@ -114,7 +114,10 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
     });
     let output = output.ok_or(CliFailure::NoOutput)?;
 
-    let code = oapi_codegen::generate(&cli.spec_file, &config)?;
+    let package = oapi_codegen::generate_package(&cli.spec_file, &config, &output)?;
+    // Both scans read the generated code as text, and splitting it across files
+    // must not change what either one concludes, so both read every file.
+    let code = package.combined_source();
     if console::is_effectively_empty(&code) {
         let stats = spec_stats(&cli.spec_file, &config)?;
         return Err(CliFailure::EmptyOutput {
@@ -127,22 +130,34 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
     if cli.check {
         // `--check` compares and writes nothing, so it reports no dependencies
         // either. A comparison adds no crate to the manifest.
-        match oapi_codegen::check_output(&output, &code)? {
-            Drift::None => {
+        match oapi_codegen::check_package(&output, &package)? {
+            PackageDrift::None => {
                 console::report_check_passed(&output);
                 return Ok(());
             }
-            Drift::Absent => {
-                return Err(CliFailure::Drift { output, absent: true });
+            PackageDrift::Absent(path) => {
+                return Err(CliFailure::Drift {
+                    path,
+                    kind: console::DriftKind::Absent,
+                });
             }
-            Drift::Differs => {
-                return Err(CliFailure::Drift { output, absent: false });
+            PackageDrift::Differs(path) => {
+                return Err(CliFailure::Drift {
+                    path,
+                    kind: console::DriftKind::Differs,
+                });
+            }
+            PackageDrift::Stale(path) => {
+                return Err(CliFailure::Drift {
+                    path,
+                    kind: console::DriftKind::Stale,
+                });
             }
         }
     }
 
-    oapi_codegen::write_output(&output, &code)?;
-    console::report_wrote(&output);
+    oapi_codegen::write_package(&output, &package)?;
+    console::report_wrote(&output, package.file_count());
 
     let manifest = nearest_manifest(&output);
     let deps = oapi_codegen::deps::required_dependencies(&code);
