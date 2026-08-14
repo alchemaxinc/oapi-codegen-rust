@@ -1,5 +1,17 @@
 SHELL := /bin/bash
 
+RUST_VERSION := $(shell sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml)
+ifeq ($(strip $(RUST_VERSION)),)
+$(error could not read the toolchain channel from rust-toolchain.toml)
+endif
+export RUST_VERSION
+
+GENERATED_PATHS := \
+	README.md \
+	docs \
+	examples \
+	crates/oapi-codegen/tests/generated
+
 .PHONY: help
 help: ## Show this help text
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -58,8 +70,9 @@ update-generated: ## Refresh generated files from the coverage fixtures
 	UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage
 
 .PHONY: update-docs
-update-docs: ## Refresh docs/cli.md from the clap CLI definition
+update-docs: ## Refresh docs/cli.md and the documented command output in Markdown files
 	UPDATE_DOCS=1 cargo test -p oapi-codegen --test cli_docs
+	TRYCMD=overwrite cargo test -p oapi-codegen --test documentation
 
 .PHONY: generate-example
 generate-example: ## Regenerate the bookstore example from its OpenAPI specification
@@ -77,16 +90,20 @@ verify-example: ## Fail when the bookstore example is out of date, without writi
 		cargo run -q -p oapi-codegen -- --check --config-file oapi-codegen-server.yaml openapi.yaml && \
 		cargo run -q -p oapi-codegen -- --check --config-file oapi-codegen-client.yaml openapi.yaml
 
+.PHONY: print-generated-paths
+print-generated-paths: ## Print the paths that regeneration writes, one per line
+	@printf '%s\n' $(GENERATED_PATHS)
+
 .PHONY: verify-generated
 verify-generated: ## Regenerate all generated files and fail when they differ from committed files
 	$(MAKE) verify-example
 	$(MAKE) update-generated
 	$(MAKE) update-docs
-	@if [ -n "$$(git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md)" ]; then \
+	@if [ -n "$$(git status --porcelain -- $(GENERATED_PATHS))" ]; then \
 		echo "ERROR: generated files are out of date."; \
 		echo "Run 'make generate-example', 'make update-generated' and 'make update-docs'. Commit the result."; \
-		git status --porcelain -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
-		git --no-pager diff -- examples/bookstore/generated crates/oapi-codegen/tests/generated docs/cli.md; \
+		git status --porcelain -- $(GENERATED_PATHS); \
+		git --no-pager diff -- $(GENERATED_PATHS); \
 		exit 1; \
 	fi
 	@echo "Generated files are up to date."

@@ -25,6 +25,14 @@
   regenerate `docs/cli.md` (it is generated — never edit it by hand). CI's
   `make verify-generated` fails on drift.
 
+## Documented command output is generated
+
+- The `console` code blocks in `README.md`, `docs/*.md`, and `examples/*/README.md`
+  are trycmd cases: their expected output is verified by the `documentation` test.
+  The dependency report the CLI prints carries the versions declared in
+  `crates/oapi-codegen/Cargo.toml`, so a dependency bump changes that output.
+  After any dependency upgrade, run `make update-docs` and commit the result.
+
 # Rust Coding Conventions and Best Practices
 
 Follow idiomatic Rust practices and community standards when writing Rust code.

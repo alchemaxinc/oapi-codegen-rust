@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: "0 0 * * 0" # Run every Sunday at midnight
 
+env:
+  BRANCH_PREFIX: update-cargo
+
 jobs:
   update-cargo:
     runs-on: ubuntu-latest
@@ -14,6 +17,7 @@ jobs:
         with:
           owner: ${{ github.repository_owner }}
           client-id: ${{ vars.HOUSEKEEPING_BOT_APP_ID }}
+          repositories: ${{ github.event.repository.name }}
           private-key: ${{ secrets.HOUSEKEEPING_BOT_PRIVATE_KEY }}
 
       - name: Update Cargo Dependencies
@@ -23,6 +27,31 @@ jobs:
           auto-merge: "true"
           base-branch: "develop"
           merge-method: "squash"
-          branch-prefix: "update-cargo"
+          branch-prefix: ${{ env.BRANCH_PREFIX }}
           pr-title: "fix(deps): update cargo dependencies"
           commit-message: "fix(deps): update cargo dependencies"
+
+      # The action leaves the working tree on the branch it created, so the
+      # regenerated output lands on the same pull request.
+      - name: Refresh the documented command output
+        run: |
+          set -euo pipefail
+          branch="$(git rev-parse --abbrev-ref HEAD)"
+          case "$branch" in
+            "$BRANCH_PREFIX"-*) ;;
+            *)
+              echo "::notice::No dependency-update branch exists; nothing to refresh."
+              exit 0
+              ;;
+          esac
+
+          make update-docs
+
+          paths="$(make --no-print-directory print-generated-paths)"
+          if [ -z "$(git status --porcelain -- $paths)" ]; then
+            echo "::notice::The documented command output is already up to date."
+            exit 0
+          fi
+          git add -- $paths
+          git commit -m "docs: refresh documented command output for updated dependencies"
+          git push origin "HEAD:$branch"
