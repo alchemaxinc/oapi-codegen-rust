@@ -1,5 +1,11 @@
 SHELL := /bin/bash
 
+RUST_VERSION := $(shell sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml)
+ifeq ($(strip $(RUST_VERSION)),)
+$(error could not read the toolchain channel from rust-toolchain.toml)
+endif
+export RUST_VERSION
+
 GENERATED_PATHS := \
 	README.md \
 	docs \

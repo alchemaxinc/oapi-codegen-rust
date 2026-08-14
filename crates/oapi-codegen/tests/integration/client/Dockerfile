@@ -4,7 +4,10 @@
 # start; pre-building with `--no-run` means startup goes straight to the tests.
 # The build context is the repository root (see docker-compose.yml).
 
-FROM rust:1.96-bookworm AS builder
+# Kept in sync with rust-toolchain.toml by the Makefile: a mismatch makes
+# rustup download a second toolchain inside the image on every build.
+ARG RUST_VERSION=1.97.1
+FROM rust:${RUST_VERSION}-bookworm AS builder
 WORKDIR /src
 COPY . .
 RUN cargo test --no-run --locked -p bookstore-example --features client --test e2e

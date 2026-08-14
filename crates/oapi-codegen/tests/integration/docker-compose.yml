@@ -14,6 +14,8 @@ services:
     build:
       context: ../../../..
       dockerfile: crates/oapi-codegen/tests/integration/server/Dockerfile
+      args:
+        RUST_VERSION: ${RUST_VERSION:-1.97.1}
     environment:
       BOOKSTORE_ADDR: 0.0.0.0:8080
     expose:
@@ -23,6 +25,8 @@ services:
     build:
       context: ../../../..
       dockerfile: crates/oapi-codegen/tests/integration/client/Dockerfile
+      args:
+        RUST_VERSION: ${RUST_VERSION:-1.97.1}
     depends_on:
       - server
     environment:
