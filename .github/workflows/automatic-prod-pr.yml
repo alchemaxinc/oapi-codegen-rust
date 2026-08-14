@@ -58,6 +58,7 @@ jobs:
             echo "Creating pull request from develop to main"
             PR_URL=$(gh pr create \
               --title "chore: to production" \
+              --body "" \
               --head develop \
               --base main)
 
