@@ -27,15 +27,12 @@ jobs:
       - name: Checkout code (shallow)
         uses: actions/checkout@v7
 
-      - name: Cache Commitlint
-        id: cache-commitlint
-        uses: actions/cache@v6
-        with:
-          path: node_modules
-          key: v1-commitlint-${{ env.COMMITLINT_CLI_VERSION }}
-
+      # Deliberately not cached. This workflow only runs on `pull_request`, so
+      # every cache entry lands in a `refs/pull/N/merge` scope that no other
+      # pull request can read: each one paid the full install anyway and then
+      # wrote another ~12 MB private copy against the repository's 10 GB quota.
+      # Restoring the entry also costs about as long as the install it skips.
       - name: Install Commitlint
-        if: steps.cache-commitlint.outputs.cache-hit != 'true'
         run: npm i -D @commitlint/cli@${{ env.COMMITLINT_CLI_VERSION }} @commitlint/config-conventional @commitlint/types
 
       - name: Lint PR title (conventional commit)
