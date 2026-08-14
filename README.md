@@ -73,7 +73,7 @@ decisions to support.
 | v3.1.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/65).                   |
 | v3.2.0  | Planned   | Tracking [here](https://github.com/alchemaxinc/oapi-codegen-rust/issues/66).                   |
 
-[^openapi-versions]: This table and the tracking issues are maintained automatically by the [OpenAPI version check workflow](.github/workflows/check-openapi-versions.yml), which probes the [upstream spec releases](https://github.com/OAI/OpenAPI-Specification/releases) against [`.github/openapi-versions.json`](.github/openapi-versions.json).
+[^openapi-versions]: This table and the tracking issues are maintained automatically by the [OpenAPI version check workflow](https://github.com/alchemaxinc/oapi-codegen-rust/blob/main/.github/workflows/check-openapi-versions.yml), which probes the [upstream spec releases](https://github.com/OAI/OpenAPI-Specification/releases) against [`.github/openapi-versions.json`](https://github.com/alchemaxinc/oapi-codegen-rust/blob/main/.github/openapi-versions.json).
 
 ## Documentation
 
