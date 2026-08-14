@@ -1,5 +1,8 @@
 SHELL := /bin/bash
 
+RUST_VERSION := $(shell sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' rust-toolchain.toml)
+export RUST_VERSION
+
 GENERATED_PATHS := \
 	README.md \
 	docs \
