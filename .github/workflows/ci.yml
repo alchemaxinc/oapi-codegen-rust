@@ -3,8 +3,26 @@ name: CI
 on:
   pull_request:
 
+  # Do not remove this trigger as redundant with `pull_request`: it exists to
+  # populate the cache, not to re-run checks.
+  #
+  # GitHub scopes every cache entry to the ref that wrote it, and a run may
+  # only read entries from its own ref, its base ref, or the default branch.
+  # A `pull_request`-only workflow therefore writes every entry into a
+  # `refs/pull/N/merge` scope that no other pull request can ever read, so
+  # each one starts cold, rebuilds everything, and saves yet another private
+  # copy. That churn previously consumed the whole 10 GB repository cache
+  # quota and evicted entries faster than they could be reused.
+  #
+  # Running on pushes to the default branch writes the entries into a scope
+  # every pull request can read, so one post-merge run seeds them all.
+  push:
+    branches: [develop]
+
 concurrency:
-  cancel-in-progress: true
+  # Superseded pull request runs are worth cancelling, but a push to the
+  # default branch is what seeds the shared cache, so let it always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   group: ${{ github.workflow }}-${{ github.ref }}
 
 permissions:
