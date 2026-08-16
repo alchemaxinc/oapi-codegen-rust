@@ -38,7 +38,72 @@ pub(crate) const API_TRAIT_NAME: &str = "Api";
 
 impl crate::emit::ServerEmitter for AxumServer {
     fn emit(&self, service: &Service) -> Result<Vec<TokenStream>> {
-        return service_items(service);
+        return Ok(server_items(service, HandlerVisibility::Private)?.into_flat());
+    }
+}
+
+/// How widely an emitted handler function is visible.
+///
+/// A flat file keeps the handler private, because the router that names it sits
+/// beside it. A package puts the two in different modules, so the handler has to
+/// reach its parent.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum HandlerVisibility {
+    /// No visibility keyword: the handler is reachable within its own module.
+    Private,
+    /// `pub(super)`: the handler is reachable from the module holding the router.
+    Parent,
+}
+
+impl HandlerVisibility {
+    /// The visibility tokens to place before `async fn`.
+    fn to_tokens(self) -> TokenStream {
+        return match self {
+            HandlerVisibility::Private => quote! {},
+            HandlerVisibility::Parent => quote! { pub(super) },
+        };
+    }
+}
+
+/// The axum items one operation contributes, kept apart so a package can put
+/// them in that operation's own file.
+pub(crate) struct ServerOperationItems {
+    /// The `FromRequestParts`/`FromRequest` impls for the operation's inputs.
+    pub extractors: Vec<TokenStream>,
+    /// The `IntoResponse` impl for the operation's response enum.
+    pub into_response: TokenStream,
+    /// The handler function the router dispatches to.
+    pub handler: TokenStream,
+}
+
+/// The axum server interface, split into the items shared by every operation and
+/// the items each operation contributes.
+pub(crate) struct ServerItems {
+    /// One entry per operation, in `service.operations` order.
+    pub operations: Vec<ServerOperationItems>,
+    /// The `Api` trait.
+    pub api_trait: TokenStream,
+    /// The `router` builder.
+    pub router: TokenStream,
+}
+
+impl ServerItems {
+    /// Flatten into the single-file item order: every extractor, the trait, every
+    /// `IntoResponse` impl, the router, then every handler.
+    pub fn into_flat(self) -> Vec<TokenStream> {
+        let mut items = Vec::new();
+        for operation in &self.operations {
+            items.extend(operation.extractors.iter().cloned());
+        }
+        items.push(self.api_trait);
+        for operation in &self.operations {
+            items.push(operation.into_response.clone());
+        }
+        items.push(self.router);
+        for operation in self.operations {
+            items.push(operation.handler);
+        }
+        return items;
     }
 }
 
@@ -99,30 +164,32 @@ fn negotiated_response_arms(body: &NegotiatedBody, status: &TokenStream, with_he
 
 /// Emit the axum server interface: the `Api` trait, per-operation `IntoResponse`
 /// enums, the `Router` builder, and the internal handler functions.
-fn service_items(service: &Service) -> Result<Vec<TokenStream>> {
-    let mut items = Vec::new();
+pub(crate) fn server_items(service: &Service, handler_visibility: HandlerVisibility) -> Result<ServerItems> {
+    let mut operations = Vec::with_capacity(service.operations.len());
     for operation in &service.operations {
+        let mut extractors = Vec::new();
         if let Some(headers) = &operation.headers {
-            items.push(emit_headers_extractor(headers)?);
+            extractors.push(emit_headers_extractor(headers)?);
         }
         if let Some(cookies) = &operation.cookies {
-            items.push(emit_cookies_extractor(cookies)?);
+            extractors.push(emit_cookies_extractor(cookies)?);
         }
         match &operation.request {
-            Some(RequestPayload::Multipart(multipart)) => items.push(emit_multipart_extractor(multipart)?),
-            Some(RequestPayload::Negotiated(request)) => items.push(emit_request_body_extractor(request)?),
+            Some(RequestPayload::Multipart(multipart)) => extractors.push(emit_multipart_extractor(multipart)?),
+            Some(RequestPayload::Negotiated(request)) => extractors.push(emit_request_body_extractor(request)?),
             Some(RequestPayload::Single(_)) | None => {}
         }
+        operations.push(ServerOperationItems {
+            extractors,
+            into_response: emit_into_response(operation)?,
+            handler: emit_handler(operation, handler_visibility)?,
+        });
     }
-    items.push(emit_trait(service)?);
-    for operation in &service.operations {
-        items.push(emit_into_response(operation)?);
-    }
-    items.push(emit_router(service));
-    for operation in &service.operations {
-        items.push(emit_handler(operation)?);
-    }
-    return Ok(items);
+    return Ok(ServerItems {
+        operations,
+        api_trait: emit_trait(service)?,
+        router: emit_router(service),
+    });
 }
 
 /// Emit the `Api` trait, one async method per operation.
@@ -398,7 +465,7 @@ fn emit_router(service: &Service) -> TokenStream {
 
 /// Emit an operation's internal handler: extract the typed inputs, call the
 /// `Api` method, and return its response (which is `IntoResponse`).
-fn emit_handler(operation: &Operation) -> Result<TokenStream> {
+fn emit_handler(operation: &Operation, visibility: HandlerVisibility) -> Result<TokenStream> {
     let handler = axum_handler_name(&operation.name).to_token();
     let method = operation.name.to_token();
     let response = operation.response_enum.to_token();
@@ -462,8 +529,9 @@ fn emit_handler(operation: &Operation) -> Result<TokenStream> {
         None => {}
     }
 
+    let vis = visibility.to_tokens();
     return Ok(quote! {
-        async fn #handler<T: Api>(#(#extractors),*) -> #response {
+        #vis async fn #handler<T: Api>(#(#extractors),*) -> #response {
             api.#method(#(#call_args),*).await
         }
     });

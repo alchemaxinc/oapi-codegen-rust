@@ -19,7 +19,7 @@ $ oapi-codegen --config-file oapi-codegen-catalog.yaml schemas/catalog.yaml
       cargo add serde@1.0.229 --features derive
 
 $ oapi-codegen --config-file oapi-codegen-server.yaml openapi.yaml
-✓ wrote generated/restapi.rs
+✓ wrote generated/restapi.rs and 15 modules beside it
   note: add the crates the generated code references to Cargo.toml:
       serde = { version = "1.0.229", features = ["derive"] }
       serde_json = "1.0.151"
@@ -34,7 +34,7 @@ $ oapi-codegen --config-file oapi-codegen-server.yaml openapi.yaml
       cargo add axum-extra@0.12.6 --features query
 
 $ oapi-codegen --config-file oapi-codegen-client.yaml openapi.yaml
-✓ wrote generated/restclient.rs
+✓ wrote generated/restclient.rs and 14 modules beside it
   note: add the crates the generated code references to Cargo.toml:
       serde_json = "1.0.151"
       http = "1.5.0"

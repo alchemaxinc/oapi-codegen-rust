@@ -3,26 +3,75 @@
 Generated code is a build input, and not a build product. Commit it, and let
 continuous integration confirm that it matches the spec.
 
-## Commit the generated file
+## Commit the generated files
 
-The generator writes one Rust file. Put that file in version control next to the
-hand-written code that uses it.
+A run that generates operations writes a small module tree. This is the widest
+it gets:
+
+```text
+generated/restapi.rs            the file you mount
+generated/restapi/
+    operations.rs
+    operations/<operation>.rs   one file per operation: inputs and responses
+    models.rs                   the component schemas
+    server_urls.rs              the constants for the spec's servers
+    server.rs                   the `Api` trait and the router
+    server/<operation>.rs       one file per operation: extractors and handler
+    client.rs                   `Client`, `ClientError`, and the constructors
+    client/<operation>.rs       one file per operation: the request method
+```
+
+The directory takes its name from the output file, and holds only the modules
+the run has content for. Expect fewer than the tree above:
+
+- `operations.rs` and the files under it come with the operations themselves.
+- `models.rs` needs a component schema to emit. A spec with none, and a spec
+  whose schemas all come from `import-mapping`, both get no `models.rs`.
+- `server_urls.rs` needs `generate.server-urls` and a `servers` entry.
+- `server.rs` needs `generate.std-http-server`, and `client.rs` needs
+  `generate.client`. A client-only run writes no `server.rs`.
+
+A run that generates models but no operations has nothing to split and writes
+the single file alone.
+
+Put all of it in version control next to the hand-written code that uses it.
 
 This has three effects. A reader of a pull request sees what the spec change did
 to the API. A consumer of the crate builds it with no code generator and no
 OpenAPI document. A reviewer sees a change to a public type as a change to a
 committed file.
 
+The generator owns the directory. Each run deletes the generated files in it that
+the run no longer produces, so a renamed operation leaves nothing behind. That
+covers a run that stops splitting altogether: a spec that loses its last
+operation gets the single file back, and the directory goes with the modules it
+held. Before it writes anything, a run reads every file already in the directory
+and stops if it finds one that is not its own, which is any file without the
+generated header and any symbolic link. Nothing is written or deleted when a run
+stops that way, so a file that lands in the directory by mistake is never lost.
+
+Two configurations must not nest their outputs. An `output` of `generated/api.rs`
+owns all of `generated/api/`, so no other configuration may write inside it.
+
+The output path needs a `.rs` extension, because the directory is named after the
+file's stem.
+
 ## Read the file with `#[path]`
 
-The generated file opens with an inner attribute that turns off every lint that is
-about hand-written source. Declare the file as a module, and rustc applies that
-attribute to the file alone:
+The root file re-exports every module, so one declaration reads the whole tree
+and every generated name keeps the same path:
 
 ```rust,ignore
-#[path = "generated/api.rs"]
-pub mod api;
+#[path = "generated/restapi.rs"]
+pub mod restapi;
 ```
+
+`restapi::Api` and `restapi::ListBooksQuery` resolve as before, whichever file
+holds them.
+
+The generated files open with an inner attribute that turns off every lint that is
+about hand-written source. Declaring a file as a module makes rustc apply that
+attribute to the file alone.
 
 Do not use `include!`. It pastes the text into the module that calls it, and rustc
 rejects an inner attribute in a paste.
@@ -51,14 +100,15 @@ ignore = ["**/generated/**"]
 
 ## Gate the build with `--check`
 
-`--check` generates the code in memory and compares it with the output file. It
+`--check` generates the code in memory and compares it with the files on disk. It
 writes nothing.
 
-| Result                            | Exit code |
-| --------------------------------- | --------- |
-| The file holds the generated code | 0         |
-| The file holds different content  | 1         |
-| The file does not exist           | 1         |
+| Result                                          | Exit code |
+| ----------------------------------------------- | --------- |
+| Every file holds the generated code             | 0         |
+| A file holds different content                  | 1         |
+| A file does not exist                           | 1         |
+| An earlier run's file is there and now unneeded | 1         |
 
 A non-zero exit code stops the build, so a spec change with no regenerated
 output cannot merge.

@@ -600,6 +600,7 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// flat crate-root layout in which the server and client share one file and the
 /// same per-operation types alongside the component models.
 const COMBINED_FIXTURES: &[&str] = &[
+    "combined_keyword_operations",
     "combined_prelude_value_names",
     "combined_server_client",
     "combined_response_name_collision",
@@ -1274,6 +1275,78 @@ macro_rules! combined_generated_tests {
 }
 
 combined_generated_tests!(
+    combined_keyword_operations,
+    combined_prelude_value_names,
+    combined_server_client,
+    combined_response_name_collision,
+    combined_x_rust_derive,
+);
+
+/// The prefix a package golden's root file and companion directory carry, which
+/// keeps them apart from the flat golden of the same fixture.
+const PACKAGE_PREFIX: &str = "package_";
+
+/// Regenerate `stem`'s combined output as a package and assert every file
+/// matches its committed counterpart.
+///
+/// The flat goldens cover what the emitter produces. These cover how it splits
+/// that across files: the module declarations, the imports each file needs, and
+/// the visibility a name has to carry to reach the module that uses it. Only
+/// `tests/generated.rs`, which mounts the root file, can prove the tree compiles.
+///
+/// The comparison goes through the same [`oapi_codegen::check_package`] a
+/// consumer's `--check` runs, so a leftover file from an earlier shape of the
+/// output fails here too.
+///
+/// Refresh the committed files after an intentional change with
+/// `make update-generated`
+/// (`UPDATE_GENERATED=1 cargo test -p oapi-codegen --test coverage`).
+fn assert_package_generated_matches(stem: &str) {
+    let dir = tests_dir();
+    let fixture = dir.join("fixtures").join(format!("{stem}.yaml"));
+    let root = dir.join("generated").join(format!("{PACKAGE_PREFIX}{stem}.rs"));
+
+    let package = oapi_codegen::generate_package(&fixture, &combined_config_for(stem), &root).unwrap_or_else(|err| {
+        panic!("generating package `{stem}` failed: {err}");
+    });
+
+    if std::env::var_os("UPDATE_GENERATED").is_some() {
+        oapi_codegen::write_package(&root, &package).unwrap_or_else(|err| {
+            panic!("writing package `{stem}` failed: {err}");
+        });
+        return;
+    }
+
+    let drift = oapi_codegen::check_package(&root, &package).unwrap_or_else(|err| {
+        panic!("comparing package `{stem}` failed (run `make update-generated`): {err}");
+    });
+    assert_eq!(
+        drift,
+        oapi_codegen::PackageDrift::None,
+        "generated package for `{stem}` drifted from tests/generated/{PACKAGE_PREFIX}{stem}/; \
+         run `make update-generated` if this change is intentional",
+    );
+}
+
+/// Emit one `#[test]` per combined fixture for the package layout.
+///
+/// The tests live in their own module, so each keeps the fixture's name without
+/// colliding with the flat test of the same name.
+macro_rules! package_generated_tests {
+    ($($stem:ident),+ $(,)?) => {
+        mod package_layout {
+            $(
+                #[test]
+                fn $stem() {
+                    super::assert_package_generated_matches(stringify!($stem));
+                }
+            )+
+        }
+    };
+}
+
+package_generated_tests!(
+    combined_keyword_operations,
     combined_prelude_value_names,
     combined_server_client,
     combined_response_name_collision,

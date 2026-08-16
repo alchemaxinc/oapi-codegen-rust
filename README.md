@@ -13,7 +13,7 @@ From this repository's root (e.g., after cloning), try the included bookstore ex
 
 ```console
 $ oapi-codegen --config-file examples/bookstore/oapi-codegen-server.yaml examples/bookstore/openapi.yaml
-✓ wrote generated/restapi.rs
+✓ wrote generated/restapi.rs and 15 modules beside it
   note: add the crates the generated code references to Cargo.toml:
       serde = { version = "1.0.229", features = ["derive"] }
       serde_json = "1.0.151"

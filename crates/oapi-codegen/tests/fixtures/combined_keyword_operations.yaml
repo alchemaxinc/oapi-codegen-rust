@@ -1,0 +1,70 @@
+openapi: 3.0.3
+info:
+  title: Keyword Operations
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+# Operation IDs that lower onto Rust keywords. Each one names a module in the
+# split layout, so the module item has to carry the identifier's raw form
+# (`r#type`) while its file takes a name no directory module can claim.
+paths:
+  /type:
+    get:
+      operationId: type
+      responses:
+        "200":
+          description: A widget
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+  /mod:
+    get:
+      operationId: mod
+      responses:
+        "200":
+          description: A widget
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+  /self:
+    get:
+      operationId: self
+      responses:
+        "200":
+          description: A widget
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+  /match/{id}:
+    post:
+      operationId: match
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Widget"
+      responses:
+        "200":
+          description: A widget
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+components:
+  schemas:
+    Widget:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
