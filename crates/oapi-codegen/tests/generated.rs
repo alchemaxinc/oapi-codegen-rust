@@ -30,6 +30,8 @@ mod generated {
     pub mod client_negotiated_response;
     #[path = "client_widgets.rs"]
     pub mod client_widgets;
+    #[path = "combined_keyword_operations.rs"]
+    pub mod combined_keyword_operations;
     #[path = "combined_prelude_value_names.rs"]
     pub mod combined_prelude_value_names;
     #[path = "combined_response_name_collision.rs"]
@@ -140,6 +142,22 @@ mod generated {
     pub mod type_name_collisions;
     #[path = "value_constraints.rs"]
     pub mod value_constraints;
+
+    // The same fixtures emitted as a module tree. Mounting the root file pulls
+    // in every child, which is what proves the split output resolves: the
+    // `#[path]` declarations find their files, each module imports the names it
+    // uses, and every name a sibling module needs is visible enough to reach it.
+    // The flat modules above cannot show any of that.
+    #[path = "package_combined_keyword_operations.rs"]
+    pub mod package_combined_keyword_operations;
+    #[path = "package_combined_prelude_value_names.rs"]
+    pub mod package_combined_prelude_value_names;
+    #[path = "package_combined_response_name_collision.rs"]
+    pub mod package_combined_response_name_collision;
+    #[path = "package_combined_server_client.rs"]
+    pub mod package_combined_server_client;
+    #[path = "package_combined_x_rust_derive.rs"]
+    pub mod package_combined_x_rust_derive;
 }
 
 /// Stand-in for the foreign types the `ext_x_rust_derive` fixture points its

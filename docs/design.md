@@ -75,10 +75,19 @@ Supported keys:
 
 `x-go-*` keys are accepted but ignored.
 
-## Combined output at the crate root
+## Combined output in one namespace
 
 Generated models, per-operation types, server interfaces, and client interfaces
-are emitted at the crate root in one file.
+are split across a module tree, and the root file re-exports every module. One
+namespace therefore still holds them all, and a consumer names any of them
+through the root.
+
+The split follows the concerns the generator already has, not the shape of the
+document. Each operation gets a file per concern it touches, so a spec change
+that adds an operation adds files instead of growing one. A `mod.rs` is never
+written: every child is declared with an explicit `#[path]`, which resolves the
+same whether the root is mounted with `#[path]` or as a plain `mod`, and which
+leaves no directory module to clash with the root file.
 
 If a generated per-operation type name conflicts with a component model name,
 generation fails. Use `x-rust-name` or `response-type-suffix` to resolve it.
@@ -164,12 +173,13 @@ of them at once.
 
 ## One namespace holds every generated type
 
-The flat layout puts every generated type at the crate root. Four kinds of type
-share one namespace there. These are the component models, the inline schemas that
-the generator hoists, the per-operation types, and the generator interfaces (`Api`,
-`Client`, and `ClientError`). Any two of them that take one name emit two items with
-that name, which does not compile. One check therefore holds one namespace and
-reports every name that two items take. Three cases reach it.
+Every generated type is re-exported from the root file, so one namespace holds
+them all. Four kinds of type share it. These are the component models, the inline
+schemas that the generator hoists, the per-operation types, and the generator
+interfaces (`Api`, `Client`, and `ClientError`). Any two of them that take one
+name emit two items with that name, which does not compile. One check therefore
+holds one namespace and reports every name that two items take. Three cases reach
+it.
 
 A hoisted inline schema takes its name from the property path that encloses it. The
 inline `bar` property of schema `Foo` gives `FooBar`, which is also the name that a

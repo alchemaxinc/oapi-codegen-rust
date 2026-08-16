@@ -27,11 +27,11 @@ Keys mirror [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen)'s
 YAML config; unknown keys are ignored, so an existing Go config can be reused
 as-is. Only the subset below is interpreted.
 
-| Key              | Type   | Purpose                                                                |
-| ---------------- | ------ | ---------------------------------------------------------------------- |
-| `package`        | string | Target module name (informational).                                    |
-| `output`         | path   | Output file path.                                                      |
-| `import-mapping` | map    | Map referenced spec files to external Rust modules (multi-file specs). |
+| Key              | Type   | Purpose                                                                                                                                          |
+| ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `package`        | string | Target module name (informational).                                                                                                              |
+| `output`         | path   | Root output file, ending in `.rs`. A run with operations adds a directory named after its stem beside it, and owns everything in that directory. |
+| `import-mapping` | map    | Map referenced spec files to external Rust modules (multi-file specs).                                                                           |
 
 ### `generate`
 
@@ -44,8 +44,8 @@ as-is. Only the subset below is interpreted.
 | `embedded-spec`   | _Not implemented_ — rejected if set.                   |
 
 Setting both `std-http-server` and `client` emits models, per-operation types,
-and both interfaces flat at the crate root, so the server and client share one
-file and the same response types.
+and both interfaces into one module tree, so the server and client share the same
+response types. See [Build workflow](workflow.md) for the files a run writes.
 
 ## Dependencies
 

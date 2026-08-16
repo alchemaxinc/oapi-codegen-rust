@@ -39,9 +39,47 @@ pub(crate) const CLIENT_STRUCT_NAME: &str = "Client";
 /// component schema cannot collide with it.
 pub(crate) const CLIENT_ERROR_NAME: &str = "ClientError";
 
+/// Name of the percent-encoding set the client applies to path parameters. A
+/// package puts it beside the `Client` struct, and each operation module that
+/// has a path parameter imports it by this name.
+pub(crate) const ENCODE_SET_NAME: &str = "PATH_PARAM_ENCODE_SET";
+
 impl crate::emit::ClientEmitter for ReqwestClient {
     fn emit(&self, service: &Service) -> Result<Vec<TokenStream>> {
-        return client_items(service);
+        return Ok(client_items(service)?.into_flat());
+    }
+}
+
+/// The client items, split into the shared infrastructure and the per-operation
+/// request methods, so a package can put each method in its own file.
+pub(crate) struct ClientItems {
+    /// The `ClientError` enum and its trait impls.
+    pub error: TokenStream,
+    /// The percent-encoding set, emitted only when some operation has a path
+    /// parameter.
+    pub encode_set: Option<TokenStream>,
+    /// The `Client` struct definition.
+    pub client_struct: TokenStream,
+    /// The constructors and credential setters, which belong to every operation.
+    pub shared_methods: Vec<TokenStream>,
+    /// One request method per operation, in `service.operations` order.
+    pub operation_methods: Vec<TokenStream>,
+}
+
+impl ClientItems {
+    /// Flatten into the single-file item order, with every method in one
+    /// inherent `impl Client` block.
+    pub fn into_flat(self) -> Vec<TokenStream> {
+        let mut items = vec![self.error];
+        items.extend(self.encode_set);
+        items.push(self.client_struct);
+        let methods = self.shared_methods.into_iter().chain(self.operation_methods);
+        items.push(quote! {
+            impl Client {
+                #(#methods)*
+            }
+        });
+        return items;
     }
 }
 
@@ -78,22 +116,26 @@ fn ensure_supported(operation: &Operation, schemes: &[SecurityScheme]) -> Result
 
 /// Emit the client: the `ClientError` type, per-operation input/response types,
 /// the `Client` struct, and its inherent `impl` with one method per operation.
-fn client_items(service: &Service) -> Result<Vec<TokenStream>> {
+pub(crate) fn client_items(service: &Service) -> Result<ClientItems> {
     for operation in &service.operations {
         ensure_supported(operation, &service.security_schemes)?;
     }
 
-    let mut items = vec![client_error()];
-    if service
+    let has_path_params = service
         .operations
         .iter()
-        .any(|operation| return !operation.path_params.is_empty())
-    {
-        items.push(path_param_encode_set());
+        .any(|operation| return !operation.path_params.is_empty());
+    let mut operation_methods = Vec::with_capacity(service.operations.len());
+    for operation in &service.operations {
+        operation_methods.push(emit_method(operation, &service.security_schemes)?);
     }
-    items.push(client_struct(&service.security_schemes));
-    items.push(emit_client_impl(service)?);
-    return Ok(items);
+    return Ok(ClientItems {
+        error: client_error(),
+        encode_set: has_path_params.then(path_param_encode_set),
+        client_struct: client_struct(&service.security_schemes),
+        shared_methods: shared_methods(&service.security_schemes),
+        operation_methods,
+    });
 }
 
 /// Emit the `ClientError` type shared by every client method.
@@ -185,12 +227,11 @@ fn client_struct(schemes: &[SecurityScheme]) -> TokenStream {
     };
 }
 
-/// Emit the `impl Client` block: the constructors, the `with_<scheme>` credential
-/// setters, then one method per operation.
-fn emit_client_impl(service: &Service) -> Result<TokenStream> {
-    let schemes = &service.security_schemes;
+/// The `impl Client` methods that belong to no single operation: the
+/// constructors and the `with_<scheme>` credential setters.
+fn shared_methods(schemes: &[SecurityScheme]) -> Vec<TokenStream> {
     let inits = credential_inits(schemes);
-    let mut methods = Vec::with_capacity(service.operations.len() + schemes.len() + 2);
+    let mut methods = Vec::with_capacity(schemes.len().saturating_add(2));
     methods.push(quote! {
         /// Build a client targeting `base_url` with a default blocking
         /// `reqwest::blocking::Client`.
@@ -206,17 +247,8 @@ fn emit_client_impl(service: &Service) -> Result<TokenStream> {
             return Self { base_url: base_url.into(), http, #(#inits,)* };
         }
     });
-    for setter in credential_setters(schemes) {
-        methods.push(setter);
-    }
-    for operation in &service.operations {
-        methods.push(emit_method(operation, schemes)?);
-    }
-    return Ok(quote! {
-        impl Client {
-            #(#methods)*
-        }
-    });
+    methods.extend(credential_setters(schemes));
+    return methods;
 }
 
 /// The credential fields added to the `Client` struct, one per supported scheme.
