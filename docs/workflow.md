@@ -5,24 +5,34 @@ continuous integration confirm that it matches the spec.
 
 ## Commit the generated files
 
-A run that generates operations writes a small module tree:
+A run that generates operations writes a small module tree. This is the widest
+it gets:
 
 ```text
 generated/restapi.rs            the file you mount
 generated/restapi/
-    models.rs                   the component schemas
-    server_urls.rs              the constants for the spec's servers
     operations.rs
     operations/<operation>.rs   one file per operation: inputs and responses
+    models.rs                   the component schemas
+    server_urls.rs              the constants for the spec's servers
     server.rs                   the `Api` trait and the router
     server/<operation>.rs       one file per operation: extractors and handler
     client.rs                   `Client`, `ClientError`, and the constructors
     client/<operation>.rs       one file per operation: the request method
 ```
 
-The directory takes its name from the output file. It holds only the modules the
-run produces, so a client-only run writes no `server.rs`. A run that generates
-models but no operations has nothing to split and writes the single file alone.
+The directory takes its name from the output file, and holds only the modules
+the run has content for. Expect fewer than the tree above:
+
+- `operations.rs` and the files under it come with the operations themselves.
+- `models.rs` needs a component schema to emit. A spec with none, and a spec
+  whose schemas all come from `import-mapping`, both get no `models.rs`.
+- `server_urls.rs` needs `generate.server-urls` and a `servers` entry.
+- `server.rs` needs `generate.std-http-server`, and `client.rs` needs
+  `generate.client`. A client-only run writes no `server.rs`.
+
+A run that generates models but no operations has nothing to split and writes
+the single file alone.
 
 Put all of it in version control next to the hand-written code that uses it.
 
@@ -32,11 +42,13 @@ OpenAPI document. A reviewer sees a change to a public type as a change to a
 committed file.
 
 The generator owns the directory. Each run deletes the generated files in it that
-the run no longer produces, so a renamed operation leaves nothing behind. Before
-it writes anything, a run reads every file already in the directory and stops if
-it finds one that is not its own, which is any file without the generated header
-and any symbolic link. Nothing is written or deleted when a run stops that way,
-so a file that lands in the directory by mistake is never lost.
+the run no longer produces, so a renamed operation leaves nothing behind. That
+covers a run that stops splitting altogether: a spec that loses its last
+operation gets the single file back, and the directory goes with the modules it
+held. Before it writes anything, a run reads every file already in the directory
+and stops if it finds one that is not its own, which is any file without the
+generated header and any symbolic link. Nothing is written or deleted when a run
+stops that way, so a file that lands in the directory by mistake is never lost.
 
 Two configurations must not nest their outputs. An `output` of `generated/api.rs`
 owns all of `generated/api/`, so no other configuration may write inside it.

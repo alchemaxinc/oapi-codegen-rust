@@ -226,10 +226,13 @@ pub(crate) fn companion_of(output_path: &Path) -> Result<PathBuf> {
 /// file the generator would replace or delete is inspected first, so a run that
 /// meets somebody else's work stops before touching anything.
 fn audit(output_path: &Path, package: &GeneratedPackage) -> Result<Vec<PathBuf>> {
-    if package.children().is_empty() {
-        return Ok(Vec::new());
-    }
-    let directory = companion_of(output_path)?;
+    // A run without children still has to clear the companion directory an
+    // earlier run left behind, so only a path that cannot have one is skipped.
+    let directory = match companion_of(output_path) {
+        Ok(directory) => directory,
+        Err(_) if package.children().is_empty() => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
     let parent = output_path.parent().unwrap_or_else(|| return Path::new(""));
     for child in package.children() {
         let path = child.path();
@@ -266,7 +269,6 @@ fn audit(output_path: &Path, package: &GeneratedPackage) -> Result<Vec<PathBuf>>
             });
         }
     }
-    let parent = output_path.parent().unwrap_or_else(|| return Path::new(""));
     let expected: Vec<PathBuf> = package
         .children()
         .iter()
