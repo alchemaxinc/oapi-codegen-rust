@@ -48,6 +48,10 @@ Write commit messages in the
 [Conventional Commits](https://www.conventionalcommits.org) form. `commitlint`
 checks them, and each line has a limit of 150 characters.
 
+Dependency updates use the `deps` scope. Cargo updates use `build(deps)`, and
+GitHub Actions updates use `ci(deps)`. semantic-release groups these commits
+under `Dependency Updates`.
+
 ## Bug reports
 
 Give the smallest specification that shows the problem. This tool reads a

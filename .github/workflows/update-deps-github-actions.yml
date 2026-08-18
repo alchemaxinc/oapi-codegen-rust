@@ -26,5 +26,5 @@ jobs:
           merge-method: "squash"
           file-glob: ".github/**/*.yml"
           branch-prefix: "update-actions"
-          pr-title: "chore(ci): update github actions"
-          commit-message: "chore(ci): update github actions"
+          pr-title: "ci(deps): update github actions"
+          commit-message: "ci(deps): update github actions"
