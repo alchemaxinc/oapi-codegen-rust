@@ -108,9 +108,8 @@ pub struct Field {
 /// One direction of an exchange.
 ///
 /// A request travels from the client to the server. A response travels back.
-/// Which serde trait that needs depends on the side, so the direction is kept
-/// separate from the trait: a server deserializes a request and serializes a
-/// response, and a client does the opposite.
+/// The direction does not name a serde trait, because a server deserializes a
+/// request and serializes a response, and a client does the opposite.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Direction {
@@ -122,20 +121,18 @@ pub enum Direction {
 
 /// Which direction of an exchange carries a property.
 ///
-/// OpenAPI marks a property `readOnly` when a response may carry it and a
-/// request must not, and `writeOnly` for the opposite. The mark names a
-/// direction and not a value, so one struct cannot state both. [`Access`]
-/// records the mark, and [`crate::lower::direction`] builds the two shapes a
-/// marked model needs.
+/// `readOnly` gives [`Access::ReadOnly`] and `writeOnly` gives
+/// [`Access::WriteOnly`]. [`crate::lower::direction`] then drops a property that
+/// the direction of a shape does not carry.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Access {
     /// Both directions carry the property.
     #[default]
     ReadWrite,
-    /// `readOnly: true`: a response carries the property, a request must not.
+    /// A response carries the property, and a request must not.
     ReadOnly,
-    /// `writeOnly: true`: a request carries the property, a response must not.
+    /// A request carries the property, and a response must not.
     WriteOnly,
 }
 

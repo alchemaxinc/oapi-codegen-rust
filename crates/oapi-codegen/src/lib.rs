@@ -101,9 +101,8 @@ fn lower_spec(spec_path: &Path, config: &Config) -> Result<Lowered> {
             .unwrap_or(crate::config::DEFAULT_RESPONSE_SUFFIX);
         let mut service = lower::generate_service(&spec, &config.import_mapping, response_type_suffix)?;
         lower::rewrite_service(&mut service, names.renames());
-        // Before pruning, so a shape no operation reaches is dropped with the
-        // unused models, and before the name checks, so a shape's name is
-        // checked like any other.
+        // Runs before the prune pass, which drops a shape no operation reaches,
+        // and before the name checks, which then see the projected names.
         lower::split_by_direction(&mut module, Some(&mut service));
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);

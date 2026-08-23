@@ -11,7 +11,7 @@ mod operation;
 mod package;
 mod reqwest;
 mod servers;
-mod usage;
+pub(crate) mod usage;
 
 use std::collections::HashMap;
 
@@ -301,8 +301,8 @@ fn render_body(items: &[TokenStream]) -> Result<String> {
 
 /// Render a doc attribute, or nothing when there is no documentation.
 ///
-/// The text is split on its line breaks, so a multi-line `description` prints as
-/// a run of `///` lines rather than one `/** */` block.
+/// This splits the text on its line breaks, so a multi-line `description` prints
+/// as a run of `///` lines and not one `/** */` block.
 pub(crate) fn doc_attr(doc: &Option<String>) -> TokenStream {
     let tokens = match doc {
         Some(text) => doc_lines(std::slice::from_ref(text)),

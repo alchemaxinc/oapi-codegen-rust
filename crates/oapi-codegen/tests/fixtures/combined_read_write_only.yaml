@@ -30,6 +30,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AccountPage"
+  /accounts/search:
+    post:
+      operationId: searchAccounts
+      summary: Search accounts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountFilter"
+      responses:
+        "204":
+          description: The search was accepted.
+  /audit:
+    get:
+      operationId: listAudit
+      summary: List the audit log.
+      responses:
+        "200":
+          description: The audit entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEntry"
   /accounts/{accountId}/avatar:
     put:
       operationId: uploadAvatar
@@ -75,6 +101,29 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Account"
+    AccountFilter:
+      description: A request-only model that marks a property `readOnly`.
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+        matched:
+          description: Only a response could carry this, so the request drops it.
+          type: integer
+          format: int32
+          readOnly: true
+    AuditEntry:
+      description: A response-only model that marks a property `writeOnly`.
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+        token:
+          description: Only a request could carry this, so the response drops it.
+          type: string
+          writeOnly: true
     Avatar:
       description: A multipart body, which only a request carries.
       type: object

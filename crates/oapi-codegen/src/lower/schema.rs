@@ -332,9 +332,8 @@ impl Mapper<'_> {
         let rename = crate::naming::rename_for(wire, &ident);
         let access = match prop {
             ReferenceOr::Item(schema) => access_of(&schema.schema_data, &at)?,
-            // A `$ref` property carries no sibling keyword in OpenAPI 3.0, so the
-            // mark can only sit on the target. The checks below read the target
-            // the same way.
+            // A `$ref` property carries no sibling keyword in OpenAPI 3.0, so
+            // the mark can only sit on the target.
             ReferenceOr::Reference { reference } => match self.spec.resolve(reference) {
                 Ok(target) => access_of(&target.schema_data, &at)?,
                 Err(_) => Access::ReadWrite,
@@ -1078,9 +1077,8 @@ fn verbatim_type(data: &SchemaData, verbatim: &str, path: &str) -> Result<RustTy
 
 /// Read `readOnly`/`writeOnly` into the direction they name.
 ///
-/// A property that sets both states that no direction may carry it, which the
-/// OpenAPI specification calls invalid. The generator rejects it rather than
-/// pick one of the two marks.
+/// A property that sets both marks states that no direction can carry it. The
+/// generator rejects that rather than pick one of the two marks.
 pub(crate) fn access_of(data: &SchemaData, at: &str) -> Result<Access> {
     return match (data.read_only, data.write_only) {
         (true, true) => Err(Error::UnsupportedSchema {

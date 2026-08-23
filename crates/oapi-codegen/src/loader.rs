@@ -445,8 +445,8 @@ impl Spec {
     /// schemas kept it. That builds, and it carries the wrong type.
     ///
     /// A schema the direction pass splits is an error for the same reason. The
-    /// other run emits two names there and this one cannot tell which of the two
-    /// an `import-mapping` reference means.
+    /// other run emits two names there, and this one cannot tell which of the
+    /// two an `import-mapping` reference means.
     pub fn external_schema_name(&self, file: &str, name: &str, reference: &str) -> Result<String> {
         let entry = self.component_schema(Some(file), reference, name)?;
         let chosen = external_name_of(&entry, name)?;
@@ -488,11 +488,9 @@ impl Spec {
 ///
 /// A schema qualifies when it marks anything inside it `readOnly` or
 /// `writeOnly`, or when it reaches such a schema through a same-document `$ref`.
-/// The reference walk runs from a marked schema up to the schemas naming it,
-/// because a holder's field type is what changes per direction.
 ///
-/// This reads the document alone. Both runs that compose a crate must reach the
-/// same verdict for the same file, and only one of the two holds the operations.
+/// This reads the document alone, because both runs that compose a crate must
+/// reach the same verdict. Only one of the two holds the operations.
 fn direction_split_schemas(doc: &OpenAPI) -> std::collections::BTreeSet<String> {
     let mut marked = std::collections::BTreeSet::new();
     let Some(components) = doc.components.as_ref() else {

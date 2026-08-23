@@ -1,39 +1,27 @@
-//! Splitting a model into the request shape and the response shape that its
-//! `readOnly` and `writeOnly` properties describe.
+//! The request shape and the response shape that `readOnly` and `writeOnly`
+//! describe.
 //!
-//! OpenAPI marks a property `readOnly` when a response may carry it and a
-//! request must not, and `writeOnly` for the opposite. The mark names a
-//! direction, not a value, so one struct cannot state both: the same `Order`
-//! type reaches a request body and a response body, and a serde attribute that
-//! is right for one is wrong for the other. A server deserializes a request and
-//! serializes a response, and a client does the reverse, so an attribute cannot
-//! even be chosen per target.
+//! OpenAPI marks a property `readOnly` when a response carries it and a request
+//! must not, and `writeOnly` for the opposite. The mark names a direction, not a
+//! value, so one struct cannot state both.
 //!
-//! So a marked model becomes two models. `Order` with a `readOnly` `id` emits
-//! `OrderRequest`, which has no `id`, and `OrderResponse`, which has one. Each
-//! API position then names the shape its direction carries: a request body, a
-//! parameter and a multipart part take the request shape, and a response body
-//! and a response header take the response shape.
+//! Each model therefore drops the properties that its direction does not carry.
+//! A model that one direction reaches keeps its name. A model that both
+//! directions reach becomes `<Name>Request` and `<Name>Response`, and so does
+//! every model that both directions reach and that references it.
 //!
-//! The split spreads along model references. A model holding a marked model
-//! cannot keep one name either, because its field type differs per direction,
-//! so `Envelope { order: Order }` becomes `EnvelopeRequest { order: OrderRequest }`
-//! and `EnvelopeResponse { order: OrderResponse }`. A model that no mark reaches
-//! keeps its name, so a document that uses neither keyword generates exactly
-//! what it generated before.
-//!
-//! The split reads the marks only. It does not read how the operations use a
-//! model, so the two names a schema takes stay the same when an operation is
-//! added or removed. A shape that no operation reaches is then dropped by
-//! [`crate::lower::prune`], the same way any unused model is.
+//! `docs/design.md` states the rest of the reasoning.
 
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 
+use crate::emit::usage;
 use crate::ir::Alias;
 use crate::ir::Direction;
 use crate::ir::Enum;
 use crate::ir::EnumKind;
+use crate::ir::Field;
 use crate::ir::Item;
 use crate::ir::Module;
 use crate::ir::RequestPayload;
@@ -51,33 +39,44 @@ pub const REQUEST_SUFFIX: &str = "Request";
 /// The suffix the response shape of a split model takes.
 pub const RESPONSE_SUFFIX: &str = "Response";
 
-/// Replace every model a direction mark reaches with its request shape and its
-/// response shape, and point each API position at the shape its direction
-/// carries.
+/// How one direction-sensitive model is projected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Projection {
+    /// Both directions reach the model, so it becomes two items with suffixed
+    /// names.
+    Split,
+    /// One direction reaches the model, so it keeps its name and drops only the
+    /// properties that direction does not carry.
+    Single(Direction),
+}
+
+/// Project every model a direction mark reaches onto the direction that carries
+/// it, and point each API position at the shape it takes.
 ///
 /// `service` is `None` for a models-only run, which has no operation to give a
-/// direction. Both shapes are emitted there, because a models crate is consumed
-/// by a run that does know the direction.
+/// direction. The pass splits every marked model there, because the run that
+/// consumes those models does know the direction.
 ///
-/// A document that marks no property leaves both the module and the service
-/// untouched.
+/// The pass leaves a document that marks no property untouched.
 pub fn split_by_direction(module: &mut Module, service: Option<&mut Service>) {
-    let split = split_models(module);
-    if split.is_empty() {
+    let projections = projections(module, service.as_deref());
+    if projections.is_empty() {
         return;
     }
-    let mut items = Vec::with_capacity(module.items.len() + split.len());
+    let mut items = Vec::with_capacity(module.items.len() + projections.len());
     for item in module.items.drain(..) {
-        if split.contains(item.name()) {
-            items.push(project_item(&item, Direction::Request, &split));
-            items.push(project_item(&item, Direction::Response, &split));
-        } else {
-            items.push(item);
+        match projections.get(item.name()) {
+            Some(Projection::Split) => {
+                items.push(project_item(&item, Direction::Request, &projections));
+                items.push(project_item(&item, Direction::Response, &projections));
+            }
+            Some(Projection::Single(direction)) => items.push(project_item(&item, *direction, &projections)),
+            None => items.push(item),
         }
     }
     module.items = items;
     if let Some(service) = service {
-        project_service(service, &split);
+        project_service(service, &projections);
     }
 }
 
@@ -90,12 +89,37 @@ pub fn projected_name(name: &str, direction: Direction) -> RustIdent {
     return to_ident(&format!("{name} {suffix}"), Case::Pascal);
 }
 
-/// The models that must be split: the ones marking a property, plus every model
-/// that reaches one of those through a field, a variant, or an alias target.
+/// How each direction-sensitive model is projected, keyed by its logical name.
+fn projections(module: &Module, service: Option<&Service>) -> BTreeMap<String, Projection> {
+    let sensitive = sensitive_models(module);
+    let Some(service) = service else {
+        return sensitive
+            .into_iter()
+            .map(|name| return (name, Projection::Split))
+            .collect();
+    };
+
+    let usage = usage::direction_usage(module, service);
+    return sensitive
+        .into_iter()
+        .map(|name| {
+            let used = usage.get(&name).copied().unwrap_or_default();
+            let projection = match (used.request, used.response) {
+                (true, false) => Projection::Single(Direction::Request),
+                (false, true) => Projection::Single(Direction::Response),
+                _ => Projection::Split,
+            };
+            return (name, projection);
+        })
+        .collect();
+}
+
+/// The models a direction mark reaches: the ones that mark a property, and
+/// every model that references one of those.
 ///
-/// The walk runs up the reference graph, from a marked model to the models
-/// naming it, because a holder's field type is what changes per direction.
-fn split_models(module: &Module) -> BTreeSet<String> {
+/// The walk starts at a marked model and follows the reference graph in
+/// reverse. The field type of a holder is what changes per direction.
+fn sensitive_models(module: &Module) -> BTreeSet<String> {
     let mut marked: BTreeSet<String> = module
         .items
         .iter()
@@ -107,9 +131,9 @@ fn split_models(module: &Module) -> BTreeSet<String> {
     }
 
     let mut referrers: HashMap<String, Vec<String>> = HashMap::new();
-    for item in &module.items {
-        for target in item_references(item) {
-            referrers.entry(target).or_default().push(item.name().to_owned());
+    for (name, targets) in usage::adjacency(module) {
+        for target in targets {
+            referrers.entry(target).or_default().push(name.clone());
         }
     }
 
@@ -137,72 +161,46 @@ fn marks_a_direction(item: &Item) -> bool {
     });
 }
 
-/// The names of the generated models an item references, canonicalized the way
-/// [`Item::name`] spells them.
-fn item_references(item: &Item) -> Vec<String> {
-    let mut names = Vec::new();
-    match item {
-        Item::Struct(strukt) => {
-            for field in &strukt.fields {
-                collect_named(&field.ty, &mut names);
-            }
-            if let Some(additional) = &strukt.additional_properties {
-                collect_named(additional, &mut names);
-            }
-        }
-        Item::Enum(enom) => {
-            if let EnumKind::Union(variants) = &enom.kind {
-                for variant in variants {
-                    collect_named(&variant.ty, &mut names);
-                }
-            }
-        }
-        Item::Alias(alias) => collect_named(&alias.ty, &mut names),
-    }
-    return names;
-}
-
-/// Collect the model a type expression names, looking through the wrappers.
+/// Build the shape of an item for one direction.
 ///
-/// A [`RustType::Named`] still holds the schema name the document wrote, so it
-/// is run through [`to_ident`] to match the item names the graph is keyed by.
-fn collect_named(ty: &RustType, out: &mut Vec<String>) {
-    match ty {
-        RustType::Named(name) => out.push(to_ident(name, Case::Pascal).logical().to_owned()),
-        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) | RustType::Boxed(inner) => {
-            collect_named(inner, out);
+/// The name takes the suffix of the direction only when both directions reach
+/// the model. The shape drops the properties that the other direction carries,
+/// and points every reference to a split model at the shape of that model.
+fn project_item(item: &Item, direction: Direction, projections: &BTreeMap<String, Projection>) -> Item {
+    let split = matches!(projections.get(item.name()), Some(Projection::Split));
+    let name_of = |name: &RustIdent| {
+        if split {
+            return projected_name(name.logical(), direction);
         }
-        _ => {}
-    }
-}
-
-/// Build one direction's shape of an item: its name takes the direction's
-/// suffix, the properties the other direction carries are dropped, and every
-/// reference to a split model points at that model's shape.
-fn project_item(item: &Item, direction: Direction, split: &BTreeSet<String>) -> Item {
+        return name.clone();
+    };
     return match item {
-        Item::Struct(strukt) => Item::Struct(Struct {
-            name: projected_name(strukt.name.logical(), direction),
-            doc: projected_doc(&strukt.doc, strukt.name.logical(), direction),
-            fields: strukt
+        Item::Struct(strukt) => {
+            let fields: Vec<Field> = strukt
                 .fields
                 .iter()
                 .filter(|field| return field.access.carried_by(direction))
                 .map(|field| {
                     let mut projected = field.clone();
-                    projected.ty = project_type(&field.ty, direction, split);
+                    projected.ty = project_type(&field.ty, direction, projections);
                     return projected;
                 })
-                .collect(),
-            additional_properties: strukt
-                .additional_properties
-                .as_ref()
-                .map(|ty| return project_type(ty, direction, split)),
-            ..strukt.clone()
-        }),
+                .collect();
+            let dropped = fields.len() < strukt.fields.len();
+            Item::Struct(Struct {
+                name: name_of(&strukt.name),
+                doc: projected_doc(&strukt.doc, strukt.name.logical(), direction, split, dropped),
+                fields,
+                additional_properties: strukt
+                    .additional_properties
+                    .as_ref()
+                    .map(|ty| return project_type(ty, direction, projections)),
+                ..strukt.clone()
+            })
+        }
         Item::Enum(enom) => Item::Enum(Enum {
-            name: projected_name(enom.name.logical(), direction),
-            doc: projected_doc(&enom.doc, enom.name.logical(), direction),
+            name: name_of(&enom.name),
+            doc: projected_doc(&enom.doc, enom.name.logical(), direction, split, false),
             kind: match &enom.kind {
                 EnumKind::Union(variants) => EnumKind::Union(
                     variants
@@ -210,7 +208,7 @@ fn project_item(item: &Item, direction: Direction, split: &BTreeSet<String>) -> 
                         .map(|variant| {
                             return UnionVariant {
                                 name: variant.name.clone(),
-                                ty: project_type(&variant.ty, direction, split),
+                                ty: project_type(&variant.ty, direction, projections),
                             };
                         })
                         .collect(),
@@ -220,23 +218,35 @@ fn project_item(item: &Item, direction: Direction, split: &BTreeSet<String>) -> 
             ..enom.clone()
         }),
         Item::Alias(alias) => Item::Alias(Alias {
-            name: projected_name(alias.name.logical(), direction),
-            doc: projected_doc(&alias.doc, alias.name.logical(), direction),
-            ty: project_type(&alias.ty, direction, split),
+            name: name_of(&alias.name),
+            doc: projected_doc(&alias.doc, alias.name.logical(), direction, split, false),
+            ty: project_type(&alias.ty, direction, projections),
             ..alias.clone()
         }),
     };
 }
 
-/// Add a line naming the direction a shape carries, after whatever the schema
-/// `description` already says.
+/// Add a line about the direction, after the schema `description`.
 ///
-/// A reader meets two types where the document declares one schema, so the
-/// generated file states which of the two this is and where the name came from.
-fn projected_doc(doc: &Option<String>, name: &str, direction: Direction) -> Option<String> {
-    let note = match direction {
-        Direction::Request => format!("The request shape of `{name}`. A `readOnly` property is not part of it."),
-        Direction::Response => format!("The response shape of `{name}`. A `writeOnly` property is not part of it."),
+/// A split shape always takes the line, because a reader meets two types where
+/// the document declares one schema. A model that keeps its name takes the line
+/// only when the projection drops a property. So a mark that costs a shape
+/// nothing leaves the generated file as it was.
+fn projected_doc(doc: &Option<String>, name: &str, direction: Direction, split: bool, dropped: bool) -> Option<String> {
+    let note = match (split, direction) {
+        (true, Direction::Request) => {
+            format!("The request shape of `{name}`. A `readOnly` property is not part of it.")
+        }
+        (true, Direction::Response) => {
+            format!("The response shape of `{name}`. A `writeOnly` property is not part of it.")
+        }
+        (false, _) if !dropped => return doc.clone(),
+        (false, Direction::Request) => {
+            "Only a request carries this model, so a `readOnly` property is not part of it.".to_owned()
+        }
+        (false, Direction::Response) => {
+            "Only a response carries this model, so a `writeOnly` property is not part of it.".to_owned()
+        }
     };
     return Some(match doc {
         Some(text) => format!("{text}\n\n{note}"),
@@ -244,70 +254,74 @@ fn projected_doc(doc: &Option<String>, name: &str, direction: Direction) -> Opti
     });
 }
 
-/// Rewrite a type expression so a reference to a split model names that model's
-/// shape for `direction`. Anything else is left as it is.
-fn project_type(ty: &RustType, direction: Direction, split: &BTreeSet<String>) -> RustType {
+/// Rewrite a type expression so a reference to a split model names the shape of
+/// that model for `direction`. This leaves any other type as it is.
+fn project_type(ty: &RustType, direction: Direction, projections: &BTreeMap<String, Projection>) -> RustType {
     return match ty {
         RustType::Named(name) => {
+            // A `RustType::Named` holds the schema name the document wrote, so the
+            // lookup canonicalizes it. Without that, a reference to `order-item`
+            // would miss the `OrderItem` entry and keep the unsplit name.
             let canonical = to_ident(name, Case::Pascal);
-            if split.contains(canonical.logical()) {
-                RustType::Named(projected_name(canonical.logical(), direction).logical().to_owned())
-            } else {
-                ty.clone()
+            match projections.get(canonical.logical()) {
+                Some(Projection::Split) => {
+                    RustType::Named(projected_name(canonical.logical(), direction).logical().to_owned())
+                }
+                _ => ty.clone(),
             }
         }
-        RustType::Vec(inner) => RustType::Vec(Box::new(project_type(inner, direction, split))),
-        RustType::Map(inner) => RustType::Map(Box::new(project_type(inner, direction, split))),
-        RustType::Option(inner) => RustType::Option(Box::new(project_type(inner, direction, split))),
-        RustType::Boxed(inner) => RustType::Boxed(Box::new(project_type(inner, direction, split))),
+        RustType::Vec(inner) => RustType::Vec(Box::new(project_type(inner, direction, projections))),
+        RustType::Map(inner) => RustType::Map(Box::new(project_type(inner, direction, projections))),
+        RustType::Option(inner) => RustType::Option(Box::new(project_type(inner, direction, projections))),
+        RustType::Boxed(inner) => RustType::Boxed(Box::new(project_type(inner, direction, projections))),
         other => other.clone(),
     };
 }
 
 /// Point every API position at the shape of the direction it carries, and drop
 /// the multipart parts a request must not send.
-fn project_service(service: &mut Service, split: &BTreeSet<String>) {
+fn project_service(service: &mut Service, projections: &BTreeMap<String, Projection>) {
     for operation in &mut service.operations {
         for param in &mut operation.path_params {
-            param.ty = project_type(&param.ty, Direction::Request, split);
+            param.ty = project_type(&param.ty, Direction::Request, projections);
         }
         if let Some(query) = &mut operation.query {
-            project_struct(query, Direction::Request, split);
+            project_struct(query, Direction::Request, projections);
         }
         if let Some(headers) = &mut operation.headers {
             for param in &mut headers.params {
-                param.ty = project_type(&param.ty, Direction::Request, split);
+                param.ty = project_type(&param.ty, Direction::Request, projections);
             }
         }
         if let Some(cookies) = &mut operation.cookies {
             for param in &mut cookies.params {
-                param.ty = project_type(&param.ty, Direction::Request, split);
+                param.ty = project_type(&param.ty, Direction::Request, projections);
             }
         }
         if let Some(request) = &mut operation.request {
             match request {
-                RequestPayload::Single(body) => body.ty = project_type(&body.ty, Direction::Request, split),
+                RequestPayload::Single(body) => body.ty = project_type(&body.ty, Direction::Request, projections),
                 RequestPayload::Multipart(multipart) => {
                     for field in &mut multipart.fields {
-                        field.ty = project_type(&field.ty, Direction::Request, split);
+                        field.ty = project_type(&field.ty, Direction::Request, projections);
                     }
                 }
                 RequestPayload::Negotiated(negotiated) => {
                     for variant in &mut negotiated.variants {
-                        variant.body.ty = project_type(&variant.body.ty, Direction::Request, split);
+                        variant.body.ty = project_type(&variant.body.ty, Direction::Request, projections);
                     }
                 }
             }
         }
         for case in &mut operation.responses {
             for header in &mut case.headers {
-                header.ty = project_type(&header.ty, Direction::Response, split);
+                header.ty = project_type(&header.ty, Direction::Response, projections);
             }
             match &mut case.body {
-                Some(ResponseBody::Single(body)) => body.ty = project_type(&body.ty, Direction::Response, split),
+                Some(ResponseBody::Single(body)) => body.ty = project_type(&body.ty, Direction::Response, projections),
                 Some(ResponseBody::Negotiated(negotiated)) => {
                     for variant in &mut negotiated.variants {
-                        variant.body.ty = project_type(&variant.body.ty, Direction::Response, split);
+                        variant.body.ty = project_type(&variant.body.ty, Direction::Response, projections);
                     }
                 }
                 None => {}
@@ -317,12 +331,12 @@ fn project_service(service: &mut Service, split: &BTreeSet<String>) {
 }
 
 /// Rewrite the type of every field of a per-operation struct.
-fn project_struct(strukt: &mut Struct, direction: Direction, split: &BTreeSet<String>) {
+fn project_struct(strukt: &mut Struct, direction: Direction, projections: &BTreeMap<String, Projection>) {
     for field in &mut strukt.fields {
-        field.ty = project_type(&field.ty, direction, split);
+        field.ty = project_type(&field.ty, direction, projections);
     }
     if let Some(additional) = &mut strukt.additional_properties {
-        *additional = project_type(additional, direction, split);
+        *additional = project_type(additional, direction, projections);
     }
 }
 
@@ -335,8 +349,8 @@ mod tests {
     use crate::ir::Field;
     use crate::loader::Spec;
 
-    /// Lower an inline document's schemas and split them, which is the pipeline
-    /// a models-only run does.
+    /// Lower the schemas of an inline document and split them, the way a
+    /// models-only run does.
     fn split_yaml(yaml: &str) -> Module {
         let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse spec");
         let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
@@ -344,6 +358,42 @@ mod tests {
         let mut module = crate::lower::generate_models(&spec, &names).expect("lower schemas");
         split_by_direction(&mut module, None);
         return module;
+    }
+
+    /// Lower an inline document with its operations and split them, the way a
+    /// server or client run does.
+    fn split_service_yaml(yaml: &str) -> Module {
+        let doc: openapiv3::OpenAPI = serde_yaml::from_str(yaml).expect("parse spec");
+        let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
+        let names = crate::lower::rename::type_renames(&spec, None).expect("resolve names");
+        let mut module = crate::lower::generate_models(&spec, &names).expect("lower schemas");
+        let mut service =
+            crate::lower::generate_service(&spec, &Default::default(), "Response").expect("lower operations");
+        crate::lower::rewrite_service(&mut service, names.renames());
+        split_by_direction(&mut module, Some(&mut service));
+        return module;
+    }
+
+    /// The doc text of the item called `name`.
+    fn doc(module: &Module, name: &str) -> Option<String> {
+        for item in &module.items {
+            if item.name() == name {
+                return match item {
+                    Item::Struct(strukt) => strukt.doc.clone(),
+                    Item::Enum(enom) => enom.doc.clone(),
+                    Item::Alias(alias) => alias.doc.clone(),
+                };
+            }
+        }
+        panic!("no item named `{name}`");
+    }
+
+    /// A document whose only operation returns `Account`, so no request reaches
+    /// it.
+    fn response_only(schemas: &str) -> String {
+        return format!(
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths:\n  /accounts:\n    get:\n      operationId: listAccounts\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Account'\ncomponents:\n  schemas:\n{schemas}"
+        );
     }
 
     /// The item names a module declares, in emission order.
@@ -368,6 +418,40 @@ mod tests {
     }
 
     const PREAMBLE: &str = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n";
+
+    #[test]
+    fn one_direction_keeps_the_name_and_drops_nothing_it_carries() {
+        let module = split_service_yaml(&response_only(
+            "    Account:\n      description: An account.\n      type: object\n      properties:\n        id:\n          type: string\n          readOnly: true\n        email:\n          type: string\n",
+        ));
+        assert_eq!(names(&module), vec!["Account"]);
+        assert_eq!(fields(&module, "Account"), vec!["id", "email"]);
+        assert_eq!(doc(&module, "Account"), Some("An account.".to_owned()));
+    }
+
+    #[test]
+    fn one_direction_keeps_the_name_and_drops_what_it_cannot_carry() {
+        let module = split_service_yaml(&response_only(
+            "    Account:\n      type: object\n      properties:\n        email:\n          type: string\n        secret:\n          type: string\n          writeOnly: true\n",
+        ));
+        assert_eq!(names(&module), vec!["Account"]);
+        assert_eq!(fields(&module, "Account"), vec!["email"]);
+        assert_eq!(
+            doc(&module, "Account"),
+            Some("Only a response carries this model, so a `writeOnly` property is not part of it.".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_holder_that_one_direction_reaches_keeps_its_name_and_names_the_split_shape() {
+        let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths:\n  /accounts:\n    post:\n      operationId: createAccount\n      requestBody:\n        content:\n          application/json:\n            schema:\n              $ref: '#/components/schemas/Account'\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Page'\ncomponents:\n  schemas:\n    Account:\n      type: object\n      properties:\n        id:\n          type: string\n          readOnly: true\n        email:\n          type: string\n    Page:\n      type: object\n      properties:\n        items:\n          type: array\n          items:\n            $ref: '#/components/schemas/Account'\n";
+        let module = split_service_yaml(yaml);
+        assert_eq!(names(&module), vec!["AccountRequest", "AccountResponse", "Page"]);
+        let Some(Item::Struct(page)) = module.items.iter().find(|item| return item.name() == "Page") else {
+            panic!("no struct named `Page`");
+        };
+        assert_eq!(page.fields[0].ty.label(), "Option<Vec<AccountResponse>>");
+    }
 
     #[test]
     fn a_document_with_no_mark_is_left_alone() {

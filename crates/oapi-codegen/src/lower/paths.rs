@@ -441,8 +441,8 @@ impl Lowerer<'_> {
             serde_skip: false,
             default,
             constraints,
-            // A parameter only ever travels in a request, so a direction mark on
-            // its schema states nothing the generator can act on.
+            // A parameter travels in a request only, so a direction mark on its
+            // schema states nothing the generator can act on.
             access: crate::ir::Access::ReadWrite,
         };
         crate::lower::constraints::check_constraints(&field)?;
@@ -1565,9 +1565,9 @@ impl Lowerer<'_> {
 
 /// Whether a `multipart/form-data` part travels in a request.
 ///
-/// A multipart body is a request body only, so a `readOnly` part is left out of
-/// the generated extractor. `writeOnly` states that a request carries the part,
-/// which is what a multipart part already does.
+/// A multipart body is a request body only, so the generator leaves a `readOnly`
+/// part out of the extractor. `writeOnly` states what a multipart part already
+/// does.
 fn multipart_part_is_sent(data: &SchemaData, path: &str, method: &str, wire_name: &str) -> Result<bool> {
     let at = format!("{method} {path} multipart field `{wire_name}`");
     let access = crate::lower::schema::access_of(data, &at)?;

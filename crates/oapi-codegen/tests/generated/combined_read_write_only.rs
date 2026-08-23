@@ -30,18 +30,32 @@ pub struct AccountResponse {
 }
 
 /// A response-only holder of a split model.
-///
-/// The response shape of `AccountPage`. A `writeOnly` property is not part of it.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct AccountPageResponse {
+pub struct AccountPage {
     pub items: Vec<AccountResponse>,
+}
+
+/// A request-only model that marks a property `readOnly`.
+///
+/// Only a request carries this model, so a `readOnly` property is not part of it.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct AccountFilter {
+    pub email: String,
+}
+
+/// A response-only model that marks a property `writeOnly`.
+///
+/// Only a response carries this model, so a `writeOnly` property is not part of it.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct AuditEntry {
+    pub action: String,
 }
 
 /// List every account.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ListAccountsResponse {
     /// The accounts, wrapped in a page.
-    Ok(AccountPageResponse),
+    Ok(AccountPage),
 }
 
 /// Create an account.
@@ -49,6 +63,20 @@ pub enum ListAccountsResponse {
 pub enum CreateAccountResponse {
     /// The created account.
     Created(AccountResponse),
+}
+
+/// Search accounts.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SearchAccountsResponse {
+    /// The search was accepted.
+    NoContent,
+}
+
+/// List the audit log.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ListAuditResponse {
+    /// The audit entries.
+    Ok(Vec<AuditEntry>),
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +153,13 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         body: AccountRequest,
     ) -> impl std::future::Future<Output = CreateAccountResponse> + Send;
+    /// Search accounts.
+    fn search_accounts(
+        &self,
+        body: AccountFilter,
+    ) -> impl std::future::Future<Output = SearchAccountsResponse> + Send;
+    /// List the audit log.
+    fn list_audit(&self) -> impl std::future::Future<Output = ListAuditResponse> + Send;
     /// Replace an account avatar.
     fn upload_avatar(
         &self,
@@ -165,6 +200,38 @@ impl axum::response::IntoResponse for CreateAccountResponse {
     }
 }
 
+impl axum::response::IntoResponse for SearchAccountsResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            SearchAccountsResponse::NoContent => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    204,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                STATUS.into_response()
+            }
+        }
+    }
+}
+
+impl axum::response::IntoResponse for ListAuditResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            ListAuditResponse::Ok(body) => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    200,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
+            }
+        }
+    }
+}
+
 impl axum::response::IntoResponse for UploadAvatarResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
@@ -189,6 +256,8 @@ pub fn router<T: Api>(api: T) -> axum::Router {
             axum::routing::get(list_accounts_handler::<T>)
                 .post(create_account_handler::<T>),
         )
+        .route("/accounts/search", axum::routing::post(search_accounts_handler::<T>))
+        .route("/audit", axum::routing::get(list_audit_handler::<T>))
         .route(
             "/accounts/{accountId}/avatar",
             axum::routing::put(upload_avatar_handler::<T>),
@@ -207,6 +276,19 @@ async fn create_account_handler<T: Api>(
     axum::Json(body): axum::Json<AccountRequest>,
 ) -> CreateAccountResponse {
     api.create_account(body).await
+}
+
+async fn search_accounts_handler<T: Api>(
+    axum::extract::State(api): axum::extract::State<T>,
+    axum::Json(body): axum::Json<AccountFilter>,
+) -> SearchAccountsResponse {
+    api.search_accounts(body).await
+}
+
+async fn list_audit_handler<T: Api>(
+    axum::extract::State(api): axum::extract::State<T>,
+) -> ListAuditResponse {
+    api.list_audit().await
 }
 
 async fn upload_avatar_handler<T: Api>(
@@ -308,7 +390,7 @@ impl Client {
         let response = self.http.request(reqwest::Method::GET, url).send()?;
         let status = response.status();
         if status.as_u16() == 200 {
-            let body: AccountPageResponse = response.json()?;
+            let body: AccountPage = response.json()?;
             return Ok(ListAccountsResponse::Ok(body));
         }
         return Err(ClientError::UnexpectedStatus(status));
@@ -326,6 +408,32 @@ impl Client {
         if status.as_u16() == 201 {
             let body: AccountResponse = response.json()?;
             return Ok(CreateAccountResponse::Created(body));
+        }
+        return Err(ClientError::UnexpectedStatus(status));
+    }
+    /// Search accounts.
+    pub fn search_accounts(
+        &self,
+        body: AccountFilter,
+    ) -> Result<SearchAccountsResponse, ClientError> {
+        let url = format!("{}/accounts/search", self.base_url);
+        let mut request = self.http.request(reqwest::Method::POST, url);
+        request = request.json(&body);
+        let response = request.send()?;
+        let status = response.status();
+        if status.as_u16() == 204 {
+            return Ok(SearchAccountsResponse::NoContent);
+        }
+        return Err(ClientError::UnexpectedStatus(status));
+    }
+    /// List the audit log.
+    pub fn list_audit(&self) -> Result<ListAuditResponse, ClientError> {
+        let url = format!("{}/audit", self.base_url);
+        let response = self.http.request(reqwest::Method::GET, url).send()?;
+        let status = response.status();
+        if status.as_u16() == 200 {
+            let body: Vec<AuditEntry> = response.json()?;
+            return Ok(ListAuditResponse::Ok(body));
         }
         return Err(ClientError::UnexpectedStatus(status));
     }

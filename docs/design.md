@@ -512,33 +512,43 @@ does the same. `minProperties` on a schema that names its properties, and
 names the way out, because a rule the document states and the code drops is worse
 than no rule at all.
 
-## A direction mark splits a model in two
+## A direction mark projects a model onto its direction
 
 `readOnly` and `writeOnly` mark a direction, not a value. A `readOnly` property
 travels in a response, and a request must not send it. A `writeOnly` property
 travels in a request, and a response must not send it. A property that sets both
 marks is an error, because no direction is left to carry it.
 
-One struct cannot hold both statements. The same `Order` type reaches a request
-body and a response body, so a serde attribute that is right for one is wrong for
-the other. The side does not settle it either. A server reads a request and
-writes a response, and a client does the reverse.
+A serde attribute cannot state this. The same `Order` type can reach a request
+body and a response body, so an attribute that is right for one is wrong for the
+other. The side does not settle it either. A server reads a request and writes a
+response, and a client does the reverse.
 
-So a marked model becomes two models. `Order` with a `readOnly` `id` gives
-`OrderRequest`, which has no `id`, and `OrderResponse`, which has one. A request
-body, a parameter, and a multipart part take the request shape. A response body
-and a response header take the response shape.
+So each model drops the properties that its direction does not carry. When one
+direction reaches a model, the model keeps its name. An `Order` that only a
+response carries keeps the name `Order` and drops each `writeOnly` property. A
+`readOnly` property costs that model nothing, so a read-only API generates what
+it generated before the marks were there.
 
-The split spreads along model references. A model that holds a marked model
-cannot keep one name either, because its field type differs per direction. So
-`Envelope { order: Order }` gives `EnvelopeRequest` with an `OrderRequest` field
-and `EnvelopeResponse` with an `OrderResponse` field. A model that no mark
-reaches keeps its name, and a document that uses neither keyword generates what
-it generated before.
+When both directions reach a model, one name is not enough. `Order` then becomes
+`OrderRequest`, which has no `readOnly` property, and `OrderResponse`, which has
+no `writeOnly` property. A parameter, a request body, and a multipart part take
+the request shape. A response body and a response header take the response
+shape.
 
-The split reads the marks alone. It does not read how the operations use a model,
-so the two names stay the same when an operation is added or removed. A shape
-that no operation reaches is then dropped with the other unused models.
+The split spreads along model references. A model that holds a split model and
+that both directions reach cannot keep one name either, because its field type
+differs per direction. A holder that one direction reaches keeps its name, and
+only its field type follows the split. So a response-only `Page` keeps the name
+`Page` and holds an `OrderResponse`.
+
+A models-only run splits every marked model, because it has no operation to give
+a direction. The run that consumes those models does know the direction and
+picks the shape it needs.
+
+A new operation can rename a model. A `POST` that sends an `Order` gives that
+model a second direction, so the one name becomes two. The model gains a second
+shape at that point, so the two names report what the document now states.
 
 The two names go through the same checks as any other type name. A schema named
 `GetWidget` gives a `GetWidgetResponse` shape, which the response enum of a
@@ -550,9 +560,9 @@ property does not declare it at all, so the requirement applies only where the
 property exists. This is what the OpenAPI specification states.
 
 An `import-mapping` reference to a marked schema is an error. Two runs make a
-composed crate, and only one of them holds the operations. The other run emits
-two names for that schema, and a reference by name alone cannot say which of the
-two it means.
+composed crate, and only one of them holds the operations. The other run is a
+models-only run, so it emits two names for that schema. A reference by name
+alone cannot say which of the two it means.
 
 ## A `default` removes the `Option`
 

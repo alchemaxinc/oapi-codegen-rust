@@ -310,6 +310,36 @@ fn a_holder_of_a_split_model_names_the_shape_of_its_direction() {
 }
 
 #[test]
+fn a_model_that_one_direction_reaches_keeps_its_name() {
+    use generated::combined_read_write_only;
+
+    // `AccountPage` is response-only, so it keeps its name and only its field
+    // type follows the split of `Account`.
+    let page = combined_read_write_only::AccountPage {
+        items: vec![combined_read_write_only::AccountResponse {
+            id: "3a1f9b0e-1c1a-4d0f-8b6f-2f9a4c5d6e70".to_owned(),
+            email: "a@example.com".to_owned(),
+        }],
+    };
+    assert_eq!(page.items.len(), 1);
+
+    // `AuditEntry` is response-only and marks `token` `writeOnly`, so it keeps
+    // its name and drops that property.
+    let entry: combined_read_write_only::AuditEntry =
+        serde_json::from_str(r#"{"action":"login","token":"t"}"#).expect("deserialize");
+    let json = serde_json::to_string(&entry).expect("serialize");
+    assert_eq!(json, r#"{"action":"login"}"#);
+
+    // `AccountFilter` is request-only and marks `matched` `readOnly`, so it
+    // keeps its name and drops that property.
+    let filter = combined_read_write_only::AccountFilter {
+        email: "a@example.com".to_owned(),
+    };
+    let json = serde_json::to_string(&filter).expect("serialize");
+    assert_eq!(json, r#"{"email":"a@example.com"}"#);
+}
+
+#[test]
 fn a_read_only_multipart_part_is_left_out_of_the_extractor() {
     use generated::combined_read_write_only;
 
