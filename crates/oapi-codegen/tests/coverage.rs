@@ -922,6 +922,9 @@ fn a_property_that_sets_both_direction_marks_names_both_in_the_message() {
 /// The run that writes the operations resolves the reference by name alone, so
 /// it cannot tell which shape the author meant. Emitting the plain name compiles
 /// nothing, because the models crate declares neither.
+///
+/// The target carries an `x-rust-name`, so the message must name the shapes that
+/// the chosen name builds, not the shapes that the schema name builds.
 #[test]
 fn a_cross_file_reference_to_a_split_schema_is_rejected() {
     let fixture = tests_dir()
@@ -930,8 +933,12 @@ fn a_cross_file_reference_to_a_split_schema_is_rejected() {
     let error = oapi_codegen::generate(&fixture, &server_config()).expect_err("a split target must be rejected");
     let message = format!("{error}");
     assert!(
-        message.contains("ParcelRequest") && message.contains("ParcelResponse"),
+        message.contains("ShipmentRequest") && message.contains("ShipmentResponse"),
         "the message must name both shapes: {message}",
+    );
+    assert!(
+        !message.contains("ParcelRequest") && !message.contains("ParcelResponse"),
+        "the message must not name a shape the models run never emits: {message}",
     );
 }
 

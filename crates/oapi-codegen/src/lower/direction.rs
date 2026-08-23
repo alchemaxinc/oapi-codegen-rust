@@ -228,23 +228,29 @@ fn project_item(item: &Item, direction: Direction, projections: &BTreeMap<String
 
 /// Add a line about the direction, after the schema `description`.
 ///
-/// A split shape always takes the line, because a reader meets two types where
-/// the document declares one schema. A model that keeps its name takes the line
-/// only when the projection drops a property. So a mark that costs a shape
-/// nothing leaves the generated file as it was.
+/// A split shape always takes a line, because a reader meets two types where the
+/// document declares one schema. The line names the keyword only when the
+/// projection drops a property. A holder that splits because it references a
+/// split model drops nothing, so its line states the direction alone.
+///
+/// A model that keeps its name takes a line only when the projection drops a
+/// property. So a mark that costs a shape nothing leaves the generated file as
+/// it was.
 fn projected_doc(doc: &Option<String>, name: &str, direction: Direction, split: bool, dropped: bool) -> Option<String> {
-    let note = match (split, direction) {
-        (true, Direction::Request) => {
+    let note = match (split, dropped, direction) {
+        (true, true, Direction::Request) => {
             format!("The request shape of `{name}`. A `readOnly` property is not part of it.")
         }
-        (true, Direction::Response) => {
+        (true, true, Direction::Response) => {
             format!("The response shape of `{name}`. A `writeOnly` property is not part of it.")
         }
-        (false, _) if !dropped => return doc.clone(),
-        (false, Direction::Request) => {
+        (true, false, Direction::Request) => format!("The request shape of `{name}`."),
+        (true, false, Direction::Response) => format!("The response shape of `{name}`."),
+        (false, false, _) => return doc.clone(),
+        (false, true, Direction::Request) => {
             "Only a request carries this model, so a `readOnly` property is not part of it.".to_owned()
         }
-        (false, Direction::Response) => {
+        (false, true, Direction::Response) => {
             "Only a response carries this model, so a `writeOnly` property is not part of it.".to_owned()
         }
     };
@@ -278,8 +284,7 @@ fn project_type(ty: &RustType, direction: Direction, projections: &BTreeMap<Stri
     };
 }
 
-/// Point every API position at the shape of the direction it carries, and drop
-/// the multipart parts a request must not send.
+/// Point every API position at the shape of the direction it carries.
 fn project_service(service: &mut Service, projections: &BTreeMap<String, Projection>) {
     for operation in &mut service.operations {
         for param in &mut operation.path_params {
@@ -442,9 +447,36 @@ mod tests {
         );
     }
 
+    /// A split shape names the keyword only when it drops a property.
+    ///
+    /// A holder splits because it references a split model. It drops nothing, so
+    /// a line about a `readOnly` property would state a fault that is not there.
     #[test]
-    fn a_holder_that_one_direction_reaches_keeps_its_name_and_names_the_split_shape() {
-        let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths:\n  /accounts:\n    post:\n      operationId: createAccount\n      requestBody:\n        content:\n          application/json:\n            schema:\n              $ref: '#/components/schemas/Account'\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Page'\ncomponents:\n  schemas:\n    Account:\n      type: object\n      properties:\n        id:\n          type: string\n          readOnly: true\n        email:\n          type: string\n    Page:\n      type: object\n      properties:\n        items:\n          type: array\n          items:\n            $ref: '#/components/schemas/Account'\n";
+    fn a_split_shape_that_drops_nothing_states_the_direction_alone() {
+        let module = split_yaml(&format!(
+            "{PREAMBLE}    Account:\n      type: object\n      properties:\n        id:\n          type: string\n          readOnly: true\n    Envelope:\n      type: object\n      properties:\n        account:\n          $ref: '#/components/schemas/Account'\n"
+        ));
+        assert_eq!(
+            doc(&module, "AccountRequest"),
+            Some("The request shape of `Account`. A `readOnly` property is not part of it.".to_owned())
+        );
+        assert_eq!(
+            doc(&module, "AccountResponse"),
+            Some("The response shape of `Account`.".to_owned()),
+            "the response drops nothing, because no property is `writeOnly`",
+        );
+        assert_eq!(
+            doc(&module, "EnvelopeRequest"),
+            Some("The request shape of `Envelope`.".to_owned())
+        );
+        assert_eq!(
+            doc(&module, "EnvelopeResponse"),
+            Some("The response shape of `Envelope`.".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_holder_that_one_direction_reaches_keeps_its_name_and_names_the_split_shape() {        let yaml = "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths:\n  /accounts:\n    post:\n      operationId: createAccount\n      requestBody:\n        content:\n          application/json:\n            schema:\n              $ref: '#/components/schemas/Account'\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Page'\ncomponents:\n  schemas:\n    Account:\n      type: object\n      properties:\n        id:\n          type: string\n          readOnly: true\n        email:\n          type: string\n    Page:\n      type: object\n      properties:\n        items:\n          type: array\n          items:\n            $ref: '#/components/schemas/Account'\n";
         let module = split_service_yaml(yaml);
         assert_eq!(names(&module), vec!["AccountRequest", "AccountResponse", "Page"]);
         let Some(Item::Struct(page)) = module.items.iter().find(|item| return item.name() == "Page") else {

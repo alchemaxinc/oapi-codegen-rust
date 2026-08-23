@@ -35,7 +35,7 @@ pub struct AccountResponse {
 
 /// A holder splits too, because its field type differs per direction.
 ///
-/// The request shape of `Envelope`. A `readOnly` property is not part of it.
+/// The request shape of `Envelope`.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct EnvelopeRequest {
     pub account: AccountRequest,
@@ -45,7 +45,7 @@ pub struct EnvelopeRequest {
 
 /// A holder splits too, because its field type differs per direction.
 ///
-/// The response shape of `Envelope`. A `writeOnly` property is not part of it.
+/// The response shape of `Envelope`.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct EnvelopeResponse {
     pub account: AccountResponse,
@@ -55,12 +55,12 @@ pub struct EnvelopeResponse {
 
 /// An alias to a split model splits as well.
 ///
-/// The request shape of `AccountList`. A `readOnly` property is not part of it.
+/// The request shape of `AccountList`.
 pub type AccountListRequest = Vec<AccountRequest>;
 
 /// An alias to a split model splits as well.
 ///
-/// The response shape of `AccountList`. A `writeOnly` property is not part of it.
+/// The response shape of `AccountList`.
 pub type AccountListResponse = Vec<AccountResponse>;
 
 /// No mark reaches this schema, so it keeps its name.

@@ -6,13 +6,15 @@ paths: {}
 components:
   schemas:
     # `Parcel` marks a property `readOnly`, so the run that writes the models
-    # emits `ParcelRequest` and `ParcelResponse` and no `Parcel`.
+    # emits `ShipmentRequest` and `ShipmentResponse` and no `Shipment`. The
+    # `x-rust-name` key sets the base name that the two suffixes extend.
     #
     # The run that writes the operations resolves an `import-mapping` reference
     # by name alone. It cannot tell which of the two shapes the reference means,
     # so it rejects the reference instead of emitting a name the models crate
     # never declares.
     Parcel:
+      x-rust-name: Shipment
       type: object
       required: [id, weight_kg]
       properties:
