@@ -53,4 +53,4 @@ reqwest = { version = "0.13.4", default-features = false, features = ["blocking"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_urlencoded = "0.7.1"
 trycmd = "1.2.1"
-uuid = { version = "1.24.1", features = ["serde"] }
+uuid = { version = "1.25.0", features = ["serde"] }
