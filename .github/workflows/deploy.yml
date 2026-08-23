@@ -25,6 +25,8 @@ env:
   # newer release. Used by the build and publish jobs to stamp the tag version
   # into Cargo.toml before building/publishing.
   CARGO_EDIT_VERSION: "0.13.13"
+  # Pin the preset because its type schema is part of .releaserc.json.
+  CONVENTIONAL_CHANGELOG_PRESET_VERSION: "9.3.1"
 
 jobs:
   semantic-release:
@@ -49,6 +51,19 @@ jobs:
         with:
           shallow: false
           token: ${{ steps.app.outputs.token }}
+
+      # The release action checks out the repository again and removes workspace
+      # dependencies. Install the preset above the workspace so Node can find it.
+      - name: Install release-note preset
+        run: >-
+          npm install
+          --prefix "$GITHUB_WORKSPACE/.."
+          --no-save
+          --package-lock=false
+          --ignore-scripts
+          --no-audit
+          --no-fund
+          conventional-changelog-conventionalcommits@${CONVENTIONAL_CHANGELOG_PRESET_VERSION}
 
       - name: Version and release
         id: version-release

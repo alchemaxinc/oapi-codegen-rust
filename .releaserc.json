@@ -1,8 +1,114 @@
 {
   "branches": ["main", { "name": "develop", "prerelease": "dev" }],
   "plugins": [
-    "@semantic-release/commit-analyzer",
-    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/commit-analyzer",
+      {
+        "preset": "conventionalcommits",
+        "presetConfig": {},
+        "releaseRules": [
+          {
+            "breaking": true,
+            "type": "build",
+            "scope": "deps",
+            "release": "major"
+          },
+          { "type": "build", "scope": "deps", "release": "patch" }
+        ]
+      }
+    ],
+    [
+      "@semantic-release/release-notes-generator",
+      {
+        "preset": "conventionalcommits",
+        "presetConfig": {
+          "types": [
+            {
+              "type": "build",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "chore",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "ci",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "docs",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "feat",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "fix",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "perf",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "refactor",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "revert",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "style",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            {
+              "type": "test",
+              "scope": "deps",
+              "section": "Dependency Updates"
+            },
+            { "type": "feat", "section": "Features" },
+            { "type": "feature", "section": "Features" },
+            { "type": "fix", "section": "Bug Fixes" },
+            { "type": "perf", "section": "Performance Improvements" },
+            { "type": "revert", "section": "Reverts" },
+            { "type": "docs", "section": "Documentation", "hidden": true },
+            { "type": "style", "section": "Styles", "hidden": true },
+            {
+              "type": "chore",
+              "section": "Miscellaneous Chores",
+              "hidden": true
+            },
+            {
+              "type": "refactor",
+              "section": "Code Refactoring",
+              "hidden": true
+            },
+            { "type": "test", "section": "Tests", "hidden": true },
+            { "type": "build", "section": "Build System", "hidden": true },
+            {
+              "type": "ci",
+              "section": "Continuous Integration",
+              "hidden": true
+            }
+          ]
+        },
+        "writerOpts": {
+          "commitGroupsSort": "title"
+        }
+      }
+    ],
     [
       "@semantic-release/github",
       {

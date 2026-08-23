@@ -28,8 +28,8 @@ jobs:
           base-branch: "develop"
           merge-method: "squash"
           branch-prefix: ${{ env.BRANCH_PREFIX }}
-          pr-title: "fix(deps): update cargo dependencies"
-          commit-message: "fix(deps): update cargo dependencies"
+          pr-title: "build(deps): update cargo dependencies"
+          commit-message: "build(deps): update cargo dependencies"
 
       # The action leaves the working tree on the branch it created, so the
       # regenerated output lands on the same pull request.
