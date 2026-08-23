@@ -427,6 +427,7 @@ fn struct_field_names(strukt: &Struct, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::Access;
     use crate::ir::Alias;
     use crate::ir::Body;
     use crate::ir::Field;
@@ -457,6 +458,7 @@ mod tests {
             serde_skip: false,
             default: None,
             constraints: None,
+            access: Access::ReadWrite,
         };
     }
 

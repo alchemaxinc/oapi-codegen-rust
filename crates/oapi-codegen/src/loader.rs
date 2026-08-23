@@ -16,6 +16,8 @@ use openapiv3::Schema;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::lower::direction::REQUEST_SUFFIX;
+use crate::lower::direction::RESPONSE_SUFFIX;
 
 /// Maximum `$ref` chain length before bailing out (cycle guard).
 const MAX_REF_DEPTH: usize = 32;
@@ -441,11 +443,26 @@ impl Spec {
     /// `type-name-suffix` it takes from its own config. This run cannot see that
     /// config, so it emits the plain name and reaches whichever of the two
     /// schemas kept it. That builds, and it carries the wrong type.
+    ///
+    /// A schema the direction pass splits is an error for the same reason. The
+    /// other run emits two names there and this one cannot tell which of the two
+    /// an `import-mapping` reference means.
     pub fn external_schema_name(&self, file: &str, name: &str, reference: &str) -> Result<String> {
         let entry = self.component_schema(Some(file), reference, name)?;
         let chosen = external_name_of(&entry, name)?;
         let doc = self.document_for(file)?;
         let schemas = doc.components.as_ref().map(|components| return &components.schemas);
+        if direction_split_schemas(&doc).contains(name) {
+            return Err(Error::UnsupportedRef {
+                reference: reference.to_owned(),
+                reason: format!(
+                    "`{name}` in `{file}` marks a property `readOnly` or `writeOnly`, so the run that \
+                     generates that file emits it as `{name}{REQUEST_SUFFIX}` and `{name}{RESPONSE_SUFFIX}`. \
+                     This run cannot tell which of the two an `import-mapping` reference means. Declare \
+                     the schema in this document instead, or drop the mark"
+                ),
+            });
+        }
         for (other, other_entry) in schemas.into_iter().flatten() {
             if other == name {
                 continue;
@@ -464,6 +481,137 @@ impl Spec {
         }
         return Ok(chosen);
     }
+}
+
+/// The schemas in `doc` that the direction pass splits into a request shape and
+/// a response shape.
+///
+/// A schema qualifies when it marks anything inside it `readOnly` or
+/// `writeOnly`, or when it reaches such a schema through a same-document `$ref`.
+/// The reference walk runs from a marked schema up to the schemas naming it,
+/// because a holder's field type is what changes per direction.
+///
+/// This reads the document alone. Both runs that compose a crate must reach the
+/// same verdict for the same file, and only one of the two holds the operations.
+fn direction_split_schemas(doc: &OpenAPI) -> std::collections::BTreeSet<String> {
+    let mut marked = std::collections::BTreeSet::new();
+    let Some(components) = doc.components.as_ref() else {
+        return marked;
+    };
+    let mut referrers: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, entry) in &components.schemas {
+        let ReferenceOr::Item(schema) = entry else {
+            continue;
+        };
+        if schema_marks_a_direction(schema) {
+            marked.insert(name.clone());
+        }
+        let mut targets = Vec::new();
+        schema_local_refs(schema, &mut targets);
+        for target in targets {
+            referrers.entry(target).or_default().push(name.clone());
+        }
+    }
+
+    let mut stack: Vec<String> = marked.iter().cloned().collect();
+    while let Some(name) = stack.pop() {
+        let Some(parents) = referrers.get(&name) else {
+            continue;
+        };
+        for parent in parents {
+            if marked.insert(parent.clone()) {
+                stack.push(parent.clone());
+            }
+        }
+    }
+    return marked;
+}
+
+/// Whether a schema, or any schema written inside it, sets `readOnly` or
+/// `writeOnly`.
+fn schema_marks_a_direction(schema: &Schema) -> bool {
+    if schema.schema_data.read_only || schema.schema_data.write_only {
+        return true;
+    }
+    let mut found = false;
+    walk_inline_schemas(schema, &mut |inner| {
+        found = found || inner.schema_data.read_only || inner.schema_data.write_only;
+    });
+    return found;
+}
+
+/// The same-document component schemas a schema names, at any depth.
+fn schema_local_refs(schema: &Schema, out: &mut Vec<String>) {
+    let mut collect = |entry: &ReferenceOr<Schema>| {
+        if let ReferenceOr::Reference { reference } = entry
+            && ref_file_part(reference).is_none()
+            && let Some(name) = ref_component_name(reference, "schemas")
+        {
+            out.push(name.to_owned());
+        }
+    };
+    for entry in inline_members(schema) {
+        collect(&entry);
+    }
+    walk_inline_schemas(schema, &mut |inner| {
+        for entry in inline_members(inner) {
+            collect(&entry);
+        }
+    });
+}
+
+/// Apply `visit` to every schema written inline within `schema`, at any depth.
+fn walk_inline_schemas(schema: &Schema, visit: &mut impl FnMut(&Schema)) {
+    for entry in inline_members(schema) {
+        if let ReferenceOr::Item(inner) = entry {
+            visit(&inner);
+            walk_inline_schemas(&inner, visit);
+        }
+    }
+}
+
+/// The schemas one schema holds directly: its properties, its element type, its
+/// `additionalProperties`, and its composition members.
+fn inline_members(schema: &Schema) -> Vec<ReferenceOr<Schema>> {
+    let unbox = |entry: &ReferenceOr<Box<Schema>>| {
+        return match entry {
+            ReferenceOr::Item(inner) => ReferenceOr::Item((**inner).clone()),
+            ReferenceOr::Reference { reference } => ReferenceOr::Reference {
+                reference: reference.clone(),
+            },
+        };
+    };
+    let additional = |entry: &Option<openapiv3::AdditionalProperties>| {
+        return match entry {
+            Some(openapiv3::AdditionalProperties::Schema(inner)) => vec![(**inner).clone()],
+            Some(openapiv3::AdditionalProperties::Any(_)) | None => Vec::new(),
+        };
+    };
+    let mut members = Vec::new();
+    match &schema.schema_kind {
+        openapiv3::SchemaKind::Type(openapiv3::Type::Object(object)) => {
+            members.extend(object.properties.values().map(&unbox));
+            members.extend(additional(&object.additional_properties));
+        }
+        openapiv3::SchemaKind::Type(openapiv3::Type::Array(array)) => {
+            members.extend(array.items.as_ref().map(&unbox));
+        }
+        openapiv3::SchemaKind::Type(_) => {}
+        openapiv3::SchemaKind::OneOf { one_of } => members.extend(one_of.iter().cloned()),
+        openapiv3::SchemaKind::AllOf { all_of } => members.extend(all_of.iter().cloned()),
+        openapiv3::SchemaKind::AnyOf { any_of } => members.extend(any_of.iter().cloned()),
+        openapiv3::SchemaKind::Not { not } => members.push((**not).clone()),
+        openapiv3::SchemaKind::Any(any) => {
+            members.extend(any.properties.values().map(&unbox));
+            members.extend(additional(&any.additional_properties));
+            members.extend(any.items.as_ref().map(&unbox));
+            members.extend(any.one_of.iter().cloned());
+            members.extend(any.all_of.iter().cloned());
+            members.extend(any.any_of.iter().cloned());
+            members.extend(any.not.as_ref().map(|not| return (**not).clone()));
+        }
+    }
+    return members;
 }
 
 /// The name a schema in a referenced document declares for itself, honouring

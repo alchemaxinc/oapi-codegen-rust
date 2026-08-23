@@ -1,0 +1,23 @@
+openapi: 3.0.3
+info:
+  title: shared models that a direction mark splits
+  version: "1"
+paths: {}
+components:
+  schemas:
+    # `Parcel` marks a property `readOnly`, so the run that writes the models
+    # emits `ParcelRequest` and `ParcelResponse` and no `Parcel`.
+    #
+    # The run that writes the operations resolves an `import-mapping` reference
+    # by name alone. It cannot tell which of the two shapes the reference means,
+    # so it rejects the reference instead of emitting a name the models crate
+    # never declares.
+    Parcel:
+      type: object
+      required: [id, weight_kg]
+      properties:
+        id:
+          type: string
+          readOnly: true
+        weight_kg:
+          type: number

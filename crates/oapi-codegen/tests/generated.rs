@@ -34,6 +34,8 @@ mod generated {
     pub mod combined_keyword_operations;
     #[path = "combined_prelude_value_names.rs"]
     pub mod combined_prelude_value_names;
+    #[path = "combined_read_write_only.rs"]
+    pub mod combined_read_write_only;
     #[path = "combined_response_name_collision.rs"]
     pub mod combined_response_name_collision;
     #[path = "combined_server_client.rs"]
@@ -81,6 +83,8 @@ mod generated {
     pub mod prelude_value_names;
     #[path = "primitive_scalars.rs"]
     pub mod primitive_scalars;
+    #[path = "read_write_only.rs"]
+    pub mod read_write_only;
     #[path = "recursive_schema.rs"]
     pub mod recursive_schema;
     #[path = "ref_local.rs"]
@@ -247,6 +251,72 @@ fn optional_field_is_skipped_when_none() {
     };
     let json = serde_json::to_string(&profile).expect("serialize");
     assert_eq!(json, r#"{"id":"u1"}"#);
+}
+
+#[test]
+fn a_direction_mark_splits_a_model_into_two_shapes() {
+    use generated::read_write_only;
+
+    // The request shape drops what only a response carries, so a payload the
+    // client builds cannot state a server-assigned value.
+    let request = read_write_only::AccountRequest {
+        email: "a@example.com".to_owned(),
+        password: "hunter2".to_owned(),
+        nickname: "ann".to_owned(),
+    };
+    let json = serde_json::to_string(&request).expect("serialize");
+    assert_eq!(
+        json,
+        r#"{"email":"a@example.com","password":"hunter2","nickname":"ann"}"#
+    );
+
+    // The response shape drops what only a request carries, and reading a
+    // response that still holds it ignores the extra key.
+    let response: read_write_only::AccountResponse = serde_json::from_str(
+        r#"{"id":"3a1f9b0e-1c1a-4d0f-8b6f-2f9a4c5d6e70","email":"a@example.com","nickname":"ann","password":"hunter2"}"#,
+    )
+    .expect("deserialize");
+    assert_eq!(response.email, "a@example.com");
+    let json = serde_json::to_string(&response).expect("serialize");
+    assert!(
+        !json.contains("password"),
+        "response shape wrote a write-only property: {json}"
+    );
+}
+
+#[test]
+fn a_holder_of_a_split_model_names_the_shape_of_its_direction() {
+    use generated::read_write_only;
+
+    let envelope = read_write_only::EnvelopeRequest {
+        account: read_write_only::AccountRequest {
+            email: "a@example.com".to_owned(),
+            password: "hunter2".to_owned(),
+            nickname: "ann".to_owned(),
+        },
+        accounts: None,
+    };
+    let json = serde_json::to_string(&envelope).expect("serialize");
+    assert!(
+        !json.contains("\"id\""),
+        "request shape wrote a read-only property: {json}"
+    );
+
+    let list: read_write_only::AccountListResponse = serde_json::from_str(
+        r#"[{"id":"3a1f9b0e-1c1a-4d0f-8b6f-2f9a4c5d6e70","email":"a@example.com","nickname":"ann"}]"#,
+    )
+    .expect("deserialize");
+    assert_eq!(list.len(), 1);
+}
+
+#[test]
+fn a_read_only_multipart_part_is_left_out_of_the_extractor() {
+    use generated::combined_read_write_only;
+
+    // `Avatar.checksum` is `readOnly`, and a multipart body only travels in a
+    // request, so the extractor never reads that part.
+    let body = combined_read_write_only::UploadAvatarMultipart { image: vec![1, 2, 3] };
+    assert_eq!(body.image, vec![1, 2, 3]);
 }
 
 #[test]

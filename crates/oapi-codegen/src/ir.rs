@@ -100,6 +100,54 @@ pub struct Field {
     /// The generator checks these on the way in, so the check runs only where
     /// the code deserializes. A response the server writes is not checked.
     pub constraints: Option<Constraints>,
+    /// Which direction of an exchange carries the property, from `readOnly` and
+    /// `writeOnly`.
+    pub access: Access,
+}
+
+/// One direction of an exchange.
+///
+/// A request travels from the client to the server. A response travels back.
+/// Which serde trait that needs depends on the side, so the direction is kept
+/// separate from the trait: a server deserializes a request and serializes a
+/// response, and a client does the opposite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Direction {
+    /// The payload an operation reads: parameters and the request body.
+    Request,
+    /// The payload an operation writes: the response body and its headers.
+    Response,
+}
+
+/// Which direction of an exchange carries a property.
+///
+/// OpenAPI marks a property `readOnly` when a response may carry it and a
+/// request must not, and `writeOnly` for the opposite. The mark names a
+/// direction and not a value, so one struct cannot state both. [`Access`]
+/// records the mark, and [`crate::lower::direction`] builds the two shapes a
+/// marked model needs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Access {
+    /// Both directions carry the property.
+    #[default]
+    ReadWrite,
+    /// `readOnly: true`: a response carries the property, a request must not.
+    ReadOnly,
+    /// `writeOnly: true`: a request carries the property, a response must not.
+    WriteOnly,
+}
+
+impl Access {
+    /// Whether `direction` carries a property with this access.
+    pub fn carried_by(self, direction: Direction) -> bool {
+        return match (self, direction) {
+            (Access::ReadWrite, _) => true,
+            (Access::ReadOnly, Direction::Response) | (Access::WriteOnly, Direction::Request) => true,
+            (Access::ReadOnly, Direction::Request) | (Access::WriteOnly, Direction::Response) => false,
+        };
+    }
 }
 
 /// A numeric bound, in the form the document writes it.

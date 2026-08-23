@@ -50,6 +50,7 @@ use openapiv3::ReferenceOr;
 use openapiv3::RequestBody;
 use openapiv3::Response as OasResponse;
 use openapiv3::Schema;
+use openapiv3::SchemaData;
 use openapiv3::SchemaKind;
 use openapiv3::StatusCode;
 use openapiv3::Type;
@@ -440,6 +441,9 @@ impl Lowerer<'_> {
             serde_skip: false,
             default,
             constraints,
+            // A parameter only ever travels in a request, so a direction mark on
+            // its schema states nothing the generator can act on.
+            access: crate::ir::Access::ReadWrite,
         };
         crate::lower::constraints::check_constraints(&field)?;
         return Ok(field);
@@ -1178,7 +1182,12 @@ impl Lowerer<'_> {
                 return name == wire_name;
             });
             let (kind, nullable) = match property {
-                ReferenceOr::Item(schema) => (schema.schema_kind.clone(), schema.schema_data.nullable),
+                ReferenceOr::Item(schema) => {
+                    if !multipart_part_is_sent(&schema.schema_data, path, method, wire_name)? {
+                        continue;
+                    }
+                    (schema.schema_kind.clone(), schema.schema_data.nullable)
+                }
                 ReferenceOr::Reference { reference } => {
                     if ref_file_part(reference).is_some() {
                         return Err(Error::UnsupportedOperation {
@@ -1190,6 +1199,9 @@ impl Lowerer<'_> {
                         });
                     }
                     let resolved = self.spec.resolve_schema(None, reference)?;
+                    if !multipart_part_is_sent(&resolved.schema_data, path, method, wire_name)? {
+                        continue;
+                    }
                     (resolved.schema_kind, resolved.schema_data.nullable)
                 }
             };
@@ -1549,6 +1561,17 @@ impl Lowerer<'_> {
             name: self.spec.external_schema_name(&file, target, reference)?,
         });
     }
+}
+
+/// Whether a `multipart/form-data` part travels in a request.
+///
+/// A multipart body is a request body only, so a `readOnly` part is left out of
+/// the generated extractor. `writeOnly` states that a request carries the part,
+/// which is what a multipart part already does.
+fn multipart_part_is_sent(data: &SchemaData, path: &str, method: &str, wire_name: &str) -> Result<bool> {
+    let at = format!("{method} {path} multipart field `{wire_name}`");
+    let access = crate::lower::schema::access_of(data, &at)?;
+    return Ok(access.carried_by(crate::ir::Direction::Request));
 }
 
 /// Derive the trait method name: an explicit `x-rust-name`, else the

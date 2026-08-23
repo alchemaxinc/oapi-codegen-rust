@@ -1,0 +1,16 @@
+openapi: "3.0.3"
+info:
+  title: Both direction marks on one property
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Account:
+      type: object
+      required: [secret]
+      properties:
+        secret:
+          description: No request and no response could carry this property.
+          type: string
+          readOnly: true
+          writeOnly: true

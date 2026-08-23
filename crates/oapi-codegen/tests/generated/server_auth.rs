@@ -34,9 +34,9 @@ pub enum GetReportsResponse {
     Ok(Message),
 }
 
-/** Fetch session data, which an API key cookie protects.
-
-The cookie is set at login and expires with the session.*/
+/// Fetch session data, which an API key cookie protects.
+///
+/// The cookie is set at login and expires with the session.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetSessionResponse {
     /// The session data.
