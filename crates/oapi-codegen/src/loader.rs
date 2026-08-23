@@ -513,16 +513,24 @@ fn direction_split_schemas(doc: &OpenAPI) -> std::collections::BTreeSet<String> 
 
     let mut referrers: HashMap<String, Vec<String>> = HashMap::new();
     for (name, entry) in &components.schemas {
-        let ReferenceOr::Item(schema) = entry else {
-            continue;
-        };
-        if schema_marks_a_direction(schema, &directional) {
-            marked.insert(name.clone());
-        }
-        let mut targets = Vec::new();
-        schema_local_refs(schema, &mut targets);
-        for target in targets {
-            referrers.entry(target).or_default().push(name.clone());
+        match entry {
+            ReferenceOr::Item(schema) => {
+                if schema_marks_a_direction(schema, &directional) {
+                    marked.insert(name.clone());
+                }
+                let mut targets = Vec::new();
+                schema_local_refs(schema, &mut targets);
+                for target in targets {
+                    referrers.entry(target).or_default().push(name.clone());
+                }
+            }
+            // A component declared as a `$ref` is an alias. An alias to a split
+            // model splits as well, so it has to reach the closure below.
+            ReferenceOr::Reference { reference } => {
+                if let Some(target) = ref_target_name(reference) {
+                    referrers.entry(target.to_owned()).or_default().push(name.clone());
+                }
+            }
         }
     }
 
@@ -1065,6 +1073,28 @@ mod tests {
         assert!(split.contains("Holder"), "a property that names a marked schema splits");
         assert!(!split.contains("Marked"), "a marked primitive keeps its one name");
         assert!(!split.contains("Bystander"), "an unrelated schema keeps its one name");
+    }
+
+    /// A component declared as a `$ref` is an alias, and an alias to a split
+    /// model splits as well.
+    ///
+    /// Missing one emits a reference to a name the models run never writes, so
+    /// the composed crate does not build.
+    #[test]
+    fn an_alias_to_a_split_model_splits_as_well() {
+        let doc: OpenAPI = serde_yaml::from_str(
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Marked:\n      type: object\n      properties:\n        id:\n          type: string\n          readOnly: true\n    Alias:\n      $ref: '#/components/schemas/Marked'\n    Plain:\n      type: object\n      properties:\n        a:\n          type: string\n    PlainAlias:\n      $ref: '#/components/schemas/Plain'\n",
+        )
+        .expect("parse doc");
+
+        let split = direction_split_schemas(&doc);
+        assert!(split.contains("Marked"), "the model that declares the mark splits");
+        assert!(split.contains("Alias"), "an alias to a split model splits");
+        assert!(!split.contains("Plain"), "an unmarked model keeps its one name");
+        assert!(
+            !split.contains("PlainAlias"),
+            "an alias to an unmarked model keeps its one name"
+        );
     }
 
     /// A mark on a property splits the model that declares it, and every model
