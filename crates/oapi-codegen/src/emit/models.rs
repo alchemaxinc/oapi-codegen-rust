@@ -516,6 +516,7 @@ fn emit_alias(alias: &Alias) -> Result<TokenStream> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::Access;
     use crate::naming::Case;
     use crate::naming::to_ident;
 
@@ -536,6 +537,7 @@ mod tests {
                 serde_skip: false,
                 default: Some(DefaultValue::Int(10)),
                 constraints: None,
+                access: Access::ReadWrite,
             }],
             additional_properties: None,
             deny_unknown_fields: false,

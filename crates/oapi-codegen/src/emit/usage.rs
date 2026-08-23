@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use crate::emit::Targets;
 use crate::emit::models::ModelDerives;
 use crate::emit::models::SerdeDerives;
+use crate::ir::Direction;
 use crate::ir::ForeignDerives;
 use crate::ir::Item;
 use crate::ir::Module;
@@ -32,11 +33,11 @@ use crate::naming::to_ident;
 
 /// Whether a model is reachable as a request payload and/or a response payload.
 #[derive(Debug, Default, Clone, Copy)]
-struct Usage {
+pub(crate) struct Usage {
     /// Reachable from a request body or request-input struct.
-    request: bool,
+    pub(crate) request: bool,
     /// Reachable from a response body.
-    response: bool,
+    pub(crate) response: bool,
 }
 
 /// Compute the derive set for every generated model, keyed by its logical name.
@@ -46,14 +47,7 @@ struct Usage {
 pub(crate) fn model_derives(module: &Module, service: &Service, targets: Targets) -> HashMap<String, ModelDerives> {
     let adjacency = adjacency(module);
     let foreign = foreign_derives(module, &adjacency);
-    let mut usage: HashMap<String, Usage> = HashMap::new();
-
-    for name in request_seeds(service) {
-        mark(&adjacency, &name, &mut usage, Direction::Request);
-    }
-    for name in response_seeds(service) {
-        mark(&adjacency, &name, &mut usage, Direction::Response);
-    }
+    let usage = direction_usage(module, service);
 
     // Union of both keys. A model can be constrained by a foreign type without
     // being reachable from any operation, and the other way round, so taking only
@@ -264,11 +258,19 @@ fn item_types(item: &Item) -> Vec<RustType> {
     return types;
 }
 
-/// The direction a seed propagates.
-#[derive(Debug, Clone, Copy)]
-enum Direction {
-    Request,
-    Response,
+/// Which direction reaches each model, keyed by its logical name.
+///
+/// An absent name is reached by no operation, which happens under `skip-prune`.
+pub(crate) fn direction_usage(module: &Module, service: &Service) -> HashMap<String, Usage> {
+    let adjacency = adjacency(module);
+    let mut usage: HashMap<String, Usage> = HashMap::new();
+    for name in request_seeds(service) {
+        mark(&adjacency, &name, &mut usage, Direction::Request);
+    }
+    for name in response_seeds(service) {
+        mark(&adjacency, &name, &mut usage, Direction::Response);
+    }
+    return usage;
 }
 
 /// Mark `start` and every model reachable from it with `direction`, following
@@ -301,7 +303,7 @@ fn mark(
 
 /// Build the model-reference graph: each item name mapped to the names of the
 /// generated models it references through its fields, variants, or alias target.
-fn adjacency(module: &Module) -> HashMap<String, Vec<String>> {
+pub(crate) fn adjacency(module: &Module) -> HashMap<String, Vec<String>> {
     let mut graph = HashMap::with_capacity(module.items.len());
     for item in &module.items {
         graph.insert(item.name().to_owned(), item_references(item));
@@ -427,6 +429,7 @@ fn struct_field_names(strukt: &Struct, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::Access;
     use crate::ir::Alias;
     use crate::ir::Body;
     use crate::ir::Field;
@@ -457,6 +460,7 @@ mod tests {
             serde_skip: false,
             default: None,
             constraints: None,
+            access: Access::ReadWrite,
         };
     }
 

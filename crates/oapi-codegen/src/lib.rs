@@ -101,6 +101,9 @@ fn lower_spec(spec_path: &Path, config: &Config) -> Result<Lowered> {
             .unwrap_or(crate::config::DEFAULT_RESPONSE_SUFFIX);
         let mut service = lower::generate_service(&spec, &config.import_mapping, response_type_suffix)?;
         lower::rewrite_service(&mut service, names.renames());
+        // Runs before the prune pass, which drops a shape no operation reaches,
+        // and before the name checks, which then see the projected names.
+        lower::split_by_direction(&mut module, Some(&mut service));
         if !config.output_options.skip_prune {
             lower::prune_unused_models(&mut module, &service);
         }
@@ -128,6 +131,7 @@ fn lower_spec(spec_path: &Path, config: &Config) -> Result<Lowered> {
     }
     // Models-only generation prunes nothing, so the module holds every schema and
     // every collision reports.
+    lower::split_by_direction(&mut module, None);
     names.check_emitted(&module)?;
     lower::check_duplicate_models(&module)?;
     lower::check_prelude_shadowing(&module, emit::Targets::default())?;
@@ -216,6 +220,7 @@ pub fn generate_models_string(spec_path: &Path) -> Result<String> {
     let spec = Spec::load(spec_path)?;
     let names = lower::type_renames(&spec, None)?;
     let mut module = lower::generate_models(&spec, &names)?;
+    lower::split_by_direction(&mut module, None);
     // Every schema becomes an item here, so every collision reaches the file.
     names.check_emitted(&module)?;
     lower::check_duplicate_models(&module)?;
