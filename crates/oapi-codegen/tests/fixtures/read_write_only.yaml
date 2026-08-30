@@ -1,0 +1,51 @@
+openapi: "3.0.3"
+info:
+  title: Read-only and write-only properties
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Account:
+      description: A schema whose marks split it into a request shape and a response shape.
+      type: object
+      required: [id, email, password, nickname]
+      properties:
+        id:
+          description: Assigned by the server, so only a response carries it.
+          type: string
+          format: uuid
+          readOnly: true
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        email:
+          type: string
+        password:
+          description: Sent when the account is created, and never read back.
+          type: string
+          writeOnly: true
+        nickname:
+          type: string
+    Envelope:
+      description: A holder splits too, because its field type differs per direction.
+      type: object
+      required: [account]
+      properties:
+        account:
+          $ref: "#/components/schemas/Account"
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Account"
+    AccountList:
+      description: An alias to a split model splits as well.
+      type: array
+      items:
+        $ref: "#/components/schemas/Account"
+    Untouched:
+      description: No mark reaches this schema, so it keeps its name.
+      type: object
+      properties:
+        label:
+          type: string

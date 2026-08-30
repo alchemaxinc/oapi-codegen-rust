@@ -1,0 +1,138 @@
+openapi: 3.0.3
+info:
+  title: Combined Accounts API
+  version: 1.0.0
+paths:
+  /accounts:
+    post:
+      operationId: createAccount
+      summary: Create an account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Account"
+      responses:
+        "201":
+          description: The created account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+    get:
+      operationId: listAccounts
+      summary: List every account.
+      responses:
+        "200":
+          description: The accounts, wrapped in a page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountPage"
+  /accounts/search:
+    post:
+      operationId: searchAccounts
+      summary: Search accounts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountFilter"
+      responses:
+        "204":
+          description: The search was accepted.
+  /audit:
+    get:
+      operationId: listAudit
+      summary: List the audit log.
+      responses:
+        "200":
+          description: The audit entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEntry"
+  /accounts/{accountId}/avatar:
+    put:
+      operationId: uploadAvatar
+      summary: Replace an account avatar.
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/Avatar"
+      responses:
+        "204":
+          description: The avatar was stored.
+components:
+  schemas:
+    Account:
+      description: An account, used as a request body and as a response body.
+      type: object
+      required: [id, email, password]
+      properties:
+        id:
+          description: Assigned by the server, so only a response carries it.
+          type: string
+          readOnly: true
+        email:
+          type: string
+        password:
+          description: Sent when the account is created, and never read back.
+          type: string
+          writeOnly: true
+    AccountPage:
+      description: A response-only holder of a split model.
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Account"
+    AccountFilter:
+      description: A request-only model that marks a property `readOnly`.
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+        matched:
+          description: Only a response could carry this, so the request drops it.
+          type: integer
+          format: int32
+          readOnly: true
+    AuditEntry:
+      description: A response-only model that marks a property `writeOnly`.
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+        token:
+          description: Only a request could carry this, so the response drops it.
+          type: string
+          writeOnly: true
+    Avatar:
+      description: A multipart body, which only a request carries.
+      type: object
+      required: [image]
+      properties:
+        image:
+          type: string
+          format: binary
+        checksum:
+          description: The server computes this, so the extractor leaves it out.
+          type: string
+          readOnly: true

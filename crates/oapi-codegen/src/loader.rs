@@ -16,6 +16,8 @@ use openapiv3::Schema;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::lower::direction::REQUEST_SUFFIX;
+use crate::lower::direction::RESPONSE_SUFFIX;
 
 /// Maximum `$ref` chain length before bailing out (cycle guard).
 const MAX_REF_DEPTH: usize = 32;
@@ -441,17 +443,33 @@ impl Spec {
     /// `type-name-suffix` it takes from its own config. This run cannot see that
     /// config, so it emits the plain name and reaches whichever of the two
     /// schemas kept it. That builds, and it carries the wrong type.
+    ///
+    /// A schema the direction pass splits is an error for the same reason. The
+    /// other run emits two names there, and this one cannot tell which of the
+    /// two an `import-mapping` reference means.
     pub fn external_schema_name(&self, file: &str, name: &str, reference: &str) -> Result<String> {
         let entry = self.component_schema(Some(file), reference, name)?;
         let chosen = external_name_of(&entry, name)?;
         let doc = self.document_for(file)?;
         let schemas = doc.components.as_ref().map(|components| return &components.schemas);
+        let ident = crate::naming::to_ident(&chosen, crate::naming::Case::Pascal);
+        if direction_split_schemas(&doc).contains(name) {
+            let shape = ident.logical();
+            return Err(Error::UnsupportedRef {
+                reference: reference.to_owned(),
+                reason: format!(
+                    "`{name}` in `{file}` marks a property `readOnly` or `writeOnly`, so the run that \
+                     generates that file emits it as `{shape}{REQUEST_SUFFIX}` and `{shape}{RESPONSE_SUFFIX}`. \
+                     This run cannot tell which of the two an `import-mapping` reference means. Declare \
+                     the schema in this document instead, or drop the mark"
+                ),
+            });
+        }
         for (other, other_entry) in schemas.into_iter().flatten() {
             if other == name {
                 continue;
             }
             let taken = external_name_of(other_entry, other)?;
-            let ident = crate::naming::to_ident(&chosen, crate::naming::Case::Pascal);
             if crate::naming::to_ident(&taken, crate::naming::Case::Pascal).logical() == ident.logical() {
                 return Err(Error::UnsupportedRef {
                     reference: reference.to_owned(),
@@ -464,6 +482,193 @@ impl Spec {
         }
         return Ok(chosen);
     }
+}
+
+/// The schemas in `doc` that the direction pass splits into a request shape and
+/// a response shape.
+///
+/// A schema qualifies when a property inside it carries a direction mark, or
+/// when it reaches such a schema through a same-document `$ref`.
+///
+/// A mark on a schema itself does not qualify that schema. The direction pass
+/// splits a model only when one of its properties is directional, so a marked
+/// primitive keeps its one name and only its referrers split.
+///
+/// This reads the document alone, because both runs that compose a crate must
+/// reach the same verdict. Only one of the two holds the operations.
+fn direction_split_schemas(doc: &OpenAPI) -> std::collections::BTreeSet<String> {
+    let mut marked = std::collections::BTreeSet::new();
+    let Some(components) = doc.components.as_ref() else {
+        return marked;
+    };
+
+    let mut directional = std::collections::BTreeSet::new();
+    for (name, entry) in &components.schemas {
+        if let ReferenceOr::Item(schema) = entry
+            && (schema.schema_data.read_only || schema.schema_data.write_only)
+        {
+            directional.insert(name.clone());
+        }
+    }
+
+    let mut referrers: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, entry) in &components.schemas {
+        match entry {
+            ReferenceOr::Item(schema) => {
+                if schema_marks_a_direction(schema, &directional) {
+                    marked.insert(name.clone());
+                }
+                let mut targets = Vec::new();
+                schema_local_refs(schema, &mut targets);
+                for target in targets {
+                    referrers.entry(target).or_default().push(name.clone());
+                }
+            }
+            // A component declared as a `$ref` is an alias. An alias to a split
+            // model splits as well, so it has to reach the closure below.
+            ReferenceOr::Reference { reference } => {
+                if let Some(target) = ref_target_name(reference) {
+                    referrers.entry(target.to_owned()).or_default().push(name.clone());
+                }
+            }
+        }
+    }
+
+    let mut stack: Vec<String> = marked.iter().cloned().collect();
+    while let Some(name) = stack.pop() {
+        let Some(parents) = referrers.get(&name) else {
+            continue;
+        };
+        for parent in parents {
+            if marked.insert(parent.clone()) {
+                stack.push(parent.clone());
+            }
+        }
+    }
+    return marked;
+}
+
+/// Whether a property of `schema`, or of a schema written inside it, carries a
+/// direction mark.
+///
+/// `directional` holds the component schemas that set `readOnly` or `writeOnly`
+/// on themselves. A property that names one of those carries the mark too.
+fn schema_marks_a_direction(schema: &Schema, directional: &std::collections::BTreeSet<String>) -> bool {
+    let mut found = declares_a_directional_property(schema, directional);
+    walk_inline_schemas(schema, &mut |inner| {
+        found = found || declares_a_directional_property(inner, directional);
+    });
+    return found;
+}
+
+/// Whether one schema declares a property that only one direction carries.
+fn declares_a_directional_property(schema: &Schema, directional: &std::collections::BTreeSet<String>) -> bool {
+    return object_properties(schema).iter().any(|entry| {
+        return match entry {
+            ReferenceOr::Item(inner) => inner.schema_data.read_only || inner.schema_data.write_only,
+            ReferenceOr::Reference { reference } => {
+                return ref_file_part(reference).is_none()
+                    && ref_component_name(reference, "schemas").is_some_and(|name| return directional.contains(name));
+            }
+        };
+    });
+}
+
+/// The schemas one schema declares as properties.
+fn object_properties(schema: &Schema) -> Vec<ReferenceOr<Schema>> {
+    let unbox = |entry: &ReferenceOr<Box<Schema>>| {
+        return match entry {
+            ReferenceOr::Item(inner) => ReferenceOr::Item((**inner).clone()),
+            ReferenceOr::Reference { reference } => ReferenceOr::Reference {
+                reference: reference.clone(),
+            },
+        };
+    };
+    return match &schema.schema_kind {
+        openapiv3::SchemaKind::Type(openapiv3::Type::Object(object)) => {
+            return object.properties.values().map(&unbox).collect();
+        }
+        openapiv3::SchemaKind::Any(any) => return any.properties.values().map(&unbox).collect(),
+        openapiv3::SchemaKind::Type(_)
+        | openapiv3::SchemaKind::OneOf { .. }
+        | openapiv3::SchemaKind::AllOf { .. }
+        | openapiv3::SchemaKind::AnyOf { .. }
+        | openapiv3::SchemaKind::Not { .. } => Vec::new(),
+    };
+}
+
+/// The same-document component schemas a schema names, at any depth.
+fn schema_local_refs(schema: &Schema, out: &mut Vec<String>) {
+    let mut collect = |entry: &ReferenceOr<Schema>| {
+        if let ReferenceOr::Reference { reference } = entry
+            && ref_file_part(reference).is_none()
+            && let Some(name) = ref_component_name(reference, "schemas")
+        {
+            out.push(name.to_owned());
+        }
+    };
+    for entry in inline_members(schema) {
+        collect(&entry);
+    }
+    walk_inline_schemas(schema, &mut |inner| {
+        for entry in inline_members(inner) {
+            collect(&entry);
+        }
+    });
+}
+
+/// Apply `visit` to every schema written inline within `schema`, at any depth.
+fn walk_inline_schemas(schema: &Schema, visit: &mut impl FnMut(&Schema)) {
+    for entry in inline_members(schema) {
+        if let ReferenceOr::Item(inner) = entry {
+            visit(&inner);
+            walk_inline_schemas(&inner, visit);
+        }
+    }
+}
+
+/// The schemas one schema holds directly: its properties, its element type, its
+/// `additionalProperties`, and its composition members.
+fn inline_members(schema: &Schema) -> Vec<ReferenceOr<Schema>> {
+    let unbox = |entry: &ReferenceOr<Box<Schema>>| {
+        return match entry {
+            ReferenceOr::Item(inner) => ReferenceOr::Item((**inner).clone()),
+            ReferenceOr::Reference { reference } => ReferenceOr::Reference {
+                reference: reference.clone(),
+            },
+        };
+    };
+    let additional = |entry: &Option<openapiv3::AdditionalProperties>| {
+        return match entry {
+            Some(openapiv3::AdditionalProperties::Schema(inner)) => vec![(**inner).clone()],
+            Some(openapiv3::AdditionalProperties::Any(_)) | None => Vec::new(),
+        };
+    };
+    let mut members = Vec::new();
+    match &schema.schema_kind {
+        openapiv3::SchemaKind::Type(openapiv3::Type::Object(object)) => {
+            members.extend(object.properties.values().map(&unbox));
+            members.extend(additional(&object.additional_properties));
+        }
+        openapiv3::SchemaKind::Type(openapiv3::Type::Array(array)) => {
+            members.extend(array.items.as_ref().map(&unbox));
+        }
+        openapiv3::SchemaKind::Type(_) => {}
+        openapiv3::SchemaKind::OneOf { one_of } => members.extend(one_of.iter().cloned()),
+        openapiv3::SchemaKind::AllOf { all_of } => members.extend(all_of.iter().cloned()),
+        openapiv3::SchemaKind::AnyOf { any_of } => members.extend(any_of.iter().cloned()),
+        openapiv3::SchemaKind::Not { not } => members.push((**not).clone()),
+        openapiv3::SchemaKind::Any(any) => {
+            members.extend(any.properties.values().map(&unbox));
+            members.extend(additional(&any.additional_properties));
+            members.extend(any.items.as_ref().map(&unbox));
+            members.extend(any.one_of.iter().cloned());
+            members.extend(any.all_of.iter().cloned());
+            members.extend(any.any_of.iter().cloned());
+            members.extend(any.not.as_ref().map(|not| return (**not).clone()));
+        }
+    }
+    return members;
 }
 
 /// The name a schema in a referenced document declares for itself, honouring
@@ -850,5 +1055,59 @@ mod tests {
             schema.schema_kind,
             openapiv3::SchemaKind::Type(openapiv3::Type::Integer(_))
         ));
+    }
+
+    /// A mark on a schema itself splits the schemas that name it, not the schema.
+    ///
+    /// The direction pass splits a model only when one of its properties is
+    /// directional, so a marked primitive stays one type alias. Reporting it as
+    /// split rejects an `import-mapping` reference that resolves.
+    #[test]
+    fn a_schema_level_mark_splits_only_the_referrers() {
+        let doc: OpenAPI = serde_yaml::from_str(
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Marked:\n      type: string\n      readOnly: true\n    Holder:\n      type: object\n      properties:\n        a:\n          $ref: '#/components/schemas/Marked'\n    Bystander:\n      type: object\n      properties:\n        b:\n          type: string\n",
+        )
+        .expect("parse doc");
+
+        let split = direction_split_schemas(&doc);
+        assert!(split.contains("Holder"), "a property that names a marked schema splits");
+        assert!(!split.contains("Marked"), "a marked primitive keeps its one name");
+        assert!(!split.contains("Bystander"), "an unrelated schema keeps its one name");
+    }
+
+    /// A component declared as a `$ref` is an alias, and an alias to a split
+    /// model splits as well.
+    ///
+    /// Missing one emits a reference to a name the models run never writes, so
+    /// the composed crate does not build.
+    #[test]
+    fn an_alias_to_a_split_model_splits_as_well() {
+        let doc: OpenAPI = serde_yaml::from_str(
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Marked:\n      type: object\n      properties:\n        id:\n          type: string\n          readOnly: true\n    Alias:\n      $ref: '#/components/schemas/Marked'\n    Plain:\n      type: object\n      properties:\n        a:\n          type: string\n    PlainAlias:\n      $ref: '#/components/schemas/Plain'\n",
+        )
+        .expect("parse doc");
+
+        let split = direction_split_schemas(&doc);
+        assert!(split.contains("Marked"), "the model that declares the mark splits");
+        assert!(split.contains("Alias"), "an alias to a split model splits");
+        assert!(!split.contains("Plain"), "an unmarked model keeps its one name");
+        assert!(
+            !split.contains("PlainAlias"),
+            "an alias to an unmarked model keeps its one name"
+        );
+    }
+
+    /// A mark on a property splits the model that declares it, and every model
+    /// that reaches it.
+    #[test]
+    fn a_property_mark_splits_the_declaring_model_and_its_referrers() {
+        let doc: OpenAPI = serde_yaml::from_str(
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Leaf:\n      type: object\n      properties:\n        id:\n          type: string\n          readOnly: true\n    Parent:\n      type: object\n      properties:\n        leaf:\n          $ref: '#/components/schemas/Leaf'\n",
+        )
+        .expect("parse doc");
+
+        let split = direction_split_schemas(&doc);
+        assert!(split.contains("Leaf"), "the model that declares the mark splits");
+        assert!(split.contains("Parent"), "a model that reaches the mark splits");
     }
 }

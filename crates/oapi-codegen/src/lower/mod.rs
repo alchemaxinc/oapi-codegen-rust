@@ -10,6 +10,7 @@
 pub(crate) mod constraints;
 /// Lowering of a schema `default`. Used by [`schema`] and [`paths`] only.
 pub(crate) mod default;
+pub mod direction;
 /// Readers for the `x-` extensions the generator understands.
 pub(crate) mod extension;
 pub mod paths;
@@ -21,6 +22,7 @@ pub mod security;
 pub mod servers;
 pub mod validate;
 
+pub use crate::lower::direction::split_by_direction;
 pub use crate::lower::paths::generate_service;
 pub use crate::lower::prune::prune_unused_models;
 pub use crate::lower::recurse::box_recursive_types;

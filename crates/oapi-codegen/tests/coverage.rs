@@ -333,13 +333,18 @@ const TEST_TABLE: &[Feature] = &[
     },
     Feature {
         element: "meta.readOnly",
-        status: Status::Ignored,
-        fixture: None,
+        status: Status::Supported,
+        fixture: Some("read_write_only"),
     },
     Feature {
         element: "meta.writeOnly",
-        status: Status::Ignored,
-        fixture: None,
+        status: Status::Supported,
+        fixture: Some("read_write_only"),
+    },
+    Feature {
+        element: "meta.readOnly.with.writeOnly",
+        status: Status::Unsupported,
+        fixture: Some("read_write_only_conflict"),
     },
     Feature {
         element: "meta.example",
@@ -555,6 +560,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
     "server_unsupported_xfile_missing_component",
     "server_unsupported_xfile_missing_schema",
     "server_unsupported_xfile_name_clash",
+    "server_unsupported_xfile_direction_split",
     "server_unsupported_xfile_no_import_mapping",
     "server_unsupported_xfile_object_path_param",
     "server_unsupported_object_response_header",
@@ -601,6 +607,7 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// same per-operation types alongside the component models.
 const COMBINED_FIXTURES: &[&str] = &[
     "combined_keyword_operations",
+    "combined_read_write_only",
     "combined_prelude_value_names",
     "combined_server_client",
     "combined_response_name_collision",
@@ -742,6 +749,7 @@ generated_tests!(
     compose_shared,
     primitive_scalars,
     recursive_schema,
+    read_write_only,
     ref_local,
     integer_enum,
     string_enum,
@@ -776,6 +784,10 @@ fn server_config() -> oapi_codegen::Config {
     import_mapping.insert(
         "schemas/compose_clash.yaml".to_owned(),
         "crate::generated::compose_clash".to_owned(),
+    );
+    import_mapping.insert(
+        "schemas/compose_marked.yaml".to_owned(),
+        "crate::generated::compose_marked".to_owned(),
     );
     return oapi_codegen::Config {
         generate: oapi_codegen::config::Generate {
@@ -885,6 +897,49 @@ fn server_unsupported_features_are_rejected() {
             "`{stem}` is catalogued as unsupported but server generation succeeded",
         );
     }
+}
+
+/// A property that sets both direction marks is rejected **for that**, and not
+/// for whatever else the lowering pass trips over first.
+///
+/// `unsupported_features_are_rejected` asserts `is_err()` only, so it passes on
+/// any error at all. The OpenAPI specification calls the combination invalid, so
+/// the message must name both keywords and leave the author with one remedy.
+#[test]
+fn a_property_that_sets_both_direction_marks_names_both_in_the_message() {
+    let fixture = tests_dir().join("fixtures").join("read_write_only_conflict.yaml");
+    let error = oapi_codegen::generate_models_string(&fixture).expect_err("both marks must be rejected");
+    let message = format!("{error}");
+    assert!(
+        message.contains("`readOnly` and `writeOnly` are both set"),
+        "the message must name both keywords: {message}",
+    );
+}
+
+/// A cross-file reference to a schema the direction pass splits is rejected, and
+/// the message names the two shapes the other run emits.
+///
+/// The run that writes the operations resolves the reference by name alone, so
+/// it cannot tell which shape the author meant. Emitting the plain name compiles
+/// nothing, because the models crate declares neither.
+///
+/// The target carries an `x-rust-name`, so the message must name the shapes that
+/// the chosen name builds, not the shapes that the schema name builds.
+#[test]
+fn a_cross_file_reference_to_a_split_schema_is_rejected() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("server_unsupported_xfile_direction_split.yaml");
+    let error = oapi_codegen::generate(&fixture, &server_config()).expect_err("a split target must be rejected");
+    let message = format!("{error}");
+    assert!(
+        message.contains("ShipmentRequest") && message.contains("ShipmentResponse"),
+        "the message must name both shapes: {message}",
+    );
+    assert!(
+        !message.contains("ParcelRequest") && !message.contains("ParcelResponse"),
+        "the message must not name a shape the models run never emits: {message}",
+    );
 }
 
 /// Unused component schemas are pruned by default, but retained when
@@ -1276,6 +1331,7 @@ macro_rules! combined_generated_tests {
 
 combined_generated_tests!(
     combined_keyword_operations,
+    combined_read_write_only,
     combined_prelude_value_names,
     combined_server_client,
     combined_response_name_collision,

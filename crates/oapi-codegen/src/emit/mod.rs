@@ -11,7 +11,7 @@ mod operation;
 mod package;
 mod reqwest;
 mod servers;
-mod usage;
+pub(crate) mod usage;
 
 use std::collections::HashMap;
 
@@ -300,13 +300,12 @@ fn render_body(items: &[TokenStream]) -> Result<String> {
 }
 
 /// Render a doc attribute, or nothing when there is no documentation.
+///
+/// This splits the text on its line breaks, so a multi-line `description` prints
+/// as a run of `///` lines and not one `/** */` block.
 pub(crate) fn doc_attr(doc: &Option<String>) -> TokenStream {
     let tokens = match doc {
-        Some(text) => {
-            // Leading space matches the `/// text` desugaring rustfmt produces.
-            let spaced = format!(" {text}");
-            quote! { #[doc = #spaced] }
-        }
+        Some(text) => doc_lines(std::slice::from_ref(text)),
         None => quote! {},
     };
     return tokens;

@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info:
+  title: unsupported cross-file schema ref (a direction mark splits the target)
+  version: "1"
+paths:
+  /parcels:
+    post:
+      operationId: acceptParcel
+      summary: Accept a parcel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "schemas/compose_marked.yaml#/components/schemas/Parcel"
+      responses:
+        "201":
+          description: The parcel was accepted.

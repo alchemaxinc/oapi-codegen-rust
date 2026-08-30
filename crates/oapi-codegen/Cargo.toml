@@ -30,9 +30,9 @@ workspace = true
 anstream = "1.0.0"
 clap = { version = "4.6.6", features = ["derive"] }
 http = "1.5.0"
-indexmap = "2.14.0"
+indexmap = "2.14.1"
 openapiv3 = "2.2.0"
-owo-colors = "4.3.0"
+owo-colors = "4.4.0"
 prettyplease = "0.3.0"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
@@ -40,7 +40,7 @@ regex = { version = "1.13.1", default-features = false, features = ["std", "perf
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serde_yaml = "0.9.34"
-syn = { version = "3.0.3", features = ["full"] }
+syn = { version = "3.0.4", features = ["full"] }
 
 [dev-dependencies]
 axum = { version = "0.8.9", features = ["multipart"] }
@@ -53,4 +53,4 @@ reqwest = { version = "0.13.4", default-features = false, features = ["blocking"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_urlencoded = "0.7.1"
 trycmd = "1.2.1"
-uuid = { version = "1.24.1", features = ["serde"] }
+uuid = { version = "1.26.0", features = ["serde"] }

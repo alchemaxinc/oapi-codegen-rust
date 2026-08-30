@@ -426,6 +426,7 @@ fn canonical(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::Access;
     use crate::ir::Alias;
     use crate::ir::Enum;
     use crate::ir::Field;
@@ -449,6 +450,7 @@ mod tests {
                 serde_skip: false,
                 default: None,
                 constraints: None,
+                access: Access::ReadWrite,
             }],
             additional_properties: None,
             deny_unknown_fields: false,

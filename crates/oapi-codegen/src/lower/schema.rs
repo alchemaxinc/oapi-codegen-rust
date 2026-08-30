@@ -15,6 +15,7 @@ use openapiv3::VariantOrUnknownOrEmpty;
 
 use crate::error::Error;
 use crate::error::Result;
+use crate::ir::Access;
 use crate::ir::Alias;
 use crate::ir::Deprecation;
 use crate::ir::Enum;
@@ -329,6 +330,15 @@ impl Mapper<'_> {
             None => to_ident(wire, Case::Snake),
         };
         let rename = crate::naming::rename_for(wire, &ident);
+        let access = match prop {
+            ReferenceOr::Item(schema) => access_of(&schema.schema_data, &at)?,
+            // A `$ref` property carries no sibling keyword in OpenAPI 3.0, so
+            // the mark can only sit on the target.
+            ReferenceOr::Reference { reference } => match self.spec.resolve(reference) {
+                Ok(target) => access_of(&target.schema_data, &at)?,
+                Err(_) => Access::ReadWrite,
+            },
+        };
         let constraints = match prop {
             ReferenceOr::Item(schema) => crate::lower::constraints::constraints_of(schema),
             // The alias a `$ref` makes carries no serde attribute, so the field
@@ -350,6 +360,7 @@ impl Mapper<'_> {
             serde_skip,
             default,
             constraints,
+            access,
         };
         crate::lower::constraints::check_constraints(&field)?;
         return Ok(field);
@@ -1062,6 +1073,24 @@ fn verbatim_type(data: &SchemaData, verbatim: &str, path: &str) -> Result<RustTy
         text: verbatim.to_owned(),
         derives: foreign_derives_of(data, path)?,
     });
+}
+
+/// Read `readOnly`/`writeOnly` into the direction they name.
+///
+/// A property that sets both marks states that no direction can carry it. The
+/// generator rejects that rather than pick one of the two marks.
+pub(crate) fn access_of(data: &SchemaData, at: &str) -> Result<Access> {
+    return match (data.read_only, data.write_only) {
+        (true, true) => Err(Error::UnsupportedSchema {
+            path: at.to_owned(),
+            reason: "`readOnly` and `writeOnly` are both set, so no request and no response could \
+                     carry the property. Set at most one of the two."
+                .to_owned(),
+        }),
+        (true, false) => Ok(Access::ReadOnly),
+        (false, true) => Ok(Access::WriteOnly),
+        (false, false) => Ok(Access::ReadWrite),
+    };
 }
 
 /// Derive a `#[deprecated]` annotation from `deprecated: true` and an optional
