@@ -1,10 +1,11 @@
 # Build the bookstore server binary from the workspace, then run it from a slim
 # runtime image. The build context is the repository root (see docker-compose.yml).
 
-# Kept in sync with rust-toolchain.toml by the Makefile: a mismatch makes
-# rustup download a second toolchain inside the image on every build.
+# Rust toolchains can be available before matching Docker image tags.
+FROM rust:bookworm AS builder
 ARG RUST_VERSION=1.97.1
-FROM rust:${RUST_VERSION}-bookworm AS builder
+RUN rustup toolchain install "${RUST_VERSION}" --profile minimal --no-self-update \
+    && rustup default "${RUST_VERSION}"
 WORKDIR /src
 COPY . .
 RUN cargo build --locked -p bookstore-example --bin bookstore-server
