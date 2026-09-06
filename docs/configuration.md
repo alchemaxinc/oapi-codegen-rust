@@ -23,9 +23,12 @@ For a full, auto-generated reference of every flag and argument, see
 
 ## Config file
 
-Keys mirror [`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen)'s
-YAML config; unknown keys are ignored, so an existing Go config can be reused
-as-is. Only the subset below is interpreted.
+Keys mirror the YAML configuration of
+[`oapi-codegen`](https://github.com/oapi-codegen/oapi-codegen).
+Unknown keys produce warnings but do not stop generation.
+This also applies inside `generate` and `output-options`.
+An invalid value for a recognized key remains an error.
+The names inside `import-mapping` are file names, not configuration keys.
 
 | Key              | Type   | Purpose                                                                                                                                          |
 | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |

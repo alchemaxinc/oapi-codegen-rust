@@ -241,6 +241,9 @@ pub fn report_install_failed(dep: &Dependency, detail: &str) {
 /// Build the context-specific hints shown after an error message.
 fn hints_for(err: &Error) -> Vec<String> {
     match err {
+        Error::InvalidSpec { .. } => {
+            return vec!["Use the OpenAPI 3.0 spelling and location for this key.".to_owned()];
+        }
         Error::ReadSpec { path, source } => {
             return io_read_hints("spec file", path, source.kind());
         }

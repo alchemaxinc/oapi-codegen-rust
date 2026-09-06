@@ -189,11 +189,11 @@ impl Mapper<'_> {
                     ty,
                 })
             }
-            SchemaKind::Any(_) => Item::Alias(Alias {
+            SchemaKind::Any(schema) => Item::Alias(Alias {
                 name: self.type_name_ident(name),
                 doc: doc_of(data),
                 deprecated: deprecation_of(data, name)?,
-                ty: RustType::Value,
+                ty: self.unconstrained_type(name, schema),
             }),
             SchemaKind::Not { .. } => {
                 return Err(Error::UnsupportedSchema {
@@ -749,7 +749,7 @@ impl Mapper<'_> {
                     RustType::Named(hint.to_owned())
                 }
             }
-            SchemaKind::Any(_) => RustType::Value,
+            SchemaKind::Any(schema) => self.unconstrained_type(hint, schema),
             SchemaKind::Not { .. } => {
                 return Err(Error::UnsupportedSchema {
                     path: hint.to_owned(),
@@ -770,6 +770,19 @@ impl Mapper<'_> {
         let strukt = self.object_to_struct(hint, obj, data)?;
         self.extra.push(Item::Struct(strukt));
         return Ok(RustType::Named(hint.to_owned()));
+    }
+
+    fn unconstrained_type(&self, name: &str, schema: &openapiv3::AnySchema) -> RustType {
+        if *schema != openapiv3::AnySchema::default() {
+            crate::diagnostic::report_warnings(
+                &self.spec.source().display().to_string(),
+                &[crate::diagnostic::Warning::new(
+                    name,
+                    "this schema combination is not implemented and becomes an unconstrained JSON value",
+                )],
+            );
+        }
+        return RustType::Value;
     }
 
     /// Element type for an object used purely as a map (`additionalProperties`).

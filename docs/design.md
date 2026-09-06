@@ -275,6 +275,50 @@ A document must also declare no `webhooks:` key. That key carries operations,
 and the generator emits no handler for them. Silence about the key reads as "the
 document declares no such operation", so the generator rejects the key.
 
+## Diagnose unhandled spec content
+
+The generator inspects OpenAPI object keys before typed deserialization.
+The inspection covers the root document and each referenced document that the
+loader reads. It runs before filtering, so an excluded operation cannot hide an
+invalid key.
+
+The catalogue in `crates/oapi-codegen/src/coverage.rs` distinguishes handled keys, annotations, and
+unsupported features. An unknown key is an error with the document name and a
+JSON pointer. An invalid object, map, or array structure is also an error.
+The generator reports independent key errors together, before it writes
+output.
+
+A valid but unimplemented feature produces a warning. Examples include callbacks,
+XML serialization, response links, server overrides, and body encoding options.
+Existing errors remain errors. For example, an unsupported body type or a `not`
+schema still stops generation.
+
+Annotations that have no generated representation remain intentionally omitted.
+These include document information, schema titles, external documentation, and
+examples. Compatibility extensions with an `x-go-` prefix are also intentionally
+ignored. Other unhandled extensions produce warnings.
+
+Property names, schema names, security scheme names, and media types are data,
+not fixed OpenAPI keys. Payloads in `example`, `default`, and example `value`
+fields are also data. The inspection does not interpret their contents as
+OpenAPI objects. However, it still inspects objects inside unsupported features,
+such as callback operations.
+
+Warnings also identify several limits of the current translation. These include
+first-match unions, merged `allOf` members, nullability, and unconstrained fallback
+types. Body selection reports discarded media entries.
+The warnings expose these limits without changing the generated types.
+The catalogue is not a complete OpenAPI value validator. Lowering still applies
+its own value and combination checks.
+
+Warnings go to stderr for library calls and CLI commands, including `--check`.
+A warning alone does not change the exit code. Drift and generation errors still
+make `--check` fail.
+
+Configuration diagnostics use the serialized shape of `Config::default()`.
+This keeps recognized configuration keys in the Rust types rather than in a
+second catalogue. Dynamic `import-mapping` entries do not enter this comparison.
+
 ## A body must declare a content type the generator can represent
 
 A request body must declare one of `application/json`,

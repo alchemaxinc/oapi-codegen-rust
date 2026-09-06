@@ -45,6 +45,7 @@ use openapiv3::Operation as OasOperation;
 use openapiv3::Parameter;
 use openapiv3::ParameterData;
 use openapiv3::ParameterSchemaOrContent;
+use openapiv3::PathStyle;
 use openapiv3::QueryStyle;
 use openapiv3::ReferenceOr;
 use openapiv3::RequestBody;
@@ -55,6 +56,8 @@ use openapiv3::SchemaKind;
 use openapiv3::StatusCode;
 use openapiv3::Type;
 
+use crate::diagnostic::Warning;
+use crate::diagnostic::report_warnings;
 use crate::error::Error;
 use crate::error::Result;
 use crate::ir::Body;
@@ -332,8 +335,9 @@ impl Lowerer<'_> {
         // the template. Driving the loop above from the template alone will
         // otherwise silently drop such a parameter from the generated signature,
         // producing a handler that omits a required input.
+        let mut seen = Vec::new();
         for parameter in params {
-            let Parameter::Path { parameter_data, .. } = &parameter.value else {
+            let Parameter::Path { parameter_data, style } = &parameter.value else {
                 continue;
             };
             if !placeholders
@@ -345,6 +349,20 @@ impl Lowerer<'_> {
                     path: path.to_owned(),
                     name: parameter_data.name.clone(),
                 });
+            }
+            if seen.contains(&parameter_data.name.as_str()) {
+                continue;
+            }
+            seen.push(parameter_data.name.as_str());
+            if !matches!(style, PathStyle::Simple) {
+                self.warn(
+                    parameter.origin.as_deref(),
+                    &format!("{method} {path}"),
+                    format!(
+                        "path parameter `{}` uses unsupported style `{style:?}`. Generated code uses `simple` encoding",
+                        parameter_data.name
+                    ),
+                );
             }
         }
         return Ok(path_params);
@@ -499,7 +517,14 @@ impl Lowerer<'_> {
                 });
             }
             let element = match &array.items {
-                Some(ReferenceOr::Item(item)) => scalar_type(&item.schema_kind),
+                Some(ReferenceOr::Item(item)) => {
+                    self.warn_scalar_enum(
+                        origin,
+                        &format!("{method} {path} query parameter `{name}` items"),
+                        &item.schema_kind,
+                    );
+                    scalar_type(&item.schema_kind)
+                }
                 Some(ReferenceOr::Reference { reference }) if ref_file_part(reference).is_some() => {
                     return Err(Error::UnsupportedOperation {
                         method: method.to_owned(),
@@ -511,6 +536,11 @@ impl Lowerer<'_> {
                 }
                 Some(ReferenceOr::Reference { reference }) => {
                     let item = self.spec.resolve_schema(origin, reference)?;
+                    self.warn_scalar_enum(
+                        origin,
+                        &format!("{method} {path} query parameter `{name}` items"),
+                        &item.schema_kind,
+                    );
                     scalar_type(&item.schema_kind)
                 }
                 None => {
@@ -537,6 +567,20 @@ impl Lowerer<'_> {
                 reason: format!("query parameter `{name}` must be a scalar or an array of scalars"),
             };
         })?;
+        self.warn_scalar_enum(
+            origin,
+            &format!("{method} {path} query parameter `{name}`"),
+            &schema.schema_kind,
+        );
+        if !matches!(style, QueryStyle::Form) {
+            self.warn(
+                origin,
+                &format!("{method} {path}"),
+                format!(
+                    "query parameter `{name}` uses unsupported scalar style `{style:?}`. Generated code uses `form` encoding"
+                ),
+            );
+        }
         return Ok(ty);
     }
 
@@ -674,6 +718,11 @@ impl Lowerer<'_> {
                 reason: format!("{kind_label} `{name}` uses a `byte`/`binary` format, which is not supported"),
             });
         }
+        self.warn_scalar_enum(
+            origin,
+            &format!("{method} {path} {kind_label} `{name}`"),
+            &schema.schema_kind,
+        );
         return Ok(ty);
     }
 
@@ -784,7 +833,28 @@ impl Lowerer<'_> {
                 reason: format!("cookie parameter `{name}` uses a `byte`/`binary` format, which is not supported"),
             });
         }
+        self.warn_scalar_enum(
+            origin,
+            &format!("{method} {path} cookie parameter `{name}`"),
+            &schema.schema_kind,
+        );
         return Ok(ty);
+    }
+
+    fn warn_scalar_enum(&self, origin: Option<&str>, context: &str, kind: &SchemaKind) {
+        let has_enum = match kind {
+            SchemaKind::Type(Type::String(schema)) => !schema.enumeration.is_empty(),
+            SchemaKind::Type(Type::Integer(schema)) => !schema.enumeration.is_empty(),
+            _ => false,
+        };
+        if has_enum {
+            self.warn(
+                origin,
+                context,
+                "the declared `enum` is ignored. Generated code uses the base scalar type without enum validation"
+                    .to_owned(),
+            );
+        }
     }
 
     /// Collect every supported content type a body declares, deduplicated by
@@ -798,17 +868,45 @@ impl Lowerer<'_> {
         &self,
         content: &'m indexmap::IndexMap<String, openapiv3::MediaType>,
         priority: &[BodyKind],
+        origin: Option<&str>,
+        context: &str,
     ) -> Vec<(BodyKind, &'m openapiv3::MediaType)> {
         let mut selected = Vec::new();
         for &wanted in priority {
+            let mut first = None;
             for (name, media) in content {
                 if media_type_kind(name) == Some(wanted) {
-                    selected.push((wanted, media));
-                    break;
+                    match first {
+                        Some(first) => self.warn(
+                            origin,
+                            context,
+                            format!("media type `{name}` is ignored because `{first}` is the first representation of the same body kind"),
+                        ),
+                        None => {
+                            selected.push((wanted, media));
+                            first = Some(name);
+                        }
+                    }
+                }
+            }
+        }
+        if !selected.is_empty() {
+            for name in content.keys() {
+                if !media_type_kind(name).is_some_and(|kind| return priority.contains(&kind)) {
+                    self.warn(origin, context, format!("unsupported media type `{name}` is ignored"));
                 }
             }
         }
         return selected;
+    }
+
+    fn warn(&self, origin: Option<&str>, context: &str, message: String) {
+        let document = self.spec.source().display().to_string();
+        let message = match origin {
+            Some(origin) => format!("{message} (resolved from `{origin}`)"),
+            None => message,
+        };
+        report_warnings(&document, &[Warning::new(context, message)]);
     }
 
     /// Lower a selected body media entry into a typed [`Body`] for the given
@@ -1002,6 +1100,11 @@ impl Lowerer<'_> {
                 reason: format!("path parameter `{name}` must be a scalar type"),
             };
         })?;
+        self.warn_scalar_enum(
+            origin,
+            &format!("{method} {path} path parameter `{name}`"),
+            &schema.schema_kind,
+        );
         return Ok(ty);
     }
 
@@ -1032,7 +1135,12 @@ impl Lowerer<'_> {
                 (resolved.value, resolved.origin)
             }
         };
-        let supported = self.supported_bodies(&body.content, &REQUEST_BODY_PRIORITY);
+        let supported = self.supported_bodies(
+            &body.content,
+            &REQUEST_BODY_PRIORITY,
+            origin.as_deref(),
+            &format!("{method} {path} request body"),
+        );
         if supported.is_empty() {
             if body.content.is_empty() {
                 return Ok(None);
@@ -1426,7 +1534,12 @@ impl Lowerer<'_> {
         origin: Option<&str>,
         response: &OasResponse,
     ) -> Result<Option<LoweredResponseBody>> {
-        let supported = self.supported_bodies(&response.content, &RESPONSE_BODY_PRIORITY);
+        let supported = self.supported_bodies(
+            &response.content,
+            &RESPONSE_BODY_PRIORITY,
+            origin,
+            &format!("{method} {path} {location}"),
+        );
         if supported.is_empty() && !response.content.is_empty() {
             return Err(Error::UnsupportedContentType {
                 method: method.to_owned(),
