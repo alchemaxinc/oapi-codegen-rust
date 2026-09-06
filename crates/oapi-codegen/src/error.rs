@@ -4,6 +4,15 @@
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
+    /// An OpenAPI object contains an invalid key or structure.
+    InvalidSpec {
+        /// The source document.
+        document: String,
+        /// The JSON pointer to the invalid entry.
+        path: String,
+        /// Why the entry is invalid.
+        reason: String,
+    },
     /// The spec file cannot be read from disk.
     ReadSpec {
         /// Path that cannot be read.
@@ -411,6 +420,9 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Error::InvalidSpec { document, path, reason } => {
+                return write!(f, "{document}#{path}: {reason}");
+            }
             Error::ReadSpec { path, source } => {
                 return write!(f, "failed to read spec file `{path}`: {source}");
             }
@@ -594,7 +606,8 @@ impl std::error::Error for Error {
             Error::InvalidGeneratedCode { source } => return Some(source),
             // `Validation` holds problems at the same level and wraps no cause.
             // It has no single `source`. `Display` shows the problems instead.
-            Error::Validation { .. }
+            Error::InvalidSpec { .. }
+            | Error::Validation { .. }
             | Error::Unimplemented(_)
             | Error::UnownedOutput { .. }
             | Error::UnsplittableOutput { .. }

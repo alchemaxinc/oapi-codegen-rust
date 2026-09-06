@@ -7,7 +7,9 @@
 
 pub mod cli;
 pub mod config;
+mod coverage;
 pub mod deps;
+mod diagnostic;
 pub mod emit;
 pub mod error;
 pub mod filter;

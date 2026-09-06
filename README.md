@@ -47,7 +47,7 @@ differ:
 - Typed status-code response enums instead of response structs.
 - Token-based generation (`quote`/`syn`), not user-overridable `text/template`.
 - Blocking `reqwest` client — no async runtime forced on consumers.
-- Reuses your `oapi-codegen` YAML config — unknown keys are ignored.
+- Reuses your `oapi-codegen` YAML config — unknown keys produce warnings and are ignored.
 - Explicit over implicit: `--config-file` is required, and an output path must be given via `--output-file` or the
   config's `output:` key; empty generation fails loudly (Go defaults these and prints to stdout).
 - Fails fast where Go assumes: where `oapi-codegen` silently defaults, guesses, or ignores an ambiguity, this generator

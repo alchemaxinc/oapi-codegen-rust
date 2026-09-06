@@ -5,15 +5,18 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use serde::Deserialize;
+use serde::Serialize;
 
+use crate::diagnostic::Warning;
+use crate::diagnostic::pointer;
+use crate::diagnostic::report_warnings;
 use crate::error::Error;
 use crate::error::Result;
 
 /// A generator configuration, mirroring the keys used by `oapi-codegen`.
 ///
-/// Unknown keys are ignored so that existing `oapi-codegen` configurations can be used
-/// as-is. Only the subset relevant to this tool is interpreted.
-#[derive(Debug, Default, Clone, Deserialize)]
+/// Loading reports warnings for unknown keys and ignores them for compatibility.
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
     /// Target module/package name (informational for the Rust generator).
@@ -32,7 +35,7 @@ pub struct Config {
 }
 
 /// The set of artifacts a configuration requests.
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Generate {
     /// Generate data models (structs/enums) from component schemas.
@@ -74,7 +77,7 @@ pub(crate) const DEFAULT_RESPONSE_SUFFIX: &str = "response";
 pub(crate) const TYPE_NAME_SUFFIX_KEY: &str = "type-name-suffix";
 
 /// Output tuning options.
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct OutputOptions {
     /// Keep schemas that are not referenced (no pruning).
@@ -131,6 +134,19 @@ impl Config {
                 source,
             };
         })?;
+        let value: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|source| {
+            return Error::ParseConfig {
+                path: path.display().to_string(),
+                source,
+            };
+        })?;
+        let warnings = configuration_warnings(&value).map_err(|source| {
+            return Error::ParseConfig {
+                path: path.display().to_string(),
+                source,
+            };
+        })?;
+        report_warnings(&path.display().to_string(), &warnings);
         let config: Config = serde_yaml::from_str(&text).map_err(|source| {
             return Error::ParseConfig {
                 path: path.display().to_string(),
@@ -141,9 +157,114 @@ impl Config {
     }
 }
 
+fn configuration_warnings(value: &serde_yaml::Value) -> serde_yaml::Result<Vec<Warning>> {
+    let shape = serde_yaml::to_value(Config::default())?;
+    let mut warnings = Vec::new();
+    collect_unknown_keys(value, &shape, "", &mut warnings);
+    return Ok(warnings);
+}
+
+fn collect_unknown_keys(
+    value: &serde_yaml::Value,
+    shape: &serde_yaml::Value,
+    parent: &str,
+    warnings: &mut Vec<Warning>,
+) {
+    let (Some(mapping), Some(fields)) = (value.as_mapping(), shape.as_mapping()) else {
+        return;
+    };
+    // Empty default mappings contain user-defined keys.
+    if fields.is_empty() {
+        return;
+    }
+    for (key, value) in mapping {
+        let Some(name) = key.as_str() else {
+            continue;
+        };
+        let path = pointer(parent, name);
+        if let Some(field) = fields.get(key) {
+            collect_unknown_keys(value, field, &path, warnings);
+        } else {
+            warnings.push(Warning::new(path, "unknown configuration key is ignored"));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_configuration_keys_warn() -> serde_yaml::Result<()> {
+        for (yaml, paths) in [
+            ("packge: demo", vec!["/packge"]),
+            ("generate: {modles: true}", vec!["/generate/modles"]),
+            ("output-options: {skip-prun: true}", vec!["/output-options/skip-prun"]),
+            ("a~/b: secret", vec!["/a~0~1b"]),
+            ("generate: {'~1/': true}", vec!["/generate/~01~1"]),
+            (
+                "packge: demo\ngenerate: {modles: true}\noutput-options: {skip-prun: true}",
+                vec!["/packge", "/generate/modles", "/output-options/skip-prun"],
+            ),
+        ] {
+            let value = serde_yaml::from_str(yaml)?;
+            let expected: Vec<_> = paths
+                .into_iter()
+                .map(|path| {
+                    return Warning::new(path, "unknown configuration key is ignored");
+                })
+                .collect();
+            assert_eq!(configuration_warnings(&value)?, expected, "{yaml}");
+            assert!(serde_yaml::from_value::<Config>(value).is_ok(), "{yaml}");
+        }
+        return Ok(());
+    }
+
+    #[test]
+    fn known_configuration_keys_do_not_warn() -> serde_yaml::Result<()> {
+        for yaml in [
+            "{}",
+            "package: demo\noutput: generated.rs",
+            "generate: {models: true, std-http-server: true, client: true, embedded-spec: false, server-urls: true}",
+            "import-mapping: {'./other.yaml': other, 'a~/b': module}",
+            "output-options: {include-tags: [pets], response-type-suffix: Resp, type-name-suffix: Alt}",
+        ] {
+            let value = serde_yaml::from_str(yaml)?;
+            assert!(configuration_warnings(&value)?.is_empty(), "{yaml}");
+            assert!(serde_yaml::from_value::<Config>(value).is_ok(), "{yaml}");
+        }
+        let defaults = serde_yaml::to_value(Config::default())?;
+        assert!(configuration_warnings(&defaults)?.is_empty());
+        return Ok(());
+    }
+
+    #[test]
+    fn invalid_configuration_values_remain_deserialization_errors() -> serde_yaml::Result<()> {
+        for yaml in ["null", "generate: null", "output-options: null", "import-mapping: null"] {
+            let value = serde_yaml::from_str(yaml)?;
+            assert!(configuration_warnings(&value)?.is_empty(), "{yaml}");
+        }
+        for yaml in [
+            "false",
+            "[]",
+            "generate: wrong",
+            "generate: {models: wrong}",
+            "output-options: []",
+            "output-options: {include-tags: false}",
+            "import-mapping: {other: []}",
+        ] {
+            let value = serde_yaml::from_str(yaml)?;
+            assert!(configuration_warnings(&value)?.is_empty(), "{yaml}");
+            assert!(serde_yaml::from_value::<Config>(value).is_err(), "{yaml}");
+        }
+        let value = serde_yaml::from_str("generate: {modles: true, models: wrong}")?;
+        assert_eq!(
+            configuration_warnings(&value)?,
+            vec![Warning::new("/generate/modles", "unknown configuration key is ignored")]
+        );
+        assert!(serde_yaml::from_value::<Config>(value).is_err());
+        return Ok(());
+    }
 
     #[test]
     fn config_keys_match_serde_names() {
