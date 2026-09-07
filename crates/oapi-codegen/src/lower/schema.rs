@@ -481,6 +481,7 @@ impl Mapper<'_> {
         }
         return Ok(());
     }
+
     fn make_union(
         &mut self,
         name: &str,
@@ -494,7 +495,7 @@ impl Mapper<'_> {
                 reason: "a union must contain at least one alternative".to_owned(),
             });
         }
-        let variants = self.union_variants_from_members(name, members)?;
+        let variants = self.union_variants_from_members(name, members, data)?;
         if any_of {
             let mut methods = std::collections::HashSet::from(["as_value".to_owned(), "into_value".to_owned()]);
             for variant in &variants {
@@ -526,6 +527,7 @@ impl Mapper<'_> {
         &mut self,
         name: &str,
         members: &[ReferenceOr<Schema>],
+        data: &SchemaData,
     ) -> Result<Vec<UnionVariant>> {
         let mut variants = Vec::with_capacity(members.len());
         let mut seen = std::collections::HashSet::new();
@@ -534,14 +536,17 @@ impl Mapper<'_> {
             let variant = match member {
                 ReferenceOr::Reference { reference } => {
                     let target = self.schema_ref_target(reference, "a union member")?;
-                    // Name the variant from the *resolved* type name, so an
-                    // `x-rust-name` override or a configured collision suffix
-                    // reaches the variant too. The raw target name would give a
-                    // variant that contradicts its own payload type.
+                    let variant_name = data
+                        .discriminator
+                        .as_ref()
+                        .and_then(|disc| return disc.mapping.iter().find(|(_, mapped)| return *mapped == reference))
+                        .map_or_else(
+                            || return self.type_name_ident(&target),
+                            |(value, _)| return to_ident(value, Case::Pascal),
+                        );
                     UnionVariant {
-                        name: crate::naming::deconflict_ident(self.type_name_ident(&target), &mut seen),
+                        name: crate::naming::deconflict_ident(variant_name, &mut seen),
                         ty: RustType::Named(target),
-                        validation: super::union::validation(self.spec, member)?,
                     }
                 }
                 ReferenceOr::Item(schema) => {
@@ -562,7 +567,6 @@ impl Mapper<'_> {
                     UnionVariant {
                         name: crate::naming::deconflict_ident(to_ident(&seed, Case::Pascal), &mut seen),
                         ty,
-                        validation: super::union::validation(self.spec, member)?,
                     }
                 }
             };

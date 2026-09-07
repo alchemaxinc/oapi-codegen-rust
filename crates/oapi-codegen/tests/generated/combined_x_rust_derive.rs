@@ -27,34 +27,6 @@ pub enum ThingExclusive {
     Opaque(Opaque),
     Bool(bool),
 }
-impl ThingExclusive {
-    fn __validate_0_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_string());
-    }
-    fn __validate_1_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_boolean());
-    }
-}
 impl<'de> serde::Deserialize<'de> for ThingExclusive {
     fn deserialize<__Deserializer: serde::Deserializer<'de>>(
         deserializer: __Deserializer,
@@ -62,49 +34,31 @@ impl<'de> serde::Deserialize<'de> for ThingExclusive {
         let value = <serde_json::Value as serde::Deserialize>::deserialize(
             deserializer,
         )?;
-        let mut budget = 10000usize;
-        let matches = [
-            Self::__validate_0_0(&value, 0, &mut budget),
-            Self::__validate_1_0(&value, 0, &mut budget),
-        ];
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                serde::de::Error::custom("union validation limit exceeded"),
-            );
-        }
-        if matches.iter().filter(|matched| **matched).count() != 1 {
-            return ::std::result::Result::Err(
-                serde::de::Error::custom(
-                    "oneOf requires exactly one matching alternative",
-                ),
-            );
-        }
-        return match matches.iter().position(|matched| *matched) {
-            ::std::option::Option::Some(index) => {
-                match index {
-                    0usize => {
-                        <Opaque as serde::Deserialize>::deserialize(value)
-                            .map(Self::Opaque)
-                            .map_err(serde::de::Error::custom)
-                    }
-                    1usize => {
-                        <bool as serde::Deserialize>::deserialize(value)
-                            .map(Self::Bool)
-                            .map_err(serde::de::Error::custom)
-                    }
-                    _ => {
-                        ::std::result::Result::Err(
-                            serde::de::Error::custom("invalid oneOf alternative"),
-                        )
-                    }
-                }
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <Opaque as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
             }
-            ::std::option::Option::None => {
-                ::std::result::Result::Err(
-                    serde::de::Error::custom("oneOf has no matching alternative"),
-                )
+            selected = ::std::option::Option::Some(Self::Opaque(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <bool as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
             }
-        };
+            selected = ::std::option::Option::Some(Self::Bool(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
     }
 }
 
@@ -114,7 +68,7 @@ pub struct ThingInclusive {
     value: serde_json::Value,
 }
 impl ThingInclusive {
-    /// Borrow the complete validated JSON value.
+    /// Borrow the complete JSON value.
     pub fn as_value(&self) -> &serde_json::Value {
         return &self.value;
     }
@@ -122,90 +76,25 @@ impl ThingInclusive {
     pub fn into_value(self) -> serde_json::Value {
         return self.value;
     }
-    ///Decode the `Opaque` alternative. Return `None` when its schema does not match.
-    pub fn as_opaque(
-        &self,
-    ) -> ::std::result::Result<::std::option::Option<Opaque>, serde_json::Error> {
-        let mut budget = 10000usize;
-        let matched = Self::__validate_0_0(&self.value, 0, &mut budget);
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                <serde_json::Error as serde::de::Error>::custom(
-                    "union validation limit exceeded",
-                ),
-            );
-        }
-        if !matched {
-            return ::std::result::Result::Ok(::std::option::Option::None);
-        }
-        return <Opaque as serde::Deserialize>::deserialize(&self.value)
-            .map(::std::option::Option::Some);
+    ///Decode the `Opaque` Rust alternative.
+    pub fn as_opaque(&self) -> ::std::result::Result<Opaque, serde_json::Error> {
+        return <Opaque as serde::Deserialize>::deserialize(&self.value);
     }
-    ///Decode the `Bool` alternative. Return `None` when its schema does not match.
-    pub fn as_bool(
-        &self,
-    ) -> ::std::result::Result<::std::option::Option<bool>, serde_json::Error> {
-        let mut budget = 10000usize;
-        let matched = Self::__validate_1_0(&self.value, 0, &mut budget);
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                <serde_json::Error as serde::de::Error>::custom(
-                    "union validation limit exceeded",
-                ),
-            );
-        }
-        if !matched {
-            return ::std::result::Result::Ok(::std::option::Option::None);
-        }
-        return <bool as serde::Deserialize>::deserialize(&self.value)
-            .map(::std::option::Option::Some);
-    }
-    fn __validate_0_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_string());
-    }
-    fn __validate_1_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_boolean());
+    ///Decode the `Bool` Rust alternative.
+    pub fn as_bool(&self) -> ::std::result::Result<bool, serde_json::Error> {
+        return <bool as serde::Deserialize>::deserialize(&self.value);
     }
 }
 impl ::std::convert::TryFrom<serde_json::Value> for ThingInclusive {
-    type Error = ::std::string::String;
+    type Error = serde_json::Error;
     fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
-        let mut budget = 10000usize;
-        let count = [
-            Self::__validate_0_0(&value, 0, &mut budget),
-            Self::__validate_1_0(&value, 0, &mut budget),
-        ]
-            .into_iter()
-            .filter(|matched| *matched)
-            .count();
-        if budget == 0 {
+        if !(<Opaque as serde::Deserialize>::deserialize(&value).is_ok()
+            || <bool as serde::Deserialize>::deserialize(&value).is_ok())
+        {
             return ::std::result::Result::Err(
-                "union validation limit exceeded".to_owned(),
-            );
-        }
-        if count == 0 {
-            return ::std::result::Result::Err(
-                "anyOf requires at least one matching alternative".to_owned(),
+                <serde_json::Error as serde::de::Error>::custom(
+                    "anyOf matched no Rust alternative",
+                ),
             );
         }
         return ::std::result::Result::Ok(Self { value });

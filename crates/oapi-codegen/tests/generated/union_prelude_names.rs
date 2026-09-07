@@ -19,34 +19,6 @@ pub enum PreludeOne {
     TryFrom(TryFrom),
     Bool(bool),
 }
-impl PreludeOne {
-    fn __validate_0_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_string());
-    }
-    fn __validate_1_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_boolean());
-    }
-}
 impl<'de> serde::Deserialize<'de> for PreludeOne {
     fn deserialize<__Deserializer: serde::Deserializer<'de>>(
         deserializer: __Deserializer,
@@ -54,49 +26,31 @@ impl<'de> serde::Deserialize<'de> for PreludeOne {
         let value = <serde_json::Value as serde::Deserialize>::deserialize(
             deserializer,
         )?;
-        let mut budget = 10000usize;
-        let matches = [
-            Self::__validate_0_0(&value, 0, &mut budget),
-            Self::__validate_1_0(&value, 0, &mut budget),
-        ];
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                serde::de::Error::custom("union validation limit exceeded"),
-            );
-        }
-        if matches.iter().filter(|matched| **matched).count() != 1 {
-            return ::std::result::Result::Err(
-                serde::de::Error::custom(
-                    "oneOf requires exactly one matching alternative",
-                ),
-            );
-        }
-        return match matches.iter().position(|matched| *matched) {
-            ::std::option::Option::Some(index) => {
-                match index {
-                    0usize => {
-                        <TryFrom as serde::Deserialize>::deserialize(value)
-                            .map(Self::TryFrom)
-                            .map_err(serde::de::Error::custom)
-                    }
-                    1usize => {
-                        <bool as serde::Deserialize>::deserialize(value)
-                            .map(Self::Bool)
-                            .map_err(serde::de::Error::custom)
-                    }
-                    _ => {
-                        ::std::result::Result::Err(
-                            serde::de::Error::custom("invalid oneOf alternative"),
-                        )
-                    }
-                }
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <TryFrom as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
             }
-            ::std::option::Option::None => {
-                ::std::result::Result::Err(
-                    serde::de::Error::custom("oneOf has no matching alternative"),
-                )
+            selected = ::std::option::Option::Some(Self::TryFrom(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <bool as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
             }
-        };
+            selected = ::std::option::Option::Some(Self::Bool(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
     }
 }
 
@@ -106,7 +60,7 @@ pub struct PreludeAny {
     value: serde_json::Value,
 }
 impl PreludeAny {
-    /// Borrow the complete validated JSON value.
+    /// Borrow the complete JSON value.
     pub fn as_value(&self) -> &serde_json::Value {
         return &self.value;
     }
@@ -114,90 +68,25 @@ impl PreludeAny {
     pub fn into_value(self) -> serde_json::Value {
         return self.value;
     }
-    ///Decode the `Result` alternative. Return `None` when its schema does not match.
-    pub fn as_result(
-        &self,
-    ) -> ::std::result::Result<::std::option::Option<Result>, serde_json::Error> {
-        let mut budget = 10000usize;
-        let matched = Self::__validate_0_0(&self.value, 0, &mut budget);
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                <serde_json::Error as serde::de::Error>::custom(
-                    "union validation limit exceeded",
-                ),
-            );
-        }
-        if !matched {
-            return ::std::result::Result::Ok(::std::option::Option::None);
-        }
-        return <Result as serde::Deserialize>::deserialize(&self.value)
-            .map(::std::option::Option::Some);
+    ///Decode the `Result` Rust alternative.
+    pub fn as_result(&self) -> ::std::result::Result<Result, serde_json::Error> {
+        return <Result as serde::Deserialize>::deserialize(&self.value);
     }
-    ///Decode the `Bool` alternative. Return `None` when its schema does not match.
-    pub fn as_bool(
-        &self,
-    ) -> ::std::result::Result<::std::option::Option<bool>, serde_json::Error> {
-        let mut budget = 10000usize;
-        let matched = Self::__validate_1_0(&self.value, 0, &mut budget);
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                <serde_json::Error as serde::de::Error>::custom(
-                    "union validation limit exceeded",
-                ),
-            );
-        }
-        if !matched {
-            return ::std::result::Result::Ok(::std::option::Option::None);
-        }
-        return <bool as serde::Deserialize>::deserialize(&self.value)
-            .map(::std::option::Option::Some);
-    }
-    fn __validate_0_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_string());
-    }
-    fn __validate_1_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_boolean());
+    ///Decode the `Bool` Rust alternative.
+    pub fn as_bool(&self) -> ::std::result::Result<bool, serde_json::Error> {
+        return <bool as serde::Deserialize>::deserialize(&self.value);
     }
 }
 impl ::std::convert::TryFrom<serde_json::Value> for PreludeAny {
-    type Error = ::std::string::String;
+    type Error = serde_json::Error;
     fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
-        let mut budget = 10000usize;
-        let count = [
-            Self::__validate_0_0(&value, 0, &mut budget),
-            Self::__validate_1_0(&value, 0, &mut budget),
-        ]
-            .into_iter()
-            .filter(|matched| *matched)
-            .count();
-        if budget == 0 {
+        if !(<Result as serde::Deserialize>::deserialize(&value).is_ok()
+            || <bool as serde::Deserialize>::deserialize(&value).is_ok())
+        {
             return ::std::result::Result::Err(
-                "union validation limit exceeded".to_owned(),
-            );
-        }
-        if count == 0 {
-            return ::std::result::Result::Err(
-                "anyOf requires at least one matching alternative".to_owned(),
+                <serde_json::Error as serde::de::Error>::custom(
+                    "anyOf matched no Rust alternative",
+                ),
             );
         }
         return ::std::result::Result::Ok(Self { value });
@@ -213,337 +102,4 @@ impl<'de> serde::Deserialize<'de> for PreludeAny {
         return <Self as ::std::convert::TryFrom<serde_json::Value>>::try_from(value)
             .map_err(serde::de::Error::custom);
     }
-}
-
-#[derive(serde::Serialize, Debug, Clone, PartialEq)]
-#[serde(transparent)]
-pub struct Validated {
-    value: serde_json::Value,
-}
-impl Validated {
-    /// Borrow the complete validated JSON value.
-    pub fn as_value(&self) -> &serde_json::Value {
-        return &self.value;
-    }
-    /// Consume the wrapper and return the complete JSON value.
-    pub fn into_value(self) -> serde_json::Value {
-        return self.value;
-    }
-    ///Decode the `Ok` alternative. Return `None` when its schema does not match.
-    pub fn as_ok(
-        &self,
-    ) -> ::std::result::Result<::std::option::Option<ValidatedOk>, serde_json::Error> {
-        let mut budget = 10000usize;
-        let matched = Self::__validate_0_0(&self.value, 0, &mut budget);
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                <serde_json::Error as serde::de::Error>::custom(
-                    "union validation limit exceeded",
-                ),
-            );
-        }
-        if !matched {
-            return ::std::result::Result::Ok(::std::option::Option::None);
-        }
-        return <ValidatedOk as serde::Deserialize>::deserialize(&self.value)
-            .map(::std::option::Option::Some);
-    }
-    ///Decode the `Values` alternative. Return `None` when its schema does not match.
-    pub fn as_values(
-        &self,
-    ) -> ::std::result::Result<::std::option::Option<Vec<f64>>, serde_json::Error> {
-        let mut budget = 10000usize;
-        let matched = Self::__validate_1_0(&self.value, 0, &mut budget);
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                <serde_json::Error as serde::de::Error>::custom(
-                    "union validation limit exceeded",
-                ),
-            );
-        }
-        if !matched {
-            return ::std::result::Result::Ok(::std::option::Option::None);
-        }
-        return <Vec<f64> as serde::Deserialize>::deserialize(&self.value)
-            .map(::std::option::Option::Some);
-    }
-    fn __validate_0_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_string())
-            && (value
-                .as_str()
-                .is_none_or(|text| {
-                    static PATTERN: ::std::sync::OnceLock<
-                        ::std::result::Result<regex::Regex, regex::Error>,
-                    > = ::std::sync::OnceLock::new();
-                    return PATTERN
-                        .get_or_init(|| regex::Regex::new("^[a-z]+$"))
-                        .as_ref()
-                        .is_ok_and(|pattern| pattern.is_match(text));
-                }))
-            && (false
-                || serde_json::from_str::<serde_json::Value>("\"ok\"")
-                    .is_ok_and(|expected| {
-                        return Self::__schema_equal(value, &expected, depth + 1, budget);
-                    }));
-    }
-    fn __validate_1_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_array())
-            && ((value.as_array().map(::std::vec::Vec::len))
-                .is_none_or(|length| length >= 1usize))
-            && (value
-                .as_array()
-                .is_none_or(|items| {
-                    items
-                        .iter()
-                        .all(|value| Self::__validate_1_1(value, depth + 1, budget))
-                }));
-    }
-    fn __validate_1_1(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_number())
-            && ((if let ::std::option::Option::Some(number) = value.as_i64() {
-                ::std::option::Option::Some(i128::from(number).cmp(&0i128))
-            } else if let ::std::option::Option::Some(number) = value.as_u64() {
-                ::std::option::Option::Some(i128::from(number).cmp(&0i128))
-            } else {
-                value
-                    .as_f64()
-                    .map(|number| {
-                        let integer_order = (number as i128).cmp(&0i128);
-                        return if integer_order == ::std::cmp::Ordering::Equal {
-                            number
-                                .fract()
-                                .partial_cmp(&0.0)
-                                .unwrap_or(::std::cmp::Ordering::Equal)
-                        } else {
-                            integer_order
-                        };
-                    })
-            })
-                .is_none_or(|order| !order.is_lt()))
-            && (match value {
-                serde_json::Value::Number(number) => {
-                    Self::__decimal_multiple(&number.to_string(), "0.1")
-                }
-                _ => true,
-            });
-    }
-    fn __schema_equal(
-        left: &serde_json::Value,
-        right: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        return match (left, right) {
-            (serde_json::Value::Number(left), serde_json::Value::Number(right)) => {
-                let left_integer = left
-                    .as_i64()
-                    .map(i128::from)
-                    .or_else(|| left.as_u64().map(i128::from));
-                let right_integer = right
-                    .as_i64()
-                    .map(i128::from)
-                    .or_else(|| right.as_u64().map(i128::from));
-                match (left_integer, right_integer) {
-                    (
-                        ::std::option::Option::Some(left),
-                        ::std::option::Option::Some(right),
-                    ) => left == right,
-                    (
-                        ::std::option::Option::Some(integer),
-                        ::std::option::Option::None,
-                    ) => {
-                        right
-                            .as_f64()
-                            .is_some_and(|number| {
-                                number.fract() == 0.0 && number as i128 == integer
-                            })
-                    }
-                    (
-                        ::std::option::Option::None,
-                        ::std::option::Option::Some(integer),
-                    ) => {
-                        left.as_f64()
-                            .is_some_and(|number| {
-                                number.fract() == 0.0 && number as i128 == integer
-                            })
-                    }
-                    (::std::option::Option::None, ::std::option::Option::None) => {
-                        left.as_f64() == right.as_f64()
-                    }
-                }
-            }
-            (serde_json::Value::Array(left), serde_json::Value::Array(right)) => {
-                left.len() == right.len()
-                    && left
-                        .iter()
-                        .zip(right)
-                        .all(|(left, right)| Self::__schema_equal(
-                            left,
-                            right,
-                            depth + 1,
-                            budget,
-                        ))
-            }
-            (serde_json::Value::Object(left), serde_json::Value::Object(right)) => {
-                left.len() == right.len()
-                    && left
-                        .iter()
-                        .all(|(key, left)| {
-                            right
-                                .get(key)
-                                .is_some_and(|right| Self::__schema_equal(
-                                    left,
-                                    right,
-                                    depth + 1,
-                                    budget,
-                                ))
-                        })
-            }
-            _ => left == right,
-        };
-    }
-    fn __decimal_parts(text: &str) -> ::std::option::Option<(u128, i32)> {
-        let text = text.strip_prefix('-').unwrap_or(text);
-        let (mantissa, mut exponent) = match text.split_once(['e', 'E']) {
-            ::std::option::Option::Some((mantissa, exponent)) => {
-                (mantissa, exponent.parse::<i32>().ok()?)
-            }
-            ::std::option::Option::None => (text, 0),
-        };
-        if let ::std::option::Option::Some((_, fraction)) = mantissa.split_once('.') {
-            exponent = exponent
-                .checked_sub(
-                    <i32 as ::std::convert::TryFrom<usize>>::try_from(fraction.len())
-                        .ok()?,
-                )?;
-        }
-        let mut coefficient = 0_u128;
-        for digit in mantissa.bytes().filter(|digit| *digit != b'.') {
-            coefficient = coefficient
-                .checked_mul(10)?
-                .checked_add(u128::from(digit.checked_sub(b'0')?))?;
-        }
-        if coefficient == 0 {
-            return ::std::option::Option::Some((0, 0));
-        }
-        while coefficient % 10 == 0 {
-            coefficient /= 10;
-            exponent = exponent.checked_add(1)?;
-        }
-        return ::std::option::Option::Some((coefficient, exponent));
-    }
-    fn __decimal_multiple(number: &str, bound: &str) -> bool {
-        let ::std::option::Option::Some((coefficient, exponent)) = Self::__decimal_parts(
-            number,
-        ) else {
-            return false;
-        };
-        let ::std::option::Option::Some((mut divisor, bound_exponent)) = Self::__decimal_parts(
-            bound,
-        ) else {
-            return false;
-        };
-        if divisor == 0 {
-            return false;
-        }
-        if coefficient == 0 {
-            return true;
-        }
-        let shift = i64::from(exponent) - i64::from(bound_exponent);
-        if shift < 0 {
-            return false;
-        }
-        let (mut left, mut right) = (coefficient, divisor);
-        while right != 0 {
-            (left, right) = (right, left % right);
-        }
-        divisor /= left;
-        for factor in [2, 5] {
-            let mut count = 0_i64;
-            while divisor % factor == 0 {
-                divisor /= factor;
-                count += 1;
-            }
-            if count > shift {
-                return false;
-            }
-        }
-        return divisor == 1;
-    }
-}
-impl ::std::convert::TryFrom<serde_json::Value> for Validated {
-    type Error = ::std::string::String;
-    fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
-        let mut budget = 10000usize;
-        let count = [
-            Self::__validate_0_0(&value, 0, &mut budget),
-            Self::__validate_1_0(&value, 0, &mut budget),
-        ]
-            .into_iter()
-            .filter(|matched| *matched)
-            .count();
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                "union validation limit exceeded".to_owned(),
-            );
-        }
-        if count == 0 {
-            return ::std::result::Result::Err(
-                "anyOf requires at least one matching alternative".to_owned(),
-            );
-        }
-        return ::std::result::Result::Ok(Self { value });
-    }
-}
-impl<'de> serde::Deserialize<'de> for Validated {
-    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
-        deserializer: __Deserializer,
-    ) -> ::std::result::Result<Self, __Deserializer::Error> {
-        let value = <serde_json::Value as serde::Deserialize>::deserialize(
-            deserializer,
-        )?;
-        return <Self as ::std::convert::TryFrom<serde_json::Value>>::try_from(value)
-            .map_err(serde::de::Error::custom);
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub enum ValidatedOk {
-    #[serde(rename = "ok")]
-    Ok,
 }

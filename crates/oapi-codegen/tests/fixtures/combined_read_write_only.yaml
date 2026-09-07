@@ -10,13 +10,13 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/UnionEnvelope"}
+            schema: { $ref: "#/components/schemas/UnionEnvelope" }
       responses:
         "200":
           description: The union response.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/UnionEnvelope"}
+              schema: { $ref: "#/components/schemas/UnionEnvelope" }
   /accounts:
     post:
       operationId: createAccount
@@ -95,8 +95,8 @@ components:
       type: object
       required: [exclusive, inclusive]
       properties:
-        exclusive: {$ref: "#/components/schemas/ExclusiveAccount"}
-        inclusive: {$ref: "#/components/schemas/InclusiveAccount"}
+        exclusive: { $ref: "#/components/schemas/ExclusiveAccount" }
+        inclusive: { $ref: "#/components/schemas/InclusiveAccount" }
     ExclusiveAccount:
       oneOf:
         - $ref: "#/components/schemas/Account"

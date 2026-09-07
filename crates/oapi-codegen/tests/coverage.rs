@@ -51,7 +51,7 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("unsupported_union_accessor_collision"),
     },
     Feature {
-        element: "schema.union.validation",
+        element: "schema.union.rust-deserialization",
         status: Status::Supported,
         fixture: Some("union_semantics"),
     },
@@ -2271,9 +2271,10 @@ fn dependency_report_reflects_generated_output() {
                 .any(|dependency| return dependency.name == "serde_json"),
             "{stem}"
         );
-        if stem == "union_semantics" {
-            assert!(dependencies.iter().any(|dependency| return dependency.name == "regex"));
-        }
+        assert!(
+            dependencies.iter().all(|dependency| return dependency.name != "regex"),
+            "{stem}"
+        );
     }
 }
 

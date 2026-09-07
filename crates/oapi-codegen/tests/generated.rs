@@ -180,197 +180,44 @@ fn union_models_do_not_shadow_prelude_traits_or_types() {
     use generated::union_prelude_names::PreludeOne;
     use generated::union_prelude_names::Result;
     use generated::union_prelude_names::TryFrom;
-    use generated::union_prelude_names::Validated;
 
     let text: TryFrom = "text".to_owned();
     let other: Result = text.clone();
     assert!(serde_json::from_value::<PreludeOne>(serde_json::json!(text)).is_ok());
     assert!(serde_json::from_value::<PreludeOne>(serde_json::json!(true)).is_ok());
     let model = PreludeAny::try_from(serde_json::json!(other)).expect("string alternative matches");
-    assert_eq!(model.as_result().expect("decode string"), Some("text".to_owned()));
+    assert_eq!(model.as_result().expect("decode string"), "text");
     assert!(serde_json::from_str::<PreludeAny>("false").is_ok());
     assert!(PreludeAny::try_from(serde_json::json!(42_i32)).is_err());
-    for (json, valid) in [
-        (r#""ok""#, true),
-        (r#""bad""#, false),
-        ("[0.3]", true),
-        ("[-0.3]", false),
-    ] {
-        assert_eq!(serde_json::from_str::<Validated>(json).is_ok(), valid, "{json}");
-    }
 }
 
 #[test]
-fn union_multiple_of_uses_exact_canonical_decimals() {
-    use generated::union_semantics::DecimalAny;
-    use generated::union_semantics::DecimalOne;
-    use generated::union_semantics::NestedDecimal;
-
-    for (json, valid) in [
-        ("0.3", true),
-        ("-0.3", true),
-        ("0", true),
-        ("-0.0", true),
-        ("3e-1", true),
-        ("1.2", true),
-        ("0.30000000000000004", false),
-        ("-0.30000000000000004", false),
-        ("0.29999999999999993", false),
-        ("0.31", false),
-        ("1e-300", false),
-        ("1e300", true),
-        ("18446744073709551615", true),
-        ("true", true),
-        ("null", false),
-    ] {
-        let value: serde_json::Value = serde_json::from_str(json).expect("JSON value");
-        assert_eq!(serde_json::from_str::<DecimalAny>(json).is_ok(), valid, "{json}");
-        let model = DecimalAny::try_from(value.clone());
-        assert_eq!(model.is_ok(), valid, "constructor: {json}");
-        if let Ok(model) = model {
-            assert_eq!(model.as_value(), &value);
-            assert_eq!(
-                model.as_decimal().expect("decimal accessor").is_some(),
-                value.is_number()
-            );
-            assert_eq!(serde_json::to_value(&model).expect("serialize"), value);
-        }
-    }
-    for (json, valid) in [("0.3", true), ("1.2", false), ("1.21", true), ("0.31", false)] {
-        assert_eq!(serde_json::from_str::<DecimalOne>(json).is_ok(), valid, "{json}");
-        let array = format!("[{json}]");
-        assert_eq!(serde_json::from_str::<NestedDecimal>(&array).is_ok(), valid, "{array}");
-    }
-}
-
-#[test]
-fn union_multiple_of_handles_exponents_and_integer_precision() {
-    use generated::union_semantics::DecimalEightHundredths;
-    use generated::union_semantics::DecimalHuge;
-    use generated::union_semantics::DecimalQuarter;
-    use generated::union_semantics::DecimalSubnormal;
-    use generated::union_semantics::DecimalThree;
-    use generated::union_semantics::DecimalTiny;
-    use generated::union_semantics::IntegerMultiple;
-    use generated::union_semantics::LargeIntegerMultiple;
-
-    for (json, valid) in [
-        ("0.9", true),
-        ("-1.2", true),
-        ("0.1", false),
-        ("1", false),
-        ("0.9000000000000001", false),
-        ("3e300", true),
-        ("1e300", false),
-    ] {
-        assert_eq!(serde_json::from_str::<DecimalThree>(json).is_ok(), valid, "{json}");
-    }
-    for (json, valid) in [
-        ("2", true),
-        ("1.2", true),
-        ("0.24", true),
-        ("0.12", false),
-        ("1", false),
-    ] {
-        assert_eq!(
-            serde_json::from_str::<DecimalEightHundredths>(json).is_ok(),
-            valid,
-            "{json}"
-        );
-    }
-    for (json, valid) in [
-        ("1", true),
-        ("0.5", true),
-        ("0.75", true),
-        ("0.1", false),
-        ("0.3", false),
-    ] {
-        assert_eq!(serde_json::from_str::<DecimalQuarter>(json).is_ok(), valid, "{json}");
-    }
-    for (json, valid) in [
-        ("0", true),
-        ("3e-300", true),
-        ("-3e-300", true),
-        ("1e300", true),
-        ("1e-301", false),
-        ("1.1e-300", false),
-    ] {
-        let number: f64 = json.parse().expect("finite float");
-        let value = serde_json::json!(number);
-        assert_eq!(
-            serde_json::from_value::<DecimalTiny>(value.clone()).is_ok(),
-            valid,
-            "{json}: {value}"
-        );
-    }
-    for (json, valid) in [
-        ("0", true),
-        ("5e-324", true),
-        ("1e-323", true),
-        ("1", true),
-        ("1.5e-323", true),
-    ] {
-        assert_eq!(serde_json::from_str::<DecimalSubnormal>(json).is_ok(), valid, "{json}");
-    }
-    for (json, valid) in [
-        ("0", true),
-        ("1e300", true),
-        ("-2e300", true),
-        ("1e308", true),
-        ("1.1e300", false),
-        ("1e-300", false),
-        ("18446744073709551615", false),
-    ] {
-        assert_eq!(serde_json::from_str::<DecimalHuge>(json).is_ok(), valid, "{json}");
-    }
-    for (json, valid) in [
-        ("9007199254740993", true),
-        ("9007199254740992", false),
-        ("9007199254740992.0", false),
-        ("18446744073709551615", true),
-        ("18446744073709551614", false),
-        ("-9223372036854775808", false),
-        ("-9223372036854775806", true),
-        ("3e30", true),
-        ("1e30", false),
-    ] {
-        assert_eq!(serde_json::from_str::<IntegerMultiple>(json).is_ok(), valid, "{json}");
-    }
-    for (json, valid) in [
-        ("9007199254740993", true),
-        ("9007199254740992", false),
-        ("18014398509481986", true),
-        ("18014398509481984", false),
-        ("-9007199254740993", true),
-    ] {
-        assert_eq!(
-            serde_json::from_str::<LargeIntegerMultiple>(json).is_ok(),
-            valid,
-            "{json}"
-        );
-    }
-}
-
-#[test]
-fn oneof_counts_schema_matches_before_payload_deserialization() {
-    use generated::union_semantics::LargeChoice;
+fn oneof_counts_successful_rust_deserializations() {
     use generated::union_semantics::Numeric;
-    use generated::union_semantics::Ranges;
 
-    for json in ["null", "true", "\"text\"", "1", "1.0"] {
+    for json in ["null", "true", "\"text\"", "1"] {
         assert!(serde_json::from_str::<Numeric>(json).is_err(), "{json}");
     }
-    assert!(serde_json::from_str::<Numeric>("1.5").is_ok());
-    for json in ["-1", "5", "10", "21"] {
-        assert!(serde_json::from_str::<Ranges>(json).is_err(), "{json}");
+    for json in ["1.0", "1.5"] {
+        assert!(matches!(
+            serde_json::from_str::<Numeric>(json).expect("only f64 decodes"),
+            Numeric::F64(_)
+        ));
     }
-    for json in ["0", "4", "11", "20"] {
-        assert!(serde_json::from_str::<Ranges>(json).is_ok(), "{json}");
+}
+
+#[test]
+fn oneof_disjoint_schema_bounds_remain_ambiguous_rust_aliases() {
+    use generated::union_semantics::High;
+    use generated::union_semantics::Low;
+    use generated::union_semantics::Ranges;
+
+    for value in [0_u64, 10, 11, 20, 21] {
+        let json = serde_json::json!(value);
+        assert!(serde_json::from_value::<Low>(json.clone()).is_ok());
+        assert!(serde_json::from_value::<High>(json.clone()).is_ok());
+        assert!(serde_json::from_value::<Ranges>(json).is_err(), "{value}");
     }
-    for json in ["9007199254740992", "9007199254740993"] {
-        assert!(serde_json::from_str::<LargeChoice>(json).is_ok(), "{json}");
-    }
-    assert!(serde_json::from_str::<LargeChoice>("9007199254740994").is_err());
 }
 
 #[test]
@@ -387,12 +234,11 @@ fn oneof_checks_required_properties_and_closed_objects() {
 }
 
 #[test]
-fn union_validation_checks_nested_unions_enums_and_allof() {
+fn union_decoding_checks_nested_unions_enums_and_merged_objects() {
     use generated::union_semantics::Colors;
     use generated::union_semantics::Composed;
     use generated::union_semantics::Nested;
     use generated::union_semantics::NestedAny;
-    use generated::union_semantics::Validated;
 
     for json in [r#""blue""#, r#""unknown""#, "42"] {
         assert!(serde_json::from_str::<Colors>(json).is_err(), "{json}");
@@ -408,12 +254,6 @@ fn union_validation_checks_nested_unions_enums_and_allof() {
     for json in [r#"{"left":"a"}"#, r#"{"left":"a","tag":"wrong"}"#] {
         assert!(serde_json::from_str::<Composed>(json).is_err(), "{json}");
     }
-    for json in [r#""ab""#, "1.5", "[true,false]"] {
-        assert!(serde_json::from_str::<Validated>(json).is_ok(), "{json}");
-    }
-    for json in [r#""a""#, r#""AB""#, "3.5", "[true,true]", "[]", "[1]"] {
-        assert!(serde_json::from_str::<Validated>(json).is_err(), "{json}");
-    }
 }
 
 #[test]
@@ -427,6 +267,13 @@ fn discriminator_and_duplicate_alternatives_do_not_hide_overlap() {
     assert!(serde_json::from_str::<DuplicateAny>(r#"{"left":"a","extra":1}"#).is_ok());
     assert!(serde_json::from_str::<Discriminated>(r#"{"kind":"chosen","left":"a","right":"b"}"#).is_err());
     assert!(serde_json::from_str::<Discriminated>(r#"{"right":"b"}"#).is_ok());
+    let chosen: Discriminated =
+        serde_json::from_str(r#"{"left":"a"}"#).expect("mapping does not require a discriminator");
+    assert!(matches!(&chosen, Discriminated::Chosen(_)));
+    assert_eq!(
+        serde_json::to_value(chosen).expect("serialize without added discriminator"),
+        serde_json::json!({"left":"a"})
+    );
 }
 
 #[test]
@@ -436,77 +283,36 @@ fn anyof_preserves_the_entire_json_value_and_exposes_all_matching_views() {
     let value = serde_json::json!({"left":"a","right":"b","extra":{"array":[null,true,1.5_f64]}});
     let model = RawObjects::try_from(value.clone()).expect("both alternatives match");
     assert_eq!(model.as_value(), &value);
-    assert_eq!(model.as_left().expect("left view").expect("left match").left, "a");
-    assert_eq!(model.as_right().expect("right view").expect("right match").right, "b");
+    assert_eq!(model.as_left().expect("left view").left, "a");
+    assert_eq!(model.as_right().expect("right view").right, "b");
     assert_eq!(serde_json::to_value(&model).expect("serialize"), value);
     let back: RawObjects = serde_json::from_value(value.clone()).expect("deserialize");
     assert_eq!(back.into_value(), value);
     let only_left = RawObjects::try_from(serde_json::json!({"left":"a"})).expect("left matches");
-    assert!(only_left.as_right().expect("no right match").is_none());
-    assert!(RawObjects::try_from(serde_json::json!({})).is_err());
+    let missing_right: Result<generated::union_semantics::Right, serde_json::Error> = only_left.as_right();
+    assert!(missing_right.is_err());
+    let no_match: Result<RawObjects, serde_json::Error> = RawObjects::try_from(serde_json::json!({}));
+    assert!(no_match.is_err());
     assert!(serde_json::from_str::<RawObjects>("null").is_err());
 }
 
 #[test]
-fn recursive_union_limits_reject_the_entire_validation() {
-    use generated::union_semantics::RecursiveAnyFallback;
-    use generated::union_semantics::RecursiveFallback;
-
-    let mut input = serde_json::json!("leaf");
-    for _ in 0..24_usize {
-        input = serde_json::json!([input]);
-    }
-    let error = serde_json::from_value::<RecursiveFallback>(input.clone()).expect_err("bounded validation");
-    assert!(error.to_string().contains("union validation limit exceeded"));
-    let error = RecursiveAnyFallback::try_from(input).expect_err("bounded validation");
-    assert!(error.contains("union validation limit exceeded"));
-
-    let mut deep = serde_json::json!("leaf");
-    for _ in 0..70_usize {
-        deep = serde_json::json!([deep]);
-    }
-    let error = serde_json::from_value::<RecursiveFallback>(deep).expect_err("bounded depth");
-    assert!(error.to_string().contains("union validation limit exceeded"));
-}
-
-#[test]
-fn nullable_union_types_do_not_bypass_enum_constraints() {
-    use generated::union_semantics::NullableEnum;
-    use generated::union_semantics::NullableString;
-
-    assert!(NullableEnum::try_from(serde_json::Value::Null).is_err());
-    assert!(NullableEnum::try_from(serde_json::json!("ok")).is_ok());
-    assert!(NullableString::try_from(serde_json::Value::Null).is_ok());
-}
-
-#[test]
-fn union_schema_equality_compares_nested_numbers_without_precision_loss() {
-    use generated::union_semantics::NestedEnum;
-    use generated::union_semantics::UniqueValues;
+fn union_recursion_through_properties_consumes_input() {
+    use generated::recursive_schema::Expression;
 
     for input in [
-        "[1,1.0]",
-        "[0,-0.0]",
-        "[[1],[1.0]]",
-        r#"[{"nested":[1]},{"nested":[1.0]}]"#,
-        "[9007199254740992,9007199254740992.0]",
+        serde_json::json!("leaf"),
+        serde_json::json!({"nested": "leaf"}),
+        serde_json::json!({"nested": {"nested": "leaf"}}),
     ] {
-        assert!(serde_json::from_str::<UniqueValues>(input).is_err(), "{input}");
+        let value: Expression = serde_json::from_value(input.clone()).expect("recursive expression");
+        assert_eq!(serde_json::to_value(value).expect("serialize expression"), input);
     }
-    for input in [
-        "[1,1.5]",
-        "[9007199254740992,9007199254740993]",
-        "[9007199254740993,9007199254740992.0]",
-        "[18446744073709551615,18446744073709551616.0]",
-    ] {
-        assert!(serde_json::from_str::<UniqueValues>(input).is_ok(), "{input}");
-    }
-    assert!(serde_json::from_str::<NestedEnum>(r#"{"values":[1.0,9007199254740993]}"#).is_ok());
-    assert!(serde_json::from_str::<NestedEnum>(r#"{"values":[1.0,9007199254740992.0]}"#).is_err());
+    assert!(serde_json::from_value::<Expression>(serde_json::json!({"nested": true})).is_err());
 }
 
 #[test]
-fn inline_and_recursive_unions_validate_without_losing_json() {
+fn inline_and_recursive_unions_decode_without_losing_json() {
     use generated::union_semantics::Containers;
     use generated::union_semantics::Recursive;
 
@@ -522,7 +328,7 @@ fn inline_and_recursive_unions_validate_without_losing_json() {
 }
 
 #[test]
-fn union_matching_uses_the_projected_request_and_response_schemas() {
+fn union_matching_uses_the_projected_request_and_response_types() {
     use generated::combined_read_write_only::UnionEnvelopeRequest;
     use generated::combined_read_write_only::UnionEnvelopeResponse;
 
@@ -540,20 +346,42 @@ fn union_matching_uses_the_projected_request_and_response_schemas() {
 
 #[test]
 fn union_matching_does_not_add_traits_to_foreign_payloads() {
+    use generated::server_union_traits::InputExclusive;
     use generated::server_union_traits::InputInclusive;
     use generated::server_union_traits::OutputInclusive;
 
+    let exclusive: InputExclusive = serde_json::from_str(r#""incoming""#).expect("non-Clone payload");
+    match exclusive {
+        InputExclusive::Incoming(payload) => assert_eq!(payload.0, "incoming"),
+        InputExclusive::Bool(_) => panic!("expected the decoded foreign payload"),
+    }
     let input: InputInclusive = serde_json::from_str(r#""incoming""#).expect("deserialize-only payload");
-    let payload = input
-        .as_incoming()
-        .expect("typed conversion")
-        .expect("string alternative");
+    let payload = input.as_incoming().expect("typed conversion");
     assert_eq!(payload.0, "incoming");
-    let output = OutputInclusive::try_from(serde_json::json!("outgoing")).expect("schema match");
-    assert_eq!(
-        serde_json::to_value(output.clone()).expect("serialize-only payload"),
-        output.into_value()
-    );
+    for value in [serde_json::json!("outgoing"), serde_json::json!({"unvalidated":42_i32})] {
+        let output = OutputInclusive::from(value.clone());
+        assert_eq!(output.as_value(), &value);
+        assert_eq!(serde_json::to_value(&output).expect("serialize-only payload"), value);
+        assert_eq!(output.into_value(), value);
+    }
+}
+
+#[test]
+fn client_union_matching_keeps_foreign_traits_directional() {
+    use generated::client_union_traits::InputInclusive;
+    use generated::client_union_traits::OutputExclusive;
+    use generated::client_union_traits::OutputInclusive;
+
+    let exclusive: OutputExclusive = serde_json::from_str(r#""outgoing""#).expect("non-Clone response payload");
+    match exclusive {
+        OutputExclusive::Outgoing(payload) => assert_eq!(payload.0, "outgoing"),
+        OutputExclusive::Bool(_) => panic!("expected the decoded foreign payload"),
+    }
+    let output: OutputInclusive = serde_json::from_str(r#""outgoing""#).expect("deserialize-only response");
+    assert_eq!(output.as_outgoing().expect("typed conversion").0, "outgoing");
+    let value = serde_json::json!({"unvalidated":true});
+    let input = InputInclusive::from(value.clone());
+    assert_eq!(serde_json::to_value(input).expect("serialize-only request"), value);
 }
 
 /// Stand-in for the foreign types the `ext_x_rust_derive` fixture points its

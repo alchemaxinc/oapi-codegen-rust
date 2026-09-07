@@ -33,84 +33,6 @@ pub enum Reference {
     OrderItem(OrderItem),
     OrderItemQuantity(OrderItemQuantity),
 }
-impl Reference {
-    fn __validate_0_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_object())
-            && (value
-                .as_object()
-                .is_none_or(|object| {
-                    true
-                        && (object
-                            .get("sku")
-                            .is_none_or(|value| Self::__validate_0_1(
-                                value,
-                                depth + 1,
-                                budget,
-                            )))
-                }));
-    }
-    fn __validate_0_1(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_string());
-    }
-    fn __validate_1_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_object())
-            && (value
-                .as_object()
-                .is_none_or(|object| {
-                    true
-                        && (object
-                            .get("quantity")
-                            .is_none_or(|value| Self::__validate_1_1(
-                                value,
-                                depth + 1,
-                                budget,
-                            )))
-                }));
-    }
-    fn __validate_1_1(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.as_f64().is_some_and(|number| number.fract() == 0.0));
-    }
-}
 impl<'de> serde::Deserialize<'de> for Reference {
     fn deserialize<__Deserializer: serde::Deserializer<'de>>(
         deserializer: __Deserializer,
@@ -118,49 +40,31 @@ impl<'de> serde::Deserialize<'de> for Reference {
         let value = <serde_json::Value as serde::Deserialize>::deserialize(
             deserializer,
         )?;
-        let mut budget = 10000usize;
-        let matches = [
-            Self::__validate_0_0(&value, 0, &mut budget),
-            Self::__validate_1_0(&value, 0, &mut budget),
-        ];
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                serde::de::Error::custom("union validation limit exceeded"),
-            );
-        }
-        if matches.iter().filter(|matched| **matched).count() != 1 {
-            return ::std::result::Result::Err(
-                serde::de::Error::custom(
-                    "oneOf requires exactly one matching alternative",
-                ),
-            );
-        }
-        return match matches.iter().position(|matched| *matched) {
-            ::std::option::Option::Some(index) => {
-                match index {
-                    0usize => {
-                        <OrderItem as serde::Deserialize>::deserialize(value)
-                            .map(Self::OrderItem)
-                            .map_err(serde::de::Error::custom)
-                    }
-                    1usize => {
-                        <OrderItemQuantity as serde::Deserialize>::deserialize(value)
-                            .map(Self::OrderItemQuantity)
-                            .map_err(serde::de::Error::custom)
-                    }
-                    _ => {
-                        ::std::result::Result::Err(
-                            serde::de::Error::custom("invalid oneOf alternative"),
-                        )
-                    }
-                }
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <OrderItem as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
             }
-            ::std::option::Option::None => {
-                ::std::result::Result::Err(
-                    serde::de::Error::custom("oneOf has no matching alternative"),
-                )
+            selected = ::std::option::Option::Some(Self::OrderItem(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <OrderItemQuantity as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
             }
-        };
+            selected = ::std::option::Option::Some(Self::OrderItemQuantity(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
     }
 }
 

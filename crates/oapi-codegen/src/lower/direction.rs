@@ -39,40 +39,6 @@ pub const REQUEST_SUFFIX: &str = "Request";
 /// The suffix the response shape of a split model takes.
 pub const RESPONSE_SUFFIX: &str = "Response";
 
-fn project_validation(validation: &crate::ir::UnionValidation, direction: Direction) -> crate::ir::UnionValidation {
-    let mut projected = validation.clone();
-    for node in &mut projected.nodes {
-        let mut removed = Vec::new();
-        node.properties.retain(|(name, index)| {
-            let Some(child) = validation.nodes.get(*index) else {
-                return true;
-            };
-            let keywords = &child.keywords;
-            let key = match direction {
-                Direction::Request => "readOnly",
-                Direction::Response => "writeOnly",
-            };
-            let keep = keywords.get(key).and_then(serde_json::Value::as_bool) != Some(true);
-            if !keep {
-                removed.push(name.clone());
-            }
-            return keep;
-        });
-        if let Some(required) = node
-            .keywords
-            .get_mut("required")
-            .and_then(serde_json::Value::as_array_mut)
-        {
-            required.retain(|value| {
-                return !value
-                    .as_str()
-                    .is_some_and(|name| return removed.iter().any(|removed| return removed == name));
-            });
-        }
-    }
-    return projected;
-}
-
 /// How one direction-sensitive model is projected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Projection {
@@ -243,7 +209,6 @@ fn project_item(item: &Item, direction: Direction, projections: &BTreeMap<String
                             return UnionVariant {
                                 name: variant.name.clone(),
                                 ty: project_type(&variant.ty, direction, projections),
-                                validation: project_validation(&variant.validation, direction),
                             };
                         })
                         .collect();

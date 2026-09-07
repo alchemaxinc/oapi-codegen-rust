@@ -305,8 +305,9 @@ OpenAPI objects. However, it still inspects objects inside unsupported features,
 such as callback operations.
 
 Warnings also identify several limits of the current translation. These include
-merged `allOf` members, nullability, and unconstrained fallback
-types. Body selection reports discarded media entries.
+Rust union matching, merged `allOf` members, nullability, and unconstrained fallback
+types. Every `oneOf` and `anyOf` produces a warning: Rust deserialization checks
+do not enforce all schema constraints. Body selection reports discarded media entries.
 The warnings expose these limits without changing the generated types.
 The catalogue is not a complete OpenAPI value validator. Lowering still applies
 its own value and combination checks.
@@ -428,95 +429,49 @@ reason: the literal does not fit.
 A `number` or `boolean` `enum` still lowers to a bare `f64` or `bool`. A float is
 not a legal discriminant, and a boolean enum names nothing useful.
 
-## Union matching follows schema alternatives
+## Union matching follows Rust deserialization
 
 `oneOf` and `anyOf` have different default representations. Both changes break
 compatibility with first-match deserialization.
 
-A `oneOf` remains a tag-free Rust enum. Its custom `Deserialize` implementation
-reads a JSON value and checks every schema alternative before it constructs a
-payload. Exactly one schema must match. Zero matches and multiple matches
-produce an error, regardless of declaration order.
+A `oneOf` remains a tag-free Rust enum. Its deserializer tries each Rust payload type against a shared reference to a `serde_json::Value`.
+Exactly one decode must succeed. Zero successes and multiple successes produce an error.
+The implementation returns the decoded variant without a payload clone. Repeated alternatives count separately.
 
-Schema matches do not depend on successful payload deserialization. For example,
-an integer matches both `integer` and `number`. An object with two required
-property sets can match two alternatives even when serde discards unknown
-properties. Rust payload conversion occurs only after the exclusive match.
-Conversion can still fail when a Rust type cannot represent the schema value.
+Union recursion must pass through an object property or array element. The generator rejects cycles through only unions and aliases to prevent infinite deserialization.
 
-Discriminator mappings do not replace, filter, or reorder the alternatives.
-The discriminator property constrains a match only through its property schema.
-A mapping cannot hide an overlap. Repeated alternatives remain distinct matches:
-two identical `oneOf` members reject every value that matches them both.
+Discriminator mappings affect variant names only. They do not filter alternatives or add discriminator properties to serialized payloads.
+A discriminator field affects decoding only through its Rust representation.
 
 An `anyOf` becomes a struct with a private `serde_json::Value` field.
-`TryFrom<serde_json::Value>` validates at least one schema match.
-Deserialization uses the same constructor. Serialization preserves the full
-JSON value, including unknown properties and properties from other matches.
+In deserialize-capable directions, `TryFrom<serde_json::Value>` requires at least one successful Rust alternative decode and returns `Result<Self, serde_json::Error>`.
+`Deserialize` delegates to this constructor. Serialization preserves the full JSON value, including unknown properties and properties from other matches.
 It does not preserve source whitespace, object key order, or duplicate keys.
 
 The wrapper exposes these methods:
 
 - `as_value()` borrows the full JSON value without mutation.
 - `into_value()` consumes the wrapper and returns the full JSON value.
-- `as_<alternative>()` returns `Result<Option<T>, serde_json::Error>` for each alternative.
-  `None` means that the schema does not match. An error means that typed
-  conversion failed after a schema match.
+- In deserialize-capable directions, `as_<alternative>()` returns `Result<T, serde_json::Error>`.
+  Each call decodes that alternative from the stored value. An error means that this Rust type cannot decode the value.
 
-There is no unchecked `From<Value>`, public raw field, mutable raw accessor, or
-typed constructor that can discard unknown properties. An accessor name that
-conflicts with another method produces a generation error.
-
-### Lowering and emission
-
-The IR distinguishes exclusive enums from inclusive wrappers. Each alternative
-also carries a finite validation graph, separate from its Rust payload type.
-Lowering resolves schema references into graph edges. Emission compiles the
-graph into private predicate methods, not a general JSON Schema interpreter.
-
-The predicates check primitive types, enum values, numeric bounds, `multipleOf`,
-string lengths and patterns, and supported date, date-time, and UUID formats.
-They also check required properties, property schemas, additional properties,
-collection limits, unique array items, and nested `oneOf`, `anyOf`, and `allOf`.
-Every nested union retains its own matching rule.
-
-Direction projection removes `readOnly` or `writeOnly` properties and their
-required entries from these graphs. Reference edges remain independent of Rust
-renaming, pruning, and recursive boxing. Inline unions use the same pipeline.
-The flat and package emitters share these predicates and dependency detection.
-
-Payload types need no extra `Clone`, `Debug`, or `Serialize` implementation for
-matching. Typed accessors exist only in deserialize-capable directions.
-Serialize-only wrappers still support validated construction from JSON.
+Serialize-only wrappers instead provide `From<serde_json::Value>` as an explicit, unvalidated constructor.
+They have no typed accessors and require no payload `Deserialize` implementation.
+They have no public raw field or mutable raw accessor.
+An accessor name that conflicts with another method produces a generation error.
 
 ### Deliberate limits
 
-This is a supported subset of OpenAPI 3.0 validation, not full JSON Schema.
-Unsupported keywords and formats retain explicit diagnostics.
-Floating-point constraints use the numeric representation of `serde_json`.
-Union `multipleOf` compares canonical decimal coefficients and exponents without a floating-point remainder or tolerance.
-Thus, `0.3` is a multiple of `0.1`, but `0.30000000000000004` is not.
-Integer values retain their full `i64` or `u64` precision.
-Floating-point values and schema bounds can undergo `f64` rounding before this comparison.
-The comparison uses bounded integer reduction, not large powers of ten, and adds no dependency.
-The validator rejects paths deeper than 128 schema edges or nested equality comparisons.
-Each validation permits fewer than 10,000 schema visits and equality comparisons in total.
-These limits bound repeated recursive alternatives as well as non-consuming reference cycles.
-Limit exhaustion rejects the entire validation, even if another alternative matches.
-It cannot turn an incomplete match count into a successful `oneOf`.
+Every union produces a generation warning: Rust deserialization checks do not enforce all schema constraints, which can affect match counts.
+Constraints affect matching only where the Rust representation enforces them. There is no separate schema validation engine.
 
-Enum and unique-item comparisons use recursive JSON equality.
-Integer and floating-point representations of the same number compare equal.
-Comparisons preserve integer precision, including integers beyond the exact range of `f64`.
-Nullable extends the type check but does not bypass enum constraints.
-
-The existing nullable Rust representations remain unchanged.
-Standalone aliases and ordinary object deserialization retain their existing
-validation limits. A nested `allOf` predicate validates every member, but the
-existing Rust object merge still restricts which `allOf` shapes can generate.
-Foreign `x-rust-type` implementations can reject values that their schemas accept.
-These limits do not permit a discriminator or serde first-match behavior to hide
-an overlap.
+Two schemas with disjoint numeric bounds can lower to aliases of the same Rust type.
+Both aliases accept the same values, so their `oneOf` rejects those values as ambiguous.
+An integer JSON value can also decode as both `i64` and `f64`.
+Objects with both required property sets can match two alternatives when serde discards unknown properties.
+Nullable types and merged `allOf` objects retain their existing representation limits.
+Foreign `x-rust-type` implementations determine their own decoding behavior.
+Request and response projections retain their directional traits. Matching needs no additional payload `Clone`, `Debug`, or `Serialize` implementation.
 
 A variant takes its name from `x-rust-name`, else from the type a `$ref` names,
 else from the type an inline member holds when it hoists none of its own. An

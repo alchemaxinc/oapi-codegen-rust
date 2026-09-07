@@ -198,11 +198,12 @@ components:
 
 ## Union variants
 
-A `oneOf` becomes a tag-free enum. An `anyOf` becomes a validated JSON wrapper
+A `oneOf` becomes a tag-free enum. An `anyOf` becomes a JSON wrapper
 with typed accessors. Each alternative gets a name from the first applicable rule:
 
 | Member                                          | Variant name                                                                                                |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| A `$ref` with a discriminator mapping           | The first mapping key for that reference                                                                    |
 | Carries `x-rust-name`                           | The name it gives                                                                                           |
 | A `$ref`                                        | The name of the type it points to                                                                           |
 | A string `enum` of one value                    | That value                                                                                                  |
@@ -248,8 +249,10 @@ says which union it belongs to. `Signal::Red(SignalRed)` reads once at the use
 site and stays unique at the crate root. Two unions that both hold a member named
 `Unknown` would otherwise take one name and stop generation.
 
-Two members can share a Rust type. A `oneOf` value must match exactly one member
-schema, not the first Rust type that deserializes. An `anyOf` value must match at
-least one member schema, and its wrapper preserves the full JSON value.
-See [Union matching](design.md#union-matching-follows-schema-alternatives) for the
-validation rules and API.
+Two members can share a Rust type. A `oneOf` requires exactly one successful Rust payload decode.
+Discriminator mappings affect variant names only. They do not add or change payload properties.
+
+An `anyOf` preserves the full JSON value. Deserialize-capable wrappers require at least one successful Rust alternative decode.
+Serialize-only wrappers instead accept unvalidated JSON without a payload `Deserialize` requirement.
+Rust deserialization checks do not enforce all schema constraints. Every union produces a generation warning about this limit.
+See [Union matching](design.md#union-matching-follows-rust-deserialization) for the API and its limits.

@@ -25,7 +25,7 @@ pub struct Note {
     value: serde_json::Value,
 }
 impl Note {
-    /// Borrow the complete validated JSON value.
+    /// Borrow the complete JSON value.
     pub fn as_value(&self) -> &serde_json::Value {
         return &self.value;
     }
@@ -33,140 +33,27 @@ impl Note {
     pub fn into_value(self) -> serde_json::Value {
         return self.value;
     }
-    ///Decode the `TextNote` alternative. Return `None` when its schema does not match.
-    pub fn as_text_note(
-        &self,
-    ) -> ::std::result::Result<::std::option::Option<TextNote>, serde_json::Error> {
-        let mut budget = 10000usize;
-        let matched = Self::__validate_0_0(&self.value, 0, &mut budget);
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                <serde_json::Error as serde::de::Error>::custom(
-                    "union validation limit exceeded",
-                ),
-            );
-        }
-        if !matched {
-            return ::std::result::Result::Ok(::std::option::Option::None);
-        }
-        return <TextNote as serde::Deserialize>::deserialize(&self.value)
-            .map(::std::option::Option::Some);
+    ///Decode the `TextNote` Rust alternative.
+    pub fn as_text_note(&self) -> ::std::result::Result<TextNote, serde_json::Error> {
+        return <TextNote as serde::Deserialize>::deserialize(&self.value);
     }
-    ///Decode the `NumberNote` alternative. Return `None` when its schema does not match.
+    ///Decode the `NumberNote` Rust alternative.
     pub fn as_number_note(
         &self,
-    ) -> ::std::result::Result<::std::option::Option<NumberNote>, serde_json::Error> {
-        let mut budget = 10000usize;
-        let matched = Self::__validate_1_0(&self.value, 0, &mut budget);
-        if budget == 0 {
-            return ::std::result::Result::Err(
-                <serde_json::Error as serde::de::Error>::custom(
-                    "union validation limit exceeded",
-                ),
-            );
-        }
-        if !matched {
-            return ::std::result::Result::Ok(::std::option::Option::None);
-        }
-        return <NumberNote as serde::Deserialize>::deserialize(&self.value)
-            .map(::std::option::Option::Some);
-    }
-    fn __validate_0_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_object())
-            && (value
-                .as_object()
-                .is_none_or(|object| {
-                    true && (object.contains_key("text"))
-                        && (object
-                            .get("text")
-                            .is_none_or(|value| Self::__validate_0_1(
-                                value,
-                                depth + 1,
-                                budget,
-                            )))
-                }));
-    }
-    fn __validate_0_1(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_string());
-    }
-    fn __validate_1_0(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.is_object())
-            && (value
-                .as_object()
-                .is_none_or(|object| {
-                    true && (object.contains_key("value"))
-                        && (object
-                            .get("value")
-                            .is_none_or(|value| Self::__validate_1_1(
-                                value,
-                                depth + 1,
-                                budget,
-                            )))
-                }));
-    }
-    fn __validate_1_1(
-        value: &serde_json::Value,
-        depth: usize,
-        budget: &mut usize,
-    ) -> bool {
-        if depth > 128usize || *budget <= 1 {
-            *budget = 0;
-            return false;
-        }
-        *budget -= 1;
-        let _ = value;
-        return true && (value.as_f64().is_some_and(|number| number.fract() == 0.0));
+    ) -> ::std::result::Result<NumberNote, serde_json::Error> {
+        return <NumberNote as serde::Deserialize>::deserialize(&self.value);
     }
 }
 impl ::std::convert::TryFrom<serde_json::Value> for Note {
-    type Error = ::std::string::String;
+    type Error = serde_json::Error;
     fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
-        let mut budget = 10000usize;
-        let count = [
-            Self::__validate_0_0(&value, 0, &mut budget),
-            Self::__validate_1_0(&value, 0, &mut budget),
-        ]
-            .into_iter()
-            .filter(|matched| *matched)
-            .count();
-        if budget == 0 {
+        if !(<TextNote as serde::Deserialize>::deserialize(&value).is_ok()
+            || <NumberNote as serde::Deserialize>::deserialize(&value).is_ok())
+        {
             return ::std::result::Result::Err(
-                "union validation limit exceeded".to_owned(),
-            );
-        }
-        if count == 0 {
-            return ::std::result::Result::Err(
-                "anyOf requires at least one matching alternative".to_owned(),
+                <serde_json::Error as serde::de::Error>::custom(
+                    "anyOf matched no Rust alternative",
+                ),
             );
         }
         return ::std::result::Result::Ok(Self { value });

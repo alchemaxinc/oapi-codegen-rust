@@ -407,8 +407,8 @@ pub(crate) fn emit_enum(enom: &Enum, derives: ModelDerives) -> Result<TokenStrea
                 #conversions
             }
         }
-        EnumKind::Union(variants) => super::union::emit(enom, variants, false, derives)?,
-        EnumKind::AnyOf(variants) => super::union::emit(enom, variants, true, derives)?,
+        EnumKind::Union(variants) => super::union::emit_one_of(enom, variants, derives)?,
+        EnumKind::AnyOf(variants) => super::union::emit_any_of(enom, variants, derives)?,
     };
     return Ok(tokens);
 }

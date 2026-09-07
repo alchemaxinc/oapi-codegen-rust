@@ -10,13 +10,13 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/Input"}
+            schema: { $ref: "#/components/schemas/Input" }
       responses:
         "200":
           description: The result.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/Output"}
+              schema: { $ref: "#/components/schemas/Output" }
 components:
   schemas:
     Incoming:
