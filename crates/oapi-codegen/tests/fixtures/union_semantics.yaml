@@ -1,0 +1,235 @@
+openapi: "3.0.3"
+info:
+  title: Union schema validation
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    DecimalAny:
+      anyOf:
+        - x-rust-name: Decimal
+          type: number
+          multipleOf: 0.1
+        - type: boolean
+    DecimalOne:
+      oneOf:
+        - type: number
+          multipleOf: 0.1
+        - type: number
+          minimum: 1
+    DecimalThree:
+      anyOf:
+        - type: number
+          multipleOf: 0.3
+        - type: boolean
+    DecimalQuarter:
+      anyOf:
+        - type: number
+          multipleOf: 0.25
+        - type: boolean
+    DecimalEightHundredths:
+      anyOf:
+        - type: number
+          multipleOf: 0.08
+        - type: boolean
+    DecimalTiny:
+      anyOf:
+        - type: number
+          multipleOf: 1.0e-300
+        - type: boolean
+    DecimalSubnormal:
+      anyOf:
+        - type: number
+          multipleOf: 5.0e-324
+        - type: boolean
+    DecimalHuge:
+      anyOf:
+        - type: number
+          multipleOf: 1.0e+300
+        - type: boolean
+    IntegerMultiple:
+      anyOf:
+        - type: integer
+          multipleOf: 3
+        - type: boolean
+    LargeIntegerMultiple:
+      anyOf:
+        - type: integer
+          multipleOf: 9007199254740993
+        - type: boolean
+    NestedDecimal:
+      anyOf:
+        - x-rust-name: Values
+          type: array
+          items:
+            oneOf:
+              - type: number
+                multipleOf: 0.1
+              - type: number
+                minimum: 1
+        - type: boolean
+    RecursiveDuplicate:
+      oneOf:
+        - type: string
+        - x-rust-name: First
+          type: array
+          items: { $ref: "#/components/schemas/RecursiveDuplicate" }
+        - x-rust-name: Second
+          type: array
+          items: { $ref: "#/components/schemas/RecursiveDuplicate" }
+    RecursiveFallback:
+      oneOf:
+        - $ref: "#/components/schemas/RecursiveDuplicate"
+        - x-rust-name: Fallback
+          type: array
+          items: {}
+    RecursiveAnyFallback:
+      anyOf:
+        - $ref: "#/components/schemas/RecursiveDuplicate"
+        - x-rust-name: Fallback
+          type: array
+          items: {}
+    NullableEnum:
+      anyOf:
+        - type: string
+          nullable: true
+          enum: [ok]
+        - type: boolean
+    NullableString:
+      anyOf:
+        - type: string
+          nullable: true
+        - type: boolean
+    UniqueValues:
+      anyOf:
+        - x-rust-name: Values
+          type: array
+          uniqueItems: true
+          items: {}
+        - type: boolean
+    NestedEnum:
+      anyOf:
+        - x-rust-name: Values
+          enum: [{ values: [1, 9007199254740993] }]
+        - type: boolean
+    LargeA:
+      type: integer
+      enum: [9007199254740992]
+    LargeB:
+      type: integer
+      enum: [9007199254740993]
+    LargeChoice:
+      oneOf:
+        - $ref: "#/components/schemas/LargeA"
+        - $ref: "#/components/schemas/LargeB"
+    Numeric:
+      oneOf:
+        - type: integer
+        - type: number
+    Ranges:
+      oneOf:
+        - type: integer
+          minimum: 0
+          maximum: 10
+        - type: integer
+          minimum: 5
+          maximum: 20
+    Choice:
+      type: string
+      enum: [red, blue]
+    OtherChoice:
+      type: string
+      enum: [blue, green]
+    Colors:
+      oneOf:
+        - $ref: "#/components/schemas/Choice"
+        - $ref: "#/components/schemas/OtherChoice"
+    Left:
+      type: object
+      required: [left]
+      properties:
+        left: { type: string }
+    Right:
+      type: object
+      required: [right]
+      properties:
+        right: { type: string }
+    Objects:
+      oneOf:
+        - $ref: "#/components/schemas/Left"
+        - $ref: "#/components/schemas/Right"
+    RawObjects:
+      anyOf:
+        - $ref: "#/components/schemas/Left"
+        - $ref: "#/components/schemas/Right"
+    Closed:
+      type: object
+      required: [left]
+      additionalProperties: false
+      properties:
+        left: { type: string }
+    ClosedChoice:
+      oneOf:
+        - $ref: "#/components/schemas/Closed"
+        - $ref: "#/components/schemas/Right"
+    Nested:
+      oneOf:
+        - $ref: "#/components/schemas/Colors"
+        - type: boolean
+    NestedAny:
+      oneOf:
+        - $ref: "#/components/schemas/RawObjects"
+        - type: boolean
+    DuplicateAny:
+      anyOf:
+        - $ref: "#/components/schemas/Left"
+        - $ref: "#/components/schemas/Left"
+    Discriminated:
+      oneOf:
+        - $ref: "#/components/schemas/Left"
+        - $ref: "#/components/schemas/Right"
+      discriminator:
+        propertyName: kind
+        mapping:
+          chosen: "#/components/schemas/Left"
+    Merged:
+      allOf:
+        - $ref: "#/components/schemas/Left"
+        - type: object
+          required: [tag]
+          properties:
+            tag: { type: string, enum: [tagged] }
+    Composed:
+      oneOf:
+        - $ref: "#/components/schemas/Merged"
+        - type: boolean
+    Containers:
+      type: object
+      required: [choice, raw]
+      properties:
+        choice:
+          oneOf:
+            - type: string
+            - type: boolean
+        raw:
+          anyOf:
+            - $ref: "#/components/schemas/Left"
+            - $ref: "#/components/schemas/Right"
+    Recursive:
+      anyOf:
+        - type: string
+        - x-rust-name: List
+          type: array
+          items: { $ref: "#/components/schemas/Recursive" }
+    Validated:
+      anyOf:
+        - type: string
+          pattern: "^[a-z]+$"
+          minLength: 2
+        - type: number
+          enum: [1.5, 2.5]
+        - x-rust-name: Flags
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: boolean }

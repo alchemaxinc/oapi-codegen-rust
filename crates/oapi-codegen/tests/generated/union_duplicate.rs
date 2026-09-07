@@ -10,30 +10,17 @@
 )]
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct OrderItem {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sku: Option<String>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct OrderItemQuantity {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quantity: Option<i64>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Cart {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub item: Option<OrderItemQuantity>,
+pub struct Cat {
+    pub meow: String,
 }
 
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
-pub enum Reference {
-    OrderItem(OrderItem),
-    OrderItemQuantity(OrderItemQuantity),
+pub enum Pet {
+    Cat(Cat),
+    Cat2(Cat),
 }
-impl Reference {
+impl Pet {
     fn __validate_0_0(
         value: &serde_json::Value,
         depth: usize,
@@ -49,9 +36,9 @@ impl Reference {
             && (value
                 .as_object()
                 .is_none_or(|object| {
-                    true
+                    true && (object.contains_key("meow"))
                         && (object
-                            .get("sku")
+                            .get("meow")
                             .is_none_or(|value| Self::__validate_0_1(
                                 value,
                                 depth + 1,
@@ -87,9 +74,9 @@ impl Reference {
             && (value
                 .as_object()
                 .is_none_or(|object| {
-                    true
+                    true && (object.contains_key("meow"))
                         && (object
-                            .get("quantity")
+                            .get("meow")
                             .is_none_or(|value| Self::__validate_1_1(
                                 value,
                                 depth + 1,
@@ -108,10 +95,10 @@ impl Reference {
         }
         *budget -= 1;
         let _ = value;
-        return true && (value.as_f64().is_some_and(|number| number.fract() == 0.0));
+        return true && (value.is_string());
     }
 }
-impl<'de> serde::Deserialize<'de> for Reference {
+impl<'de> serde::Deserialize<'de> for Pet {
     fn deserialize<__Deserializer: serde::Deserializer<'de>>(
         deserializer: __Deserializer,
     ) -> ::std::result::Result<Self, __Deserializer::Error> {
@@ -139,13 +126,13 @@ impl<'de> serde::Deserialize<'de> for Reference {
             ::std::option::Option::Some(index) => {
                 match index {
                     0usize => {
-                        <OrderItem as serde::Deserialize>::deserialize(value)
-                            .map(Self::OrderItem)
+                        <Cat as serde::Deserialize>::deserialize(value)
+                            .map(Self::Cat)
                             .map_err(serde::de::Error::custom)
                     }
                     1usize => {
-                        <OrderItemQuantity as serde::Deserialize>::deserialize(value)
-                            .map(Self::OrderItemQuantity)
+                        <Cat as serde::Deserialize>::deserialize(value)
+                            .map(Self::Cat2)
                             .map_err(serde::de::Error::custom)
                     }
                     _ => {
@@ -162,14 +149,4 @@ impl<'de> serde::Deserialize<'de> for Reference {
             }
         };
     }
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub enum Stage {
-    #[serde(rename = "in-progress")]
-    InProgress,
-    #[serde(rename = "in_progress")]
-    InProgress2,
-    #[serde(rename = "done")]
-    Done,
 }

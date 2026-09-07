@@ -53,7 +53,7 @@ pub fn box_recursive_types(module: &mut Module) -> Result<()> {
                 }
             }
             Item::Enum(enumeration) => {
-                if let EnumKind::Union(variants) = &mut enumeration.kind {
+                if let EnumKind::Union(variants) | EnumKind::AnyOf(variants) = &mut enumeration.kind {
                     for variant in variants {
                         box_held(&mut variant.ty, &owner, &graph);
                     }
@@ -110,7 +110,7 @@ impl Graph {
                     }
                 }
                 Item::Enum(enumeration) => {
-                    if let EnumKind::Union(variants) = &enumeration.kind {
+                    if let EnumKind::Union(variants) | EnumKind::AnyOf(variants) = &enumeration.kind {
                         for variant in variants {
                             collect_held(&variant.ty, &mut targets);
                         }
@@ -551,10 +551,12 @@ mod tests {
                     UnionVariant {
                         name: to_ident("Text", Case::Pascal),
                         ty: RustType::String,
+                        validation: Default::default(),
                     },
                     UnionVariant {
                         name: to_ident("Nested", Case::Pascal),
                         ty: named("Expression"),
+                        validation: Default::default(),
                     },
                 ]),
             })],

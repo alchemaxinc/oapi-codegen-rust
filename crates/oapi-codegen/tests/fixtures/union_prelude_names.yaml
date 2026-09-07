@@ -1,0 +1,31 @@
+openapi: "3.0.3"
+info:
+  title: Union prelude name collisions
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    TryFrom:
+      type: string
+    Result:
+      type: string
+    PreludeOne:
+      oneOf:
+        - $ref: "#/components/schemas/TryFrom"
+        - type: boolean
+    PreludeAny:
+      anyOf:
+        - $ref: "#/components/schemas/Result"
+        - type: boolean
+    Validated:
+      anyOf:
+        - type: string
+          pattern: "^[a-z]+$"
+          enum: [ok]
+        - x-rust-name: Values
+          type: array
+          minItems: 1
+          items:
+            type: number
+            minimum: 0
+            multipleOf: 0.1

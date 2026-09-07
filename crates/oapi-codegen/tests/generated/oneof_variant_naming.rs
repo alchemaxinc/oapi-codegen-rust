@@ -9,7 +9,7 @@
     reason = "generated code, not first-party source"
 )]
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Scalars {
     String(String),
@@ -18,20 +18,397 @@ pub enum Scalars {
     F64(f64),
     Bool(bool),
 }
+impl Scalars {
+    fn __validate_0_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+    fn __validate_1_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.as_f64().is_some_and(|number| number.fract() == 0.0));
+    }
+    fn __validate_2_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.as_f64().is_some_and(|number| number.fract() == 0.0));
+    }
+    fn __validate_3_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_number());
+    }
+    fn __validate_4_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_boolean());
+    }
+}
+impl<'de> serde::Deserialize<'de> for Scalars {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut budget = 10000usize;
+        let matches = [
+            Self::__validate_0_0(&value, 0, &mut budget),
+            Self::__validate_1_0(&value, 0, &mut budget),
+            Self::__validate_2_0(&value, 0, &mut budget),
+            Self::__validate_3_0(&value, 0, &mut budget),
+            Self::__validate_4_0(&value, 0, &mut budget),
+        ];
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom("union validation limit exceeded"),
+            );
+        }
+        if matches.iter().filter(|matched| **matched).count() != 1 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom(
+                    "oneOf requires exactly one matching alternative",
+                ),
+            );
+        }
+        return match matches.iter().position(|matched| *matched) {
+            ::std::option::Option::Some(index) => {
+                match index {
+                    0usize => {
+                        <String as serde::Deserialize>::deserialize(value)
+                            .map(Self::String)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    1usize => {
+                        <i32 as serde::Deserialize>::deserialize(value)
+                            .map(Self::I32)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    2usize => {
+                        <i64 as serde::Deserialize>::deserialize(value)
+                            .map(Self::I64)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    3usize => {
+                        <f64 as serde::Deserialize>::deserialize(value)
+                            .map(Self::F64)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    4usize => {
+                        <bool as serde::Deserialize>::deserialize(value)
+                            .map(Self::Bool)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    _ => {
+                        ::std::result::Result::Err(
+                            serde::de::Error::custom("invalid oneOf alternative"),
+                        )
+                    }
+                }
+            }
+            ::std::option::Option::None => {
+                ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf has no matching alternative"),
+                )
+            }
+        };
+    }
+}
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Formats {
     Date(chrono::NaiveDate),
     DateTime(chrono::DateTime<chrono::Utc>),
     Uuid(uuid::Uuid),
 }
+impl Formats {
+    fn __validate_0_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string())
+            && (value
+                .as_str()
+                .is_none_or(|text| {
+                    chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d").is_ok()
+                }));
+    }
+    fn __validate_1_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string())
+            && (value
+                .as_str()
+                .is_none_or(|text| chrono::DateTime::parse_from_rfc3339(text).is_ok()));
+    }
+    fn __validate_2_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string())
+            && (value.as_str().is_none_or(|text| uuid::Uuid::parse_str(text).is_ok()));
+    }
+}
+impl<'de> serde::Deserialize<'de> for Formats {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut budget = 10000usize;
+        let matches = [
+            Self::__validate_0_0(&value, 0, &mut budget),
+            Self::__validate_1_0(&value, 0, &mut budget),
+            Self::__validate_2_0(&value, 0, &mut budget),
+        ];
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom("union validation limit exceeded"),
+            );
+        }
+        if matches.iter().filter(|matched| **matched).count() != 1 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom(
+                    "oneOf requires exactly one matching alternative",
+                ),
+            );
+        }
+        return match matches.iter().position(|matched| *matched) {
+            ::std::option::Option::Some(index) => {
+                match index {
+                    0usize => {
+                        <chrono::NaiveDate as serde::Deserialize>::deserialize(value)
+                            .map(Self::Date)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    1usize => {
+                        <chrono::DateTime<
+                            chrono::Utc,
+                        > as serde::Deserialize>::deserialize(value)
+                            .map(Self::DateTime)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    2usize => {
+                        <uuid::Uuid as serde::Deserialize>::deserialize(value)
+                            .map(Self::Uuid)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    _ => {
+                        ::std::result::Result::Err(
+                            serde::de::Error::custom("invalid oneOf alternative"),
+                        )
+                    }
+                }
+            }
+            ::std::option::Option::None => {
+                ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf has no matching alternative"),
+                )
+            }
+        };
+    }
+}
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Named {
     Cat(NamedCat),
     Dog(NamedDog),
+}
+impl Named {
+    fn __validate_0_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_object())
+            && (value
+                .as_object()
+                .is_none_or(|object| {
+                    true && (object.contains_key("meow"))
+                        && (object
+                            .get("meow")
+                            .is_none_or(|value| Self::__validate_0_1(
+                                value,
+                                depth + 1,
+                                budget,
+                            )))
+                }));
+    }
+    fn __validate_0_1(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+    fn __validate_1_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_object())
+            && (value
+                .as_object()
+                .is_none_or(|object| {
+                    true && (object.contains_key("bark"))
+                        && (object
+                            .get("bark")
+                            .is_none_or(|value| Self::__validate_1_1(
+                                value,
+                                depth + 1,
+                                budget,
+                            )))
+                }));
+    }
+    fn __validate_1_1(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+}
+impl<'de> serde::Deserialize<'de> for Named {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut budget = 10000usize;
+        let matches = [
+            Self::__validate_0_0(&value, 0, &mut budget),
+            Self::__validate_1_0(&value, 0, &mut budget),
+        ];
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom("union validation limit exceeded"),
+            );
+        }
+        if matches.iter().filter(|matched| **matched).count() != 1 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom(
+                    "oneOf requires exactly one matching alternative",
+                ),
+            );
+        }
+        return match matches.iter().position(|matched| *matched) {
+            ::std::option::Option::Some(index) => {
+                match index {
+                    0usize => {
+                        <NamedCat as serde::Deserialize>::deserialize(value)
+                            .map(Self::Cat)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    1usize => {
+                        <NamedDog as serde::Deserialize>::deserialize(value)
+                            .map(Self::Dog)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    _ => {
+                        ::std::result::Result::Err(
+                            serde::de::Error::custom("invalid oneOf alternative"),
+                        )
+                    }
+                }
+            }
+            ::std::option::Option::None => {
+                ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf has no matching alternative"),
+                )
+            }
+        };
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
@@ -39,27 +416,515 @@ pub struct Widget {
     pub sku: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Referenced {
     Widget(Widget),
     Tally(Vec<String>),
 }
+impl Referenced {
+    fn __validate_0_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_object())
+            && (value
+                .as_object()
+                .is_none_or(|object| {
+                    true && (object.contains_key("sku"))
+                        && (object
+                            .get("sku")
+                            .is_none_or(|value| Self::__validate_0_1(
+                                value,
+                                depth + 1,
+                                budget,
+                            )))
+                }));
+    }
+    fn __validate_0_1(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+    fn __validate_1_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_array())
+            && (value
+                .as_array()
+                .is_none_or(|items| {
+                    items
+                        .iter()
+                        .all(|value| Self::__validate_1_1(value, depth + 1, budget))
+                }));
+    }
+    fn __validate_1_1(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+}
+impl<'de> serde::Deserialize<'de> for Referenced {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut budget = 10000usize;
+        let matches = [
+            Self::__validate_0_0(&value, 0, &mut budget),
+            Self::__validate_1_0(&value, 0, &mut budget),
+        ];
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom("union validation limit exceeded"),
+            );
+        }
+        if matches.iter().filter(|matched| **matched).count() != 1 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom(
+                    "oneOf requires exactly one matching alternative",
+                ),
+            );
+        }
+        return match matches.iter().position(|matched| *matched) {
+            ::std::option::Option::Some(index) => {
+                match index {
+                    0usize => {
+                        <Widget as serde::Deserialize>::deserialize(value)
+                            .map(Self::Widget)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    1usize => {
+                        <Vec<String> as serde::Deserialize>::deserialize(value)
+                            .map(Self::Tally)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    _ => {
+                        ::std::result::Result::Err(
+                            serde::de::Error::custom("invalid oneOf alternative"),
+                        )
+                    }
+                }
+            }
+            ::std::option::Option::None => {
+                ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf has no matching alternative"),
+                )
+            }
+        };
+    }
+}
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Mixed {
     String(String),
     Widget(Widget),
     Detail(MixedDetail),
 }
+impl Mixed {
+    fn __validate_0_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+    fn __validate_1_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_object())
+            && (value
+                .as_object()
+                .is_none_or(|object| {
+                    true && (object.contains_key("sku"))
+                        && (object
+                            .get("sku")
+                            .is_none_or(|value| Self::__validate_1_1(
+                                value,
+                                depth + 1,
+                                budget,
+                            )))
+                }));
+    }
+    fn __validate_1_1(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+    fn __validate_2_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_object())
+            && (value
+                .as_object()
+                .is_none_or(|object| {
+                    true && (object.contains_key("note"))
+                        && (object
+                            .get("note")
+                            .is_none_or(|value| Self::__validate_2_1(
+                                value,
+                                depth + 1,
+                                budget,
+                            )))
+                }));
+    }
+    fn __validate_2_1(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+}
+impl<'de> serde::Deserialize<'de> for Mixed {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut budget = 10000usize;
+        let matches = [
+            Self::__validate_0_0(&value, 0, &mut budget),
+            Self::__validate_1_0(&value, 0, &mut budget),
+            Self::__validate_2_0(&value, 0, &mut budget),
+        ];
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom("union validation limit exceeded"),
+            );
+        }
+        if matches.iter().filter(|matched| **matched).count() != 1 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom(
+                    "oneOf requires exactly one matching alternative",
+                ),
+            );
+        }
+        return match matches.iter().position(|matched| *matched) {
+            ::std::option::Option::Some(index) => {
+                match index {
+                    0usize => {
+                        <String as serde::Deserialize>::deserialize(value)
+                            .map(Self::String)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    1usize => {
+                        <Widget as serde::Deserialize>::deserialize(value)
+                            .map(Self::Widget)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    2usize => {
+                        <MixedDetail as serde::Deserialize>::deserialize(value)
+                            .map(Self::Detail)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    _ => {
+                        ::std::result::Result::Err(
+                            serde::de::Error::custom("invalid oneOf alternative"),
+                        )
+                    }
+                }
+            }
+            ::std::option::Option::None => {
+                ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf has no matching alternative"),
+                )
+            }
+        };
+    }
+}
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Signal {
     Red(SignalRed),
     Amber(SignalAmber),
     Other(SignalOther),
+}
+impl Signal {
+    fn __validate_0_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string())
+            && (false
+                || serde_json::from_str::<serde_json::Value>("\"red\"")
+                    .is_ok_and(|expected| {
+                        return Self::__schema_equal(value, &expected, depth + 1, budget);
+                    }));
+    }
+    fn __validate_1_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string())
+            && (false
+                || serde_json::from_str::<serde_json::Value>("\"amber\"")
+                    .is_ok_and(|expected| {
+                        return Self::__schema_equal(value, &expected, depth + 1, budget);
+                    }));
+    }
+    fn __validate_2_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_object())
+            && (value
+                .as_object()
+                .is_none_or(|object| {
+                    true && (object.contains_key("other"))
+                        && (object
+                            .get("other")
+                            .is_none_or(|value| Self::__validate_2_1(
+                                value,
+                                depth + 1,
+                                budget,
+                            )))
+                }));
+    }
+    fn __validate_2_1(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+    fn __schema_equal(
+        left: &serde_json::Value,
+        right: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        return match (left, right) {
+            (serde_json::Value::Number(left), serde_json::Value::Number(right)) => {
+                let left_integer = left
+                    .as_i64()
+                    .map(i128::from)
+                    .or_else(|| left.as_u64().map(i128::from));
+                let right_integer = right
+                    .as_i64()
+                    .map(i128::from)
+                    .or_else(|| right.as_u64().map(i128::from));
+                match (left_integer, right_integer) {
+                    (
+                        ::std::option::Option::Some(left),
+                        ::std::option::Option::Some(right),
+                    ) => left == right,
+                    (
+                        ::std::option::Option::Some(integer),
+                        ::std::option::Option::None,
+                    ) => {
+                        right
+                            .as_f64()
+                            .is_some_and(|number| {
+                                number.fract() == 0.0 && number as i128 == integer
+                            })
+                    }
+                    (
+                        ::std::option::Option::None,
+                        ::std::option::Option::Some(integer),
+                    ) => {
+                        left.as_f64()
+                            .is_some_and(|number| {
+                                number.fract() == 0.0 && number as i128 == integer
+                            })
+                    }
+                    (::std::option::Option::None, ::std::option::Option::None) => {
+                        left.as_f64() == right.as_f64()
+                    }
+                }
+            }
+            (serde_json::Value::Array(left), serde_json::Value::Array(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| Self::__schema_equal(
+                            left,
+                            right,
+                            depth + 1,
+                            budget,
+                        ))
+            }
+            (serde_json::Value::Object(left), serde_json::Value::Object(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .all(|(key, left)| {
+                            right
+                                .get(key)
+                                .is_some_and(|right| Self::__schema_equal(
+                                    left,
+                                    right,
+                                    depth + 1,
+                                    budget,
+                                ))
+                        })
+            }
+            _ => left == right,
+        };
+    }
+}
+impl<'de> serde::Deserialize<'de> for Signal {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut budget = 10000usize;
+        let matches = [
+            Self::__validate_0_0(&value, 0, &mut budget),
+            Self::__validate_1_0(&value, 0, &mut budget),
+            Self::__validate_2_0(&value, 0, &mut budget),
+        ];
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom("union validation limit exceeded"),
+            );
+        }
+        if matches.iter().filter(|matched| **matched).count() != 1 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom(
+                    "oneOf requires exactly one matching alternative",
+                ),
+            );
+        }
+        return match matches.iter().position(|matched| *matched) {
+            ::std::option::Option::Some(index) => {
+                match index {
+                    0usize => {
+                        <SignalRed as serde::Deserialize>::deserialize(value)
+                            .map(Self::Red)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    1usize => {
+                        <SignalAmber as serde::Deserialize>::deserialize(value)
+                            .map(Self::Amber)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    2usize => {
+                        <SignalOther as serde::Deserialize>::deserialize(value)
+                            .map(Self::Other)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    _ => {
+                        ::std::result::Result::Err(
+                            serde::de::Error::custom("invalid oneOf alternative"),
+                        )
+                    }
+                }
+            }
+            ::std::option::Option::None => {
+                ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf has no matching alternative"),
+                )
+            }
+        };
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]

@@ -190,8 +190,8 @@ An inline schema carries no name of its own, so `x-rust-name` on that schema has
 nothing to override. The remedy acts on the component schema that encloses it, or it
 moves the inline schema into a component of its own. This matches Go's
 `oapi-codegen`, which documents `x-go-name` on a component schema and on a property,
-and not on an inline schema. A member of a `oneOf` list is the one exception,
-because that member becomes a variant that needs a name of its own. See
+and not on an inline schema. A member of a `oneOf` or `anyOf` list is the exception.
+Its variant or typed accessor needs a name of its own. See
 [Union variants](extensions.md#union-variants).
 
 A per-operation type can take the name of a model. A schema named `<Op>Response` is
@@ -305,7 +305,7 @@ OpenAPI objects. However, it still inspects objects inside unsupported features,
 such as callback operations.
 
 Warnings also identify several limits of the current translation. These include
-first-match unions, merged `allOf` members, nullability, and unconstrained fallback
+merged `allOf` members, nullability, and unconstrained fallback
 types. Body selection reports discarded media entries.
 The warnings expose these limits without changing the generated types.
 The catalogue is not a complete OpenAPI value validator. Lowering still applies
@@ -428,26 +428,95 @@ reason: the literal does not fit.
 A `number` or `boolean` `enum` still lowers to a bare `f64` or `bool`. A float is
 not a legal discriminant, and a boolean enum names nothing useful.
 
-## A union cannot hold one type twice
+## Union matching follows schema alternatives
 
-A `oneOf` or an `anyOf` becomes an enum with `#[serde(untagged)]`, so no tag
-appears on the wire and serde picks a variant by shape. It reads the variants in
-declaration order and takes the first that fits.
+`oneOf` and `anyOf` have different default representations. Both changes break
+compatibility with first-match deserialization.
 
-That order makes a repeated type unreachable. A union whose members give `Cat`
-twice compiles, and the second variant never matches: a value built with it
-serializes like the first and reads back as the first. The value changes, and
-nothing reports it. So a repeated type is an error, and the message names the two
-variants that share it.
+A `oneOf` remains a tag-free Rust enum. Its custom `Deserialize` implementation
+reads a JSON value and checks every schema alternative before it constructs a
+payload. Exactly one schema must match. Zero matches and multiple matches
+produce an error, regardless of declaration order.
 
-The check reads the lowered Rust type, not the schema. Two members that differ in
-the document but reach one type still collide, which is the case that matters,
-because the wire is all serde sees.
+Schema matches do not depend on successful payload deserialization. For example,
+an integer matches both `integer` and `number`. An object with two required
+property sets can match two alternatives even when serde discards unknown
+properties. Rust payload conversion occurs only after the exclusive match.
+Conversion can still fail when a Rust type cannot represent the schema value.
 
-The check does not read shapes. Two distinct types with the same fields still
-shadow each other at run time, and the generator accepts them. Deciding that in
-general means comparing every optional field and every subset, so the generator
-draws the line at a repeated type, where the fault is exact.
+Discriminator mappings do not replace, filter, or reorder the alternatives.
+The discriminator property constrains a match only through its property schema.
+A mapping cannot hide an overlap. Repeated alternatives remain distinct matches:
+two identical `oneOf` members reject every value that matches them both.
+
+An `anyOf` becomes a struct with a private `serde_json::Value` field.
+`TryFrom<serde_json::Value>` validates at least one schema match.
+Deserialization uses the same constructor. Serialization preserves the full
+JSON value, including unknown properties and properties from other matches.
+It does not preserve source whitespace, object key order, or duplicate keys.
+
+The wrapper exposes these methods:
+
+- `as_value()` borrows the full JSON value without mutation.
+- `into_value()` consumes the wrapper and returns the full JSON value.
+- `as_<alternative>()` returns `Result<Option<T>, serde_json::Error>` for each alternative.
+  `None` means that the schema does not match. An error means that typed
+  conversion failed after a schema match.
+
+There is no unchecked `From<Value>`, public raw field, mutable raw accessor, or
+typed constructor that can discard unknown properties. An accessor name that
+conflicts with another method produces a generation error.
+
+### Lowering and emission
+
+The IR distinguishes exclusive enums from inclusive wrappers. Each alternative
+also carries a finite validation graph, separate from its Rust payload type.
+Lowering resolves schema references into graph edges. Emission compiles the
+graph into private predicate methods, not a general JSON Schema interpreter.
+
+The predicates check primitive types, enum values, numeric bounds, `multipleOf`,
+string lengths and patterns, and supported date, date-time, and UUID formats.
+They also check required properties, property schemas, additional properties,
+collection limits, unique array items, and nested `oneOf`, `anyOf`, and `allOf`.
+Every nested union retains its own matching rule.
+
+Direction projection removes `readOnly` or `writeOnly` properties and their
+required entries from these graphs. Reference edges remain independent of Rust
+renaming, pruning, and recursive boxing. Inline unions use the same pipeline.
+The flat and package emitters share these predicates and dependency detection.
+
+Payload types need no extra `Clone`, `Debug`, or `Serialize` implementation for
+matching. Typed accessors exist only in deserialize-capable directions.
+Serialize-only wrappers still support validated construction from JSON.
+
+### Deliberate limits
+
+This is a supported subset of OpenAPI 3.0 validation, not full JSON Schema.
+Unsupported keywords and formats retain explicit diagnostics.
+Floating-point constraints use the numeric representation of `serde_json`.
+Union `multipleOf` compares canonical decimal coefficients and exponents without a floating-point remainder or tolerance.
+Thus, `0.3` is a multiple of `0.1`, but `0.30000000000000004` is not.
+Integer values retain their full `i64` or `u64` precision.
+Floating-point values and schema bounds can undergo `f64` rounding before this comparison.
+The comparison uses bounded integer reduction, not large powers of ten, and adds no dependency.
+The validator rejects paths deeper than 128 schema edges or nested equality comparisons.
+Each validation permits fewer than 10,000 schema visits and equality comparisons in total.
+These limits bound repeated recursive alternatives as well as non-consuming reference cycles.
+Limit exhaustion rejects the entire validation, even if another alternative matches.
+It cannot turn an incomplete match count into a successful `oneOf`.
+
+Enum and unique-item comparisons use recursive JSON equality.
+Integer and floating-point representations of the same number compare equal.
+Comparisons preserve integer precision, including integers beyond the exact range of `f64`.
+Nullable extends the type check but does not bypass enum constraints.
+
+The existing nullable Rust representations remain unchanged.
+Standalone aliases and ordinary object deserialization retain their existing
+validation limits. A nested `allOf` predicate validates every member, but the
+existing Rust object merge still restricts which `allOf` shapes can generate.
+Foreign `x-rust-type` implementations can reject values that their schemas accept.
+These limits do not permit a discriminator or serde first-match behavior to hide
+an overlap.
 
 A variant takes its name from `x-rust-name`, else from the type a `$ref` names,
 else from the type an inline member holds when it hoists none of its own. An

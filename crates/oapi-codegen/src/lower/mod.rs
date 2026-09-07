@@ -20,6 +20,7 @@ pub mod rename;
 pub mod schema;
 pub mod security;
 pub mod servers;
+pub(crate) mod union;
 pub mod validate;
 
 pub use crate::lower::direction::split_by_direction;

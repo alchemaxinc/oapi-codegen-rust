@@ -45,6 +45,21 @@ struct Feature {
 
 /// The complete catalogue of OpenAPI 3.0 schema features and their handling.
 const TEST_TABLE: &[Feature] = &[
+    Feature {
+        element: "schema.anyOf.accessor-collision",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_union_accessor_collision"),
+    },
+    Feature {
+        element: "schema.union.validation",
+        status: Status::Supported,
+        fixture: Some("union_semantics"),
+    },
+    Feature {
+        element: "schema.union.prelude-names",
+        status: Status::Supported,
+        fixture: Some("union_prelude_names"),
+    },
     // Schema kinds
     Feature {
         element: "schema.type.string",
@@ -143,8 +158,8 @@ const TEST_TABLE: &[Feature] = &[
     },
     Feature {
         element: "schema.oneOf.duplicate-variant-type",
-        status: Status::Unsupported,
-        fixture: Some("unsupported_duplicate_union_variant"),
+        status: Status::Supported,
+        fixture: Some("union_duplicate"),
     },
     Feature {
         element: "schema.oneOf.unnamed-inline-member",
@@ -517,6 +532,7 @@ const TEST_TABLE: &[Feature] = &[
 /// [`TEST_TABLE`]): path parameters, JSON request bodies, and typed responses.
 /// Each must have a `#[test]` via [`server_generated_tests!`].
 const SERVER_FIXTURES: &[&str] = &[
+    "server_union_traits",
     "server_petstore",
     "server_refs",
     "server_query_params",
@@ -586,6 +602,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// header/cookie inputs, single-content request bodies, typed responses, and
 /// security schemes (bearer, basic, and API-key credentials).
 const CLIENT_FIXTURES: &[&str] = &[
+    "client_union_traits",
     "client_widgets",
     "client_auth",
     "client_multipart_request",
@@ -746,6 +763,9 @@ generated_tests!(
     oneof_discriminator,
     oneof_untagged,
     oneof_variant_naming,
+    union_duplicate,
+    union_semantics,
+    union_prelude_names,
     compose_shared,
     primitive_scalars,
     recursive_schema,
@@ -849,6 +869,7 @@ macro_rules! server_generated_tests {
 }
 
 server_generated_tests!(
+    server_union_traits,
     server_petstore,
     server_refs,
     server_query_params,
@@ -1221,6 +1242,7 @@ macro_rules! client_generated_tests {
 }
 
 client_generated_tests!(
+    client_union_traits,
     client_widgets,
     client_auth,
     client_multipart_request,
@@ -2238,6 +2260,32 @@ fn dependency_report_reflects_generated_output() {
     for name in &names {
         assert!(KNOWN.contains(name), "report named an unexpected crate `{name}`");
     }
+
+    for stem in ["oneof_untagged", "anyof_untagged", "union_semantics"] {
+        let fixture = tests_dir().join("fixtures").join(format!("{stem}.yaml"));
+        let code = oapi_codegen::generate_models_string(&fixture).expect("union generation");
+        let dependencies = oapi_codegen::deps::required_dependencies(&code);
+        assert!(
+            dependencies
+                .iter()
+                .any(|dependency| return dependency.name == "serde_json"),
+            "{stem}"
+        );
+        if stem == "union_semantics" {
+            assert!(dependencies.iter().any(|dependency| return dependency.name == "regex"));
+        }
+    }
+}
+
+#[test]
+fn anyof_accessor_collisions_name_the_conflicting_method() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("unsupported_union_accessor_collision.yaml");
+    let error = oapi_codegen::generate_models_string(&fixture).expect_err("accessor collision");
+    let message = error.to_string();
+    assert!(message.contains("as_value"), "{message}");
+    assert!(message.contains("x-rust-name"), "{message}");
 }
 
 /// with the same name at the crate root.

@@ -1,0 +1,53 @@
+openapi: "3.0.3"
+info:
+  title: Client directional foreign union traits
+  version: "1.0.0"
+paths:
+  /exchange:
+    post:
+      operationId: exchange
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Input"}
+      responses:
+        "200":
+          description: The result.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Output"}
+components:
+  schemas:
+    Incoming:
+      type: string
+      x-rust-type: crate::restricted::SerializeOnly
+      x-rust-derive: []
+    Outgoing:
+      type: string
+      x-rust-type: crate::restricted::DeserializeOnly
+      x-rust-derive: []
+    Input:
+      type: object
+      required: [exclusive, inclusive]
+      properties:
+        exclusive:
+          oneOf:
+            - $ref: "#/components/schemas/Incoming"
+            - type: boolean
+        inclusive:
+          anyOf:
+            - $ref: "#/components/schemas/Incoming"
+            - type: boolean
+    Output:
+      type: object
+      required: [exclusive, inclusive]
+      properties:
+        exclusive:
+          oneOf:
+            - $ref: "#/components/schemas/Outgoing"
+            - type: boolean
+        inclusive:
+          anyOf:
+            - $ref: "#/components/schemas/Outgoing"
+            - type: boolean

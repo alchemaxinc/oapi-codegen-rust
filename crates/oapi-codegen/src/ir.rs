@@ -272,13 +272,10 @@ pub enum EnumKind {
         /// The permitted values, in document order.
         variants: Vec<IntegerVariant>,
     },
-    /// A `#[serde(untagged)]` union over the given newtype variants.
-    ///
-    /// Untagged (rather than internally tagged) is used even when the OpenAPI
-    /// schema has a discriminator: OpenAPI variant schemas typically carry the
-    /// discriminator property themselves, which is incompatible with serde's
-    /// internally-tagged representation.
+    /// A tag-free enum whose deserializer requires exactly one schema match.
     Union(Vec<UnionVariant>),
+    /// A validated JSON value that matches at least one alternative.
+    AnyOf(Vec<UnionVariant>),
 }
 
 /// A unit variant of a string enum.
@@ -310,6 +307,30 @@ pub struct UnionVariant {
     pub name: RustIdent,
     /// The wrapped type.
     pub ty: RustType,
+    /// Schema checks independent of the Rust payload representation.
+    pub validation: UnionValidation,
+}
+
+/// A finite graph of schema checks for one union alternative.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct UnionValidation {
+    /// The root is node zero. References can point to earlier nodes.
+    pub nodes: Vec<UnionValidationNode>,
+}
+
+/// One schema check with references into its validation graph.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnionValidationNode {
+    /// The supported schema keywords, without child schemas.
+    pub keywords: serde_json::Map<String, serde_json::Value>,
+    /// Named object properties and their schema nodes.
+    pub properties: Vec<(String, usize)>,
+    /// An array item schema.
+    pub items: Option<usize>,
+    /// The schema for additional object properties.
+    pub additional: Option<usize>,
+    /// Composition members, or a resolved reference.
+    pub children: Vec<usize>,
 }
 
 /// A generated `type X = Y;` alias.

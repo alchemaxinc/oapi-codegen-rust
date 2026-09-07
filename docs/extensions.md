@@ -198,8 +198,8 @@ components:
 
 ## Union variants
 
-A `oneOf` or an `anyOf` becomes an untagged enum. Each member becomes a variant,
-and the name of that variant comes from the first rule below that applies.
+A `oneOf` becomes a tag-free enum. An `anyOf` becomes a validated JSON wrapper
+with typed accessors. Each alternative gets a name from the first applicable rule:
 
 | Member                                          | Variant name                                                                                                |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -209,8 +209,10 @@ and the name of that variant comes from the first rule below that applies.
 | An inline member that hoists no type of its own | The type it holds: `String`, `I32`, `I64`, `U32`, `U64`, `F64`, `Bool`, `Date`, `DateTime`, `Uuid`, `Bytes` |
 | Any other inline member                         | None. Generation stops.                                                                                     |
 
-A member that hoists no type is named by the type it holds. A union cannot hold
-one type twice, so these names stay unique.
+A member that hoists no type takes the name of its Rust type.
+Repeated alternative names receive numeric suffixes.
+For an `anyOf`, the alternative name gives the `as_<alternative>()` accessor name.
+An accessor that conflicts with a reserved method produces a generation error.
 
 A member that holds one `enum` value stands for a constant, and that value says
 what the member is. A document that writes a Rust enum as a `oneOf` gives every
@@ -246,7 +248,8 @@ says which union it belongs to. `Signal::Red(SignalRed)` reads once at the use
 site and stays unique at the crate root. Two unions that both hold a member named
 `Unknown` would otherwise take one name and stop generation.
 
-Two members that lower to one type also end generation. Serde reads an untagged
-enum in order and takes the first variant that fits, so the second one never
-matches. A value built with it comes back as the first variant, which changes the
-value and reports nothing. Remove the repeated member.
+Two members can share a Rust type. A `oneOf` value must match exactly one member
+schema, not the first Rust type that deserializes. An `anyOf` value must match at
+least one member schema, and its wrapper preserves the full JSON value.
+See [Union matching](design.md#union-matching-follows-schema-alternatives) for the
+validation rules and API.

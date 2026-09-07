@@ -368,7 +368,7 @@ fn rewrite_item(item: &mut Item, renames: &HashMap<String, String>) {
             }
         }
         Item::Enum(enumeration) => {
-            if let EnumKind::Union(variants) = &mut enumeration.kind {
+            if let EnumKind::Union(variants) | EnumKind::AnyOf(variants) = &mut enumeration.kind {
                 for variant in variants {
                     rewrite_type(&mut variant.ty, renames);
                 }

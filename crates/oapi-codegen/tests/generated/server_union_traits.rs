@@ -9,25 +9,27 @@
     reason = "generated code, not first-party source"
 )]
 
-pub type Opaque = crate::restricted::Opaque;
+pub type Incoming = crate::restricted::DeserializeOnly;
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct Thing {
-    pub id: String,
-    pub opaque: Opaque,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub exclusive: Option<ThingExclusive>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub inclusive: Option<ThingInclusive>,
+pub type Outgoing = crate::restricted::SerializeOnly;
+
+#[derive(serde::Deserialize)]
+pub struct Input {
+    pub exclusive: InputExclusive,
+    pub inclusive: InputInclusive,
 }
 
-#[derive(serde::Serialize, Debug)]
-#[serde(untagged)]
-pub enum ThingExclusive {
-    Opaque(Opaque),
+#[derive(serde::Serialize)]
+pub struct Output {
+    pub exclusive: OutputExclusive,
+    pub inclusive: OutputInclusive,
+}
+
+pub enum InputExclusive {
+    Incoming(Incoming),
     Bool(bool),
 }
-impl ThingExclusive {
+impl InputExclusive {
     fn __validate_0_0(
         value: &serde_json::Value,
         depth: usize,
@@ -55,7 +57,7 @@ impl ThingExclusive {
         return true && (value.is_boolean());
     }
 }
-impl<'de> serde::Deserialize<'de> for ThingExclusive {
+impl<'de> serde::Deserialize<'de> for InputExclusive {
     fn deserialize<__Deserializer: serde::Deserializer<'de>>(
         deserializer: __Deserializer,
     ) -> ::std::result::Result<Self, __Deserializer::Error> {
@@ -83,8 +85,8 @@ impl<'de> serde::Deserialize<'de> for ThingExclusive {
             ::std::option::Option::Some(index) => {
                 match index {
                     0usize => {
-                        <Opaque as serde::Deserialize>::deserialize(value)
-                            .map(Self::Opaque)
+                        <Incoming as serde::Deserialize>::deserialize(value)
+                            .map(Self::Incoming)
                             .map_err(serde::de::Error::custom)
                     }
                     1usize => {
@@ -108,12 +110,11 @@ impl<'de> serde::Deserialize<'de> for ThingExclusive {
     }
 }
 
-#[derive(serde::Serialize, Debug, Clone, PartialEq)]
-#[serde(transparent)]
-pub struct ThingInclusive {
+#[derive(Debug, Clone, PartialEq)]
+pub struct InputInclusive {
     value: serde_json::Value,
 }
-impl ThingInclusive {
+impl InputInclusive {
     /// Borrow the complete validated JSON value.
     pub fn as_value(&self) -> &serde_json::Value {
         return &self.value;
@@ -122,10 +123,10 @@ impl ThingInclusive {
     pub fn into_value(self) -> serde_json::Value {
         return self.value;
     }
-    ///Decode the `Opaque` alternative. Return `None` when its schema does not match.
-    pub fn as_opaque(
+    ///Decode the `Incoming` alternative. Return `None` when its schema does not match.
+    pub fn as_incoming(
         &self,
-    ) -> ::std::result::Result<::std::option::Option<Opaque>, serde_json::Error> {
+    ) -> ::std::result::Result<::std::option::Option<Incoming>, serde_json::Error> {
         let mut budget = 10000usize;
         let matched = Self::__validate_0_0(&self.value, 0, &mut budget);
         if budget == 0 {
@@ -138,7 +139,7 @@ impl ThingInclusive {
         if !matched {
             return ::std::result::Result::Ok(::std::option::Option::None);
         }
-        return <Opaque as serde::Deserialize>::deserialize(&self.value)
+        return <Incoming as serde::Deserialize>::deserialize(&self.value)
             .map(::std::option::Option::Some);
     }
     ///Decode the `Bool` alternative. Return `None` when its schema does not match.
@@ -187,7 +188,7 @@ impl ThingInclusive {
         return true && (value.is_boolean());
     }
 }
-impl ::std::convert::TryFrom<serde_json::Value> for ThingInclusive {
+impl ::std::convert::TryFrom<serde_json::Value> for InputInclusive {
     type Error = ::std::string::String;
     fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
         let mut budget = 10000usize;
@@ -211,7 +212,7 @@ impl ::std::convert::TryFrom<serde_json::Value> for ThingInclusive {
         return ::std::result::Result::Ok(Self { value });
     }
 }
-impl<'de> serde::Deserialize<'de> for ThingInclusive {
+impl<'de> serde::Deserialize<'de> for InputInclusive {
     fn deserialize<__Deserializer: serde::Deserializer<'de>>(
         deserializer: __Deserializer,
     ) -> ::std::result::Result<Self, __Deserializer::Error> {
@@ -221,4 +222,120 @@ impl<'de> serde::Deserialize<'de> for ThingInclusive {
         return <Self as ::std::convert::TryFrom<serde_json::Value>>::try_from(value)
             .map_err(serde::de::Error::custom);
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum OutputExclusive {
+    Outgoing(Outgoing),
+    Bool(bool),
+}
+
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+#[serde(transparent)]
+pub struct OutputInclusive {
+    value: serde_json::Value,
+}
+impl OutputInclusive {
+    /// Borrow the complete validated JSON value.
+    pub fn as_value(&self) -> &serde_json::Value {
+        return &self.value;
+    }
+    /// Consume the wrapper and return the complete JSON value.
+    pub fn into_value(self) -> serde_json::Value {
+        return self.value;
+    }
+    fn __validate_0_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+    fn __validate_1_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_boolean());
+    }
+}
+impl ::std::convert::TryFrom<serde_json::Value> for OutputInclusive {
+    type Error = ::std::string::String;
+    fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
+        let mut budget = 10000usize;
+        let count = [
+            Self::__validate_0_0(&value, 0, &mut budget),
+            Self::__validate_1_0(&value, 0, &mut budget),
+        ]
+            .into_iter()
+            .filter(|matched| *matched)
+            .count();
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                "union validation limit exceeded".to_owned(),
+            );
+        }
+        if count == 0 {
+            return ::std::result::Result::Err(
+                "anyOf requires at least one matching alternative".to_owned(),
+            );
+        }
+        return ::std::result::Result::Ok(Self { value });
+    }
+}
+
+pub enum ExchangeResponse {
+    /// The result.
+    Ok(Output),
+}
+
+/// Server behaviour: implement one method per operation.
+pub trait Api: Clone + Send + Sync + 'static {
+    fn exchange(
+        &self,
+        body: Input,
+    ) -> impl std::future::Future<Output = ExchangeResponse> + Send;
+}
+
+impl axum::response::IntoResponse for ExchangeResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            ExchangeResponse::Ok(body) => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    200,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
+            }
+        }
+    }
+}
+
+/// Build an axum `Router` that dispatches each route to `api`.
+pub fn router<T: Api>(api: T) -> axum::Router {
+    axum::Router::new()
+        .route("/exchange", axum::routing::post(exchange_handler::<T>))
+        .with_state(api)
+}
+
+async fn exchange_handler<T: Api>(
+    axum::extract::State(api): axum::extract::State<T>,
+    axum::Json(body): axum::Json<Input>,
+) -> ExchangeResponse {
+    api.exchange(body).await
 }

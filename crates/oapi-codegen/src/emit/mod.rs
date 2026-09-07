@@ -11,6 +11,7 @@ mod operation;
 mod package;
 mod reqwest;
 mod servers;
+mod union;
 pub(crate) mod usage;
 
 use std::collections::HashMap;

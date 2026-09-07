@@ -11,9 +11,6 @@ components:
       properties:
         meow:
           type: string
-    # Both members lower to `Cat`. The emitted enum is untagged, so serde reads
-    # the variants in order and takes the first that fits. The second variant
-    # never matches, and a value built with it comes back as the first.
     Pet:
       oneOf:
         - $ref: "#/components/schemas/Cat"

@@ -165,7 +165,20 @@ pub(crate) fn foreign_resolver(module: &Module) -> ForeignResolver {
 fn foreign_derives(module: &Module, adjacency: &HashMap<String, Vec<String>>) -> HashMap<String, ForeignDerives> {
     // Seed each model with what its own directly-named foreign types allow.
     let mut direct: HashMap<String, ForeignDerives> = HashMap::new();
+    let raw_unions: std::collections::HashSet<&str> = module
+        .items
+        .iter()
+        .filter_map(|item| {
+            if matches!(item, Item::Enum(enom) if matches!(enom.kind, crate::ir::EnumKind::AnyOf(_))) {
+                return Some(item.name());
+            }
+            return None;
+        })
+        .collect();
     for item in &module.items {
+        if raw_unions.contains(item.name()) {
+            continue;
+        }
         let mut allowed = ForeignDerives::default();
         for ty in item_types(item) {
             allowed = allowed.intersect(direct_foreign_constraint(&ty));
@@ -182,6 +195,9 @@ fn foreign_derives(module: &Module, adjacency: &HashMap<String, Vec<String>>) ->
     // model to the models naming it.
     let mut referrers: HashMap<&str, Vec<&str>> = HashMap::new();
     for (name, targets) in adjacency {
+        if raw_unions.contains(name.as_str()) {
+            continue;
+        }
         for target in targets {
             referrers.entry(target.as_str()).or_default().push(name.as_str());
         }
@@ -247,7 +263,7 @@ fn item_types(item: &Item) -> Vec<RustType> {
             }
         }
         Item::Enum(enom) => {
-            if let crate::ir::EnumKind::Union(variants) = &enom.kind {
+            if let crate::ir::EnumKind::Union(variants) | crate::ir::EnumKind::AnyOf(variants) = &enom.kind {
                 for variant in variants {
                     types.push(variant.ty.clone());
                 }
@@ -324,7 +340,7 @@ fn item_references(item: &Item) -> Vec<String> {
             }
         }
         Item::Enum(enom) => {
-            if let crate::ir::EnumKind::Union(variants) = &enom.kind {
+            if let crate::ir::EnumKind::Union(variants) | crate::ir::EnumKind::AnyOf(variants) = &enom.kind {
                 for variant in variants {
                     collect_named(&variant.ty, &mut names);
                 }

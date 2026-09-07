@@ -539,8 +539,6 @@ impl Sweep<'_> {
         }
         if matches!(context, Context::Schema | Context::PropertySchema) {
             match key {
-                "oneOf" => self.warn(path, "oneOf uses first-match deserialization, not exclusive matching"),
-                "anyOf" => self.warn(path, "anyOf retains only the first matching representation"),
                 "allOf"
                     if value.as_sequence().is_some_and(|members| {
                         return match members.as_slice() {
@@ -601,7 +599,7 @@ impl Sweep<'_> {
         if context == Context::Schema && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some()) {
             self.warn(
                 path,
-                "constraints are enforced only at supported field uses, not on type aliases or array items",
+                "outside union matching, constraints are enforced only at supported field uses, not on type aliases or array items",
             );
         }
         if value.get("x-rust-derive").is_some() && value.get("x-rust-type").is_none() {
@@ -613,7 +611,7 @@ impl Sweep<'_> {
         if matches!(kind, Some("number" | "boolean")) && value.get("enum").is_some() {
             self.warn(
                 &pointer(path, "enum"),
-                "number and boolean enum restrictions are not enforced",
+                "outside union matching, number and boolean enum restrictions are not enforced",
             );
         }
         if let Some(format) = value.get("format").and_then(Value::as_str) {
@@ -863,8 +861,6 @@ security: [{arbitrary: [custom]}]
             ("{type: number, enum: [1.5]}", "enum"),
             ("{type: string, format: custom}", "format"),
             ("{type: string, nullable: true}", "nullable"),
-            ("{oneOf: [{type: string}, {type: integer}]}", "oneOf"),
-            ("{anyOf: [{type: string}, {type: integer}]}", "anyOf"),
             ("{type: object, additionalProperties: false}", "additionalProperties"),
             (
                 "{allOf: [{type: object, properties: {name: {type: string}}, additionalProperties: false}]}",

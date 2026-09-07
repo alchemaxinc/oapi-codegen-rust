@@ -15,6 +15,212 @@ pub type Opaque = crate::restricted::Opaque;
 pub struct Thing {
     pub id: String,
     pub opaque: Opaque,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclusive: Option<ThingExclusive>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inclusive: Option<ThingInclusive>,
+}
+
+#[derive(serde::Serialize, Debug)]
+#[serde(untagged)]
+pub enum ThingExclusive {
+    Opaque(Opaque),
+    Bool(bool),
+}
+impl ThingExclusive {
+    fn __validate_0_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+    fn __validate_1_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_boolean());
+    }
+}
+impl<'de> serde::Deserialize<'de> for ThingExclusive {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut budget = 10000usize;
+        let matches = [
+            Self::__validate_0_0(&value, 0, &mut budget),
+            Self::__validate_1_0(&value, 0, &mut budget),
+        ];
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom("union validation limit exceeded"),
+            );
+        }
+        if matches.iter().filter(|matched| **matched).count() != 1 {
+            return ::std::result::Result::Err(
+                serde::de::Error::custom(
+                    "oneOf requires exactly one matching alternative",
+                ),
+            );
+        }
+        return match matches.iter().position(|matched| *matched) {
+            ::std::option::Option::Some(index) => {
+                match index {
+                    0usize => {
+                        <Opaque as serde::Deserialize>::deserialize(value)
+                            .map(Self::Opaque)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    1usize => {
+                        <bool as serde::Deserialize>::deserialize(value)
+                            .map(Self::Bool)
+                            .map_err(serde::de::Error::custom)
+                    }
+                    _ => {
+                        ::std::result::Result::Err(
+                            serde::de::Error::custom("invalid oneOf alternative"),
+                        )
+                    }
+                }
+            }
+            ::std::option::Option::None => {
+                ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf has no matching alternative"),
+                )
+            }
+        };
+    }
+}
+
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+#[serde(transparent)]
+pub struct ThingInclusive {
+    value: serde_json::Value,
+}
+impl ThingInclusive {
+    /// Borrow the complete validated JSON value.
+    pub fn as_value(&self) -> &serde_json::Value {
+        return &self.value;
+    }
+    /// Consume the wrapper and return the complete JSON value.
+    pub fn into_value(self) -> serde_json::Value {
+        return self.value;
+    }
+    ///Decode the `Opaque` alternative. Return `None` when its schema does not match.
+    pub fn as_opaque(
+        &self,
+    ) -> ::std::result::Result<::std::option::Option<Opaque>, serde_json::Error> {
+        let mut budget = 10000usize;
+        let matched = Self::__validate_0_0(&self.value, 0, &mut budget);
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                <serde_json::Error as serde::de::Error>::custom(
+                    "union validation limit exceeded",
+                ),
+            );
+        }
+        if !matched {
+            return ::std::result::Result::Ok(::std::option::Option::None);
+        }
+        return <Opaque as serde::Deserialize>::deserialize(&self.value)
+            .map(::std::option::Option::Some);
+    }
+    ///Decode the `Bool` alternative. Return `None` when its schema does not match.
+    pub fn as_bool(
+        &self,
+    ) -> ::std::result::Result<::std::option::Option<bool>, serde_json::Error> {
+        let mut budget = 10000usize;
+        let matched = Self::__validate_1_0(&self.value, 0, &mut budget);
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                <serde_json::Error as serde::de::Error>::custom(
+                    "union validation limit exceeded",
+                ),
+            );
+        }
+        if !matched {
+            return ::std::result::Result::Ok(::std::option::Option::None);
+        }
+        return <bool as serde::Deserialize>::deserialize(&self.value)
+            .map(::std::option::Option::Some);
+    }
+    fn __validate_0_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_string());
+    }
+    fn __validate_1_0(
+        value: &serde_json::Value,
+        depth: usize,
+        budget: &mut usize,
+    ) -> bool {
+        if depth > 128usize || *budget <= 1 {
+            *budget = 0;
+            return false;
+        }
+        *budget -= 1;
+        let _ = value;
+        return true && (value.is_boolean());
+    }
+}
+impl ::std::convert::TryFrom<serde_json::Value> for ThingInclusive {
+    type Error = ::std::string::String;
+    fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
+        let mut budget = 10000usize;
+        let count = [
+            Self::__validate_0_0(&value, 0, &mut budget),
+            Self::__validate_1_0(&value, 0, &mut budget),
+        ]
+            .into_iter()
+            .filter(|matched| *matched)
+            .count();
+        if budget == 0 {
+            return ::std::result::Result::Err(
+                "union validation limit exceeded".to_owned(),
+            );
+        }
+        if count == 0 {
+            return ::std::result::Result::Err(
+                "anyOf requires at least one matching alternative".to_owned(),
+            );
+        }
+        return ::std::result::Result::Ok(Self { value });
+    }
+}
+impl<'de> serde::Deserialize<'de> for ThingInclusive {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        return <Self as ::std::convert::TryFrom<serde_json::Value>>::try_from(value)
+            .map_err(serde::de::Error::custom);
+    }
 }
 
 /// A response body whose model drops Clone and PartialEq.
