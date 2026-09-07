@@ -17,6 +17,7 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::ir::Access;
 use crate::ir::Alias;
+use crate::ir::Constraints;
 use crate::ir::Deprecation;
 use crate::ir::Enum;
 use crate::ir::EnumKind;
@@ -148,6 +149,25 @@ impl Mapper<'_> {
 
     /// Lower a top-level named schema into a single item.
     fn named_to_item(&mut self, name: &str, schema: &Schema) -> Result<Item> {
+        if schema.schema_data.nullable {
+            let mut non_null = schema.clone();
+            non_null.schema_data.nullable = false;
+            let value_name = format!("{name}Value");
+            let item = self.named_to_item(&value_name, &non_null)?;
+            let ty = match item {
+                Item::Alias(alias) => alias.ty,
+                item => {
+                    self.extra.push(item);
+                    RustType::Named(value_name)
+                }
+            };
+            return Ok(Item::Alias(Alias {
+                name: self.type_name_ident(name),
+                doc: doc_of(&schema.schema_data),
+                deprecated: deprecation_of(&schema.schema_data, name)?,
+                ty: RustType::Nullable(Box::new(ty)),
+            }));
+        }
         let data = &schema.schema_data;
 
         if let Some(verbatim) = extension_str(data, X_RUST_TYPE, name)? {
@@ -278,13 +298,10 @@ impl Mapper<'_> {
         // valid.
         let declared = data
             .filter(|_| return !required)
+            .filter(|_| return !matches!(prop, ReferenceOr::Item(schema) if crate::lower::default::unsupported_nullable_default(schema)))
             .and_then(|data| return data.default.as_ref());
 
-        let nullable = data.map(|data| return data.nullable).unwrap_or(false);
-        // With a default, an absent property ends up the same as a present one,
-        // so `Option` would only ever hold `Some`. `nullable` is the exception,
-        // because there `null` is a value the property carries.
-        if (!required && declared.is_none()) || nullable {
+        if !required && declared.is_none() {
             ty = ty.optional();
         }
 
@@ -340,14 +357,15 @@ impl Mapper<'_> {
             },
         };
         let constraints = match prop {
-            ReferenceOr::Item(schema) => crate::lower::constraints::constraints_of(schema),
+            ReferenceOr::Item(schema) => crate::lower::constraints::constraints_of(schema)
+                .or_else(|| return self.single_all_of_constraints(schema, 0)),
             // The alias a `$ref` makes carries no serde attribute, so the field
             // takes the checks the target declares.
             ReferenceOr::Reference { reference } => self
                 .spec
                 .resolve(reference)
                 .ok()
-                .and_then(crate::lower::constraints::constraints_through_ref),
+                .and_then(|schema| return self.referenced_constraints(schema, 0)),
         };
         let field = Field {
             name: ident,
@@ -364,6 +382,36 @@ impl Mapper<'_> {
         };
         crate::lower::constraints::check_constraints(&field)?;
         return Ok(field);
+    }
+
+    fn referenced_constraints(&self, schema: &Schema, depth: usize) -> Option<Constraints> {
+        if let Some(found) = crate::lower::constraints::constraints_through_ref(schema) {
+            return Some(found);
+        }
+        let mut found = self.single_all_of_constraints(schema, depth)?;
+        if schema.schema_data.nullable
+            && let Some(checked) = found.checked_as.take()
+        {
+            found.checked_as = Some(RustType::Nullable(Box::new(checked)));
+        }
+        return Some(found);
+    }
+
+    fn single_all_of_constraints(&self, schema: &Schema, depth: usize) -> Option<Constraints> {
+        if depth >= MAX_SCHEMA_DEPTH || schema.schema_data.extensions.contains_key(X_RUST_TYPE) {
+            return None;
+        }
+        let SchemaKind::AllOf { all_of } = &schema.schema_kind else {
+            return None;
+        };
+        let [member] = all_of.as_slice() else {
+            return None;
+        };
+        let target = match member {
+            ReferenceOr::Reference { reference } => self.spec.resolve(reference).ok()?,
+            ReferenceOr::Item(schema) => schema,
+        };
+        return self.referenced_constraints(target, depth + 1);
     }
 
     /// Return the referenced schema name when `members` is a single `$ref`
@@ -572,7 +620,10 @@ impl Mapper<'_> {
         let mut variants = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut values_seen = std::collections::HashSet::new();
-        for (index, value) in values.iter().flatten().enumerate() {
+        for (index, value) in values.iter().enumerate() {
+            let Some(value) = value else {
+                continue;
+            };
             if !values_seen.insert(value.as_str()) {
                 diagnostics.push(Error::UnsupportedSchema {
                     path: name.to_owned(),
@@ -619,7 +670,10 @@ impl Mapper<'_> {
         let mut variants = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut values_seen = std::collections::HashSet::new();
-        for (index, value) in values.iter().flatten().enumerate() {
+        for (index, value) in values.iter().enumerate() {
+            let Some(value) = value else {
+                continue;
+            };
             if !values_seen.insert(*value) {
                 diagnostics.push(Error::UnsupportedSchema {
                     path: name.to_owned(),
@@ -697,7 +751,12 @@ impl Mapper<'_> {
             });
         }
         self.depth += 1;
-        let result = self.type_from_schema_inner(hint, schema);
+        let result = self.type_from_schema_inner(hint, schema).map(|ty| {
+            if schema.schema_data.nullable {
+                return RustType::Nullable(Box::new(ty));
+            }
+            return ty;
+        });
         self.depth -= 1;
         return result;
     }

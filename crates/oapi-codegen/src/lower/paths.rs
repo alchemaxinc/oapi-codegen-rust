@@ -1624,7 +1624,33 @@ impl Lowerer<'_> {
                 };
                 RustType::Vec(Box::new(element))
             }
+            SchemaKind::Type(Type::Object(object)) if object.properties.is_empty() => {
+                let value = match &object.additional_properties {
+                    Some(openapiv3::AdditionalProperties::Schema(value)) => {
+                        self.body_type(path, method, origin, value)?
+                    }
+                    Some(openapiv3::AdditionalProperties::Any(true)) | None => RustType::Value,
+                    Some(openapiv3::AdditionalProperties::Any(false)) => {
+                        return Err(Error::UnsupportedOperation {
+                            method: method.to_owned(),
+                            path: path.to_owned(),
+                            reason: "closed object bodies must reference a named schema (`$ref`)".to_owned(),
+                        });
+                    }
+                };
+                RustType::Map(Box::new(value))
+            }
             SchemaKind::Any(_) => RustType::Value,
+            SchemaKind::AllOf { all_of } => {
+                let [member] = all_of.as_slice() else {
+                    return Err(Error::UnsupportedOperation {
+                        method: method.to_owned(),
+                        path: path.to_owned(),
+                        reason: "composite request/response bodies must reference a named schema (`$ref`)".to_owned(),
+                    });
+                };
+                self.body_type(path, method, origin, member)?
+            }
             _ => {
                 return Err(Error::UnsupportedOperation {
                     method: method.to_owned(),
@@ -1633,7 +1659,11 @@ impl Lowerer<'_> {
                 });
             }
         };
-        return Ok(ty);
+        return Ok(if schema.schema_data.nullable {
+            RustType::Nullable(Box::new(ty))
+        } else {
+            ty
+        });
     }
 
     /// Decide the Rust type for a schema `$ref`, given the referenced file the

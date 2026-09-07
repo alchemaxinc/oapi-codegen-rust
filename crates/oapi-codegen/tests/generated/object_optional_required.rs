@@ -12,6 +12,22 @@
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Profile {
     pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Profile::validate_nickname",
+        default
+    )]
     pub nickname: Option<String>,
+}
+impl Profile {
+    /// The rules the document gives `nickname`, checked on the way in.
+    fn validate_nickname<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }

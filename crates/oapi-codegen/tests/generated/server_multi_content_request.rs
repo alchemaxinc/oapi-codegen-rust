@@ -12,8 +12,24 @@
 #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Widget {
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Widget::validate_weight",
+        default
+    )]
     pub weight: Option<i64>,
+}
+impl Widget {
+    /// The rules the document gives `weight`, checked on the way in.
+    fn validate_weight<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<i64>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<i64 as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

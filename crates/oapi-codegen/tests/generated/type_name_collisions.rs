@@ -11,20 +11,70 @@
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct OrderItem {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "OrderItem::validate_sku",
+        default
+    )]
     pub sku: Option<String>,
+}
+impl OrderItem {
+    /// The rules the document gives `sku`, checked on the way in.
+    fn validate_sku<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct OrderItemQuantity {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "OrderItemQuantity::validate_quantity",
+        default
+    )]
     pub quantity: Option<i64>,
+}
+impl OrderItemQuantity {
+    /// The rules the document gives `quantity`, checked on the way in.
+    fn validate_quantity<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<i64>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<i64 as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Cart {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Cart::validate_item",
+        default
+    )]
     pub item: Option<OrderItemQuantity>,
+}
+impl Cart {
+    /// The rules the document gives `item`, checked on the way in.
+    fn validate_item<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<OrderItemQuantity>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <OrderItemQuantity as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]

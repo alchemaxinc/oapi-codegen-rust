@@ -21,12 +21,56 @@ pub struct HasReference {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Ordered {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Ordered::validate_b_first",
+        default
+    )]
     pub b_first: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Ordered::validate_c_second",
+        default
+    )]
     pub c_second: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Ordered::validate_a_last",
+        default
+    )]
     pub a_last: Option<String>,
+}
+impl Ordered {
+    /// The rules the document gives `b_first`, checked on the way in.
+    fn validate_b_first<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+    /// The rules the document gives `c_second`, checked on the way in.
+    fn validate_c_second<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+    /// The rules the document gives `a_last`, checked on the way in.
+    fn validate_a_last<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
@@ -50,15 +94,60 @@ pub enum ClientTypeNames {
 pub struct Client {
     #[deprecated(note = "use full_name instead")]
     pub name: String,
-    #[serde(rename = "account_id", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "account_id",
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Client::validate_account_identifier",
+        default
+    )]
     pub account_identifier: Option<f64>,
+    #[serde(deserialize_with = "Client::validate_keep_null", default)]
     pub keep_null: Option<String>,
     #[serde(skip)]
     pub internal: Option<ClientInternal>,
 }
+#[allow(deprecated)]
+impl Client {
+    /// The rules the document gives `account_identifier`, checked on the way in.
+    fn validate_account_identifier<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<f64>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<f64 as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+    /// The rules the document gives `keep_null`, checked on the way in.
+    fn validate_keep_null<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ClientInternal {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ClientInternal::validate_secret",
+        default
+    )]
     pub secret: Option<String>,
+}
+impl ClientInternal {
+    /// The rules the document gives `secret`, checked on the way in.
+    fn validate_secret<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }

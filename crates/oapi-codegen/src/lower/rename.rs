@@ -349,7 +349,11 @@ fn visit_service_types(service: &mut Service, visit: &mut dyn FnMut(&mut RustTyp
 /// Recurse container types to their leaf, applying `visit` to the leaf in place.
 fn visit_type(ty: &mut RustType, visit: &mut dyn FnMut(&mut RustType)) {
     match ty {
-        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) | RustType::Boxed(inner) => {
+        RustType::Vec(inner)
+        | RustType::Map(inner)
+        | RustType::Option(inner)
+        | RustType::Nullable(inner)
+        | RustType::Boxed(inner) => {
             visit_type(inner, visit);
         }
         leaf => visit(leaf),
@@ -386,7 +390,11 @@ fn rewrite_type(ty: &mut RustType, renames: &HashMap<String, String>) {
                 *name = custom.clone();
             }
         }
-        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) | RustType::Boxed(inner) => {
+        RustType::Vec(inner)
+        | RustType::Map(inner)
+        | RustType::Option(inner)
+        | RustType::Nullable(inner)
+        | RustType::Boxed(inner) => {
             rewrite_type(inner, renames);
         }
         _ => {}

@@ -89,11 +89,10 @@ pub struct Field {
     /// The value that serde uses when the property is absent, from `default`.
     ///
     /// An optional property with a default is *not* wrapped in `Option`. Once
-    /// parsed, it always holds a value. Only `nullable` keeps the `Option`,
-    /// because there `null` is a value that the property can carry.
+    /// parsed, it always holds a value. A nullable value uses `Nullable<T>`.
     ///
     /// `default: null` never reaches here. The parser reads it as no default at
-    /// all, and serde already leaves a missing `Option` as `None`.
+    /// all. A diagnostic reports this limitation.
     pub default: Option<DefaultValue>,
     /// The validation keywords the property declares, when it declares any.
     ///
@@ -421,6 +420,8 @@ pub enum RustType {
     Map(Box<RustType>),
     /// `Option<T>`.
     Option(Box<RustType>),
+    /// A present value that can be JSON null.
+    Nullable(Box<RustType>),
     /// `Box<T>`, added by the recursion pass to give a cyclic type a size.
     ///
     /// Nothing in a schema asks for this. `lower::recurse` inserts it where a
@@ -461,13 +462,16 @@ impl RustType {
     /// own, so a rule reads the collection and not an element.
     pub fn innermost(&self) -> &RustType {
         return match self {
-            RustType::Option(inner) | RustType::Boxed(inner) => inner.innermost(),
+            RustType::Option(inner) | RustType::Nullable(inner) | RustType::Boxed(inner) => inner.innermost(),
             other => other,
         };
     }
 
     /// Whether this is a scalar the generated code compares with `==`.
     pub fn is_scalar(&self) -> bool {
+        if let RustType::Nullable(inner) = self {
+            return inner.is_scalar();
+        }
         return matches!(
             self,
             RustType::Bool
@@ -502,6 +506,7 @@ impl RustType {
             RustType::Vec(inner) => format!("Vec<{}>", inner.label()),
             RustType::Map(inner) => format!("std::collections::HashMap<String, {}>", inner.label()),
             RustType::Option(inner) => format!("Option<{}>", inner.label()),
+            RustType::Nullable(inner) => format!("Nullable<{}>", inner.label()),
             RustType::Boxed(inner) => format!("Box<{}>", inner.label()),
             RustType::Named(name) => name.clone(),
             RustType::External { module, name } => format!("{module}::{name}"),

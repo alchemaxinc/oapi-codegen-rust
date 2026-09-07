@@ -13,8 +13,26 @@
 pub struct Widget {
     pub id: String,
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Widget::validate_tags",
+        default
+    )]
     pub tags: Option<Vec<String>>,
+}
+impl Widget {
+    /// The rules the document gives `tags`, checked on the way in.
+    fn validate_tags<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Vec<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]

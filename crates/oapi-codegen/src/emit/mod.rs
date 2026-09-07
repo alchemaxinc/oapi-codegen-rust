@@ -112,7 +112,7 @@ pub fn emit_module(module: &Module, server_urls: Option<&ServerUrls>) -> Result<
     // No service, so no direction to narrow the serde traits by, and every model
     // keeps both. The foreign narrowing does apply: a trait a foreign type lacks
     // is unsatisfiable whichever direction the data flows.
-    let mut items = module_items(module, &usage::models_only_derives(module))?;
+    let mut items = module_items(module, &usage::models_only_derives(module), false)?;
     items.extend(server_url_items(server_urls)?);
     return render(&items);
 }
@@ -201,7 +201,10 @@ pub struct ReservedTypeName {
 /// whose generated name matches one of these will produce a duplicate item, so
 /// [`crate::lower::check_type_name_collisions`] rejects it up front.
 pub fn reserved_type_names(targets: Targets) -> Vec<ReservedTypeName> {
-    let mut names = Vec::new();
+    let mut names = vec![ReservedTypeName {
+        name: "Nullable",
+        description: "nullable JSON value",
+    }];
     if targets.server {
         names.push(ReservedTypeName {
             name: axum::API_TRAIT_NAME,
@@ -238,7 +241,7 @@ pub fn emit_flat(
 ) -> Result<String> {
     let derives = usage::model_derives(module, service, targets);
     let foreign = usage::foreign_resolver(module);
-    let mut items = module_items(module, &derives)?;
+    let mut items = module_items(module, &derives, uses_nullable(module, Some(service)))?;
     items.extend(server_url_items(server_urls)?);
     for operation in &service.operations {
         items.extend(operation::emit_operation_types(operation, targets, &foreign)?);
@@ -263,13 +266,140 @@ fn server_url_items(server_urls: Option<&ServerUrls>) -> Result<Vec<TokenStream>
 
 /// Lower every IR item in a module into its token stream, applying each item's
 /// derive set from `derives` (defaulting to every trait when absent).
-fn module_items(module: &Module, derives: &HashMap<String, ModelDerives>) -> Result<Vec<TokenStream>> {
+fn module_items(
+    module: &Module,
+    derives: &HashMap<String, ModelDerives>,
+    service_nullable: bool,
+) -> Result<Vec<TokenStream>> {
     let mut items = Vec::with_capacity(module.items.len());
+    if service_nullable || module.items.iter().any(item_uses_nullable) {
+        items.push(quote! {
+        /// A present JSON value, including explicit null.
+        #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize)]
+        #[serde(untagged)]
+        pub enum Nullable<T> {
+            /// Explicit JSON null.
+            #[default]
+            Null,
+            /// A non-null value.
+            Value(T),
+        }
+
+        impl<T> Nullable<T> {
+            /// Borrow the non-null value.
+            pub fn as_ref(&self) -> Option<&T> {
+                return match self {
+                    Self::Null => None,
+                    Self::Value(value) => Some(value),
+                };
+            }
+        }
+
+        impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
+            fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct NullableVisitor<T>(::core::marker::PhantomData<T>);
+
+                impl<'de, T: serde::Deserialize<'de>> serde::de::Visitor<'de> for NullableVisitor<T> {
+                    type Value = Nullable<T>;
+
+                    fn expecting(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                        return formatter.write_str("a present value or null");
+                    }
+
+                    fn visit_newtype_struct<D>(self, deserializer: D) -> ::core::result::Result<Self::Value, D::Error>
+                    where
+                        D: serde::Deserializer<'de>,
+                    {
+                        return <Option<T> as serde::Deserialize>::deserialize(deserializer).map(|value| {
+                            return match value {
+                                Some(value) => Nullable::Value(value),
+                                None => Nullable::Null,
+                            };
+                        });
+                    }
+
+                    fn visit_map<M>(self, map: M) -> ::core::result::Result<Self::Value, M::Error>
+                    where
+                        M: serde::de::MapAccess<'de>,
+                    {
+                        return T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                            .map(Nullable::Value);
+                    }
+                }
+
+                // The newtype boundary rejects absent fields before reading an Option.
+                return deserializer.deserialize_newtype_struct(
+                    "Nullable",
+                    NullableVisitor(::core::marker::PhantomData),
+                );
+            }
+        }
+        });
+    }
     for item in &module.items {
         let set = derives.get(item.name()).copied().unwrap_or_else(ModelDerives::both);
         items.push(models::emit_item(item, set)?);
     }
     return Ok(items);
+}
+
+pub(crate) fn uses_nullable(module: &Module, service: Option<&Service>) -> bool {
+    use crate::ir::RequestPayload;
+    use crate::ir::ResponseBody;
+
+    return module.items.iter().any(item_uses_nullable)
+        || service.is_some_and(|service| {
+            return service.operations.iter().any(|operation| {
+                let request = match &operation.request {
+                    Some(RequestPayload::Single(body)) => type_uses_nullable(&body.ty),
+                    Some(RequestPayload::Negotiated(body)) => body
+                        .variants
+                        .iter()
+                        .any(|variant| return type_uses_nullable(&variant.body.ty)),
+                    _ => false,
+                };
+                return request
+                    || operation.responses.iter().any(|response| {
+                        return match &response.body {
+                            Some(ResponseBody::Single(body)) => type_uses_nullable(&body.ty),
+                            Some(ResponseBody::Negotiated(body)) => body
+                                .variants
+                                .iter()
+                                .any(|variant| return type_uses_nullable(&variant.body.ty)),
+                            None => false,
+                        };
+                    });
+            });
+        });
+}
+
+fn item_uses_nullable(item: &crate::ir::Item) -> bool {
+    return match item {
+        crate::ir::Item::Struct(value) => {
+            value.fields.iter().any(|field| return type_uses_nullable(&field.ty))
+                || value.additional_properties.as_ref().is_some_and(type_uses_nullable)
+        }
+        crate::ir::Item::Alias(value) => type_uses_nullable(&value.ty),
+        crate::ir::Item::Enum(value) => match &value.kind {
+            crate::ir::EnumKind::Union(variants) => {
+                variants.iter().any(|variant| return type_uses_nullable(&variant.ty))
+            }
+            _ => false,
+        },
+    };
+}
+
+fn type_uses_nullable(ty: &RustType) -> bool {
+    return match ty {
+        RustType::Nullable(_) => true,
+        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) | RustType::Boxed(inner) => {
+            type_uses_nullable(inner)
+        }
+        _ => false,
+    };
 }
 
 /// Pretty-print a sequence of top-level items, one blank line apart, prefixed
@@ -358,6 +488,10 @@ pub(crate) fn emit_type(ty: &RustType) -> Result<TokenStream> {
         RustType::Option(inner) => {
             let inner = emit_type(inner)?;
             quote! { Option<#inner> }
+        }
+        RustType::Nullable(inner) => {
+            let inner = emit_type(inner)?;
+            quote! { Nullable<#inner> }
         }
         RustType::Boxed(inner) => {
             let inner = emit_type(inner)?;

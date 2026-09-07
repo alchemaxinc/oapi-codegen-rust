@@ -395,7 +395,7 @@ fn collect_held(ty: &RustType, out: &mut BTreeSet<String>) {
         RustType::Named(name) => {
             out.insert(canonical(name));
         }
-        RustType::Option(inner) => collect_held(inner, out),
+        RustType::Option(inner) | RustType::Nullable(inner) => collect_held(inner, out),
         _ => {}
     }
 }
@@ -413,7 +413,7 @@ fn box_held(ty: &mut RustType, owner: &str, graph: &Graph) {
                 *ty = RustType::Boxed(Box::new(inner));
             }
         }
-        RustType::Option(inner) => box_held(inner, owner, graph),
+        RustType::Option(inner) | RustType::Nullable(inner) => box_held(inner, owner, graph),
         _ => {}
     }
 }

@@ -279,6 +279,7 @@ fn project_type(ty: &RustType, direction: Direction, projections: &BTreeMap<Stri
         RustType::Vec(inner) => RustType::Vec(Box::new(project_type(inner, direction, projections))),
         RustType::Map(inner) => RustType::Map(Box::new(project_type(inner, direction, projections))),
         RustType::Option(inner) => RustType::Option(Box::new(project_type(inner, direction, projections))),
+        RustType::Nullable(inner) => RustType::Nullable(Box::new(project_type(inner, direction, projections))),
         RustType::Boxed(inner) => RustType::Boxed(Box::new(project_type(inner, direction, projections))),
         other => other.clone(),
     };

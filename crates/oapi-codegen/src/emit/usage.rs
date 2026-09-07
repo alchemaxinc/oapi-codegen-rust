@@ -127,9 +127,11 @@ impl ForeignResolver {
                 let canonical = to_ident(name, Case::Pascal);
                 return self.models.get(canonical.logical()).copied().unwrap_or_default();
             }
-            RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) | RustType::Boxed(inner) => {
-                self.of_type(inner)
-            }
+            RustType::Vec(inner)
+            | RustType::Map(inner)
+            | RustType::Option(inner)
+            | RustType::Nullable(inner)
+            | RustType::Boxed(inner) => self.of_type(inner),
             _ => ForeignDerives::default(),
         };
     }
@@ -222,9 +224,11 @@ fn foreign_derives(module: &Module, adjacency: &HashMap<String, Vec<String>>) ->
 fn direct_foreign_constraint(ty: &RustType) -> ForeignDerives {
     return match ty {
         RustType::Verbatim { derives, .. } => *derives,
-        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) | RustType::Boxed(inner) => {
-            direct_foreign_constraint(inner)
-        }
+        RustType::Vec(inner)
+        | RustType::Map(inner)
+        | RustType::Option(inner)
+        | RustType::Nullable(inner)
+        | RustType::Boxed(inner) => direct_foreign_constraint(inner),
         _ => ForeignDerives::default(),
     };
 }
@@ -346,9 +350,11 @@ fn item_references(item: &Item) -> Vec<String> {
 fn collect_named(ty: &RustType, out: &mut Vec<String>) {
     match ty {
         RustType::Named(name) => out.push(to_ident(name, Case::Pascal).logical().to_owned()),
-        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) | RustType::Boxed(inner) => {
-            collect_named(inner, out)
-        }
+        RustType::Vec(inner)
+        | RustType::Map(inner)
+        | RustType::Option(inner)
+        | RustType::Nullable(inner)
+        | RustType::Boxed(inner) => collect_named(inner, out),
         _ => {}
     }
 }

@@ -555,10 +555,10 @@ impl Sweep<'_> {
                         "allOf merges properties rather than validating every member independently",
                     );
                 }
-                "nullable" if value.as_bool() == Some(true) => {
+                "default" if value.is_null() => {
                     self.warn(
                         path,
-                        "null and absent values are not distinguished in every schema position",
+                        "the parser discards a null default, so an absent property does not receive explicit null",
                     );
                 }
                 "default" if context == Context::Schema => {
@@ -589,6 +589,40 @@ impl Sweep<'_> {
     }
 
     fn schema_notes(&mut self, value: &Value, context: Context, path: &str) {
+        if value.get("x-rust-type").is_some() && value.get("allOf").is_some() {
+            self.warn(
+                path,
+                "constraints inherited through allOf are not enforced for x-rust-type",
+            );
+        }
+        if value.get("nullable").and_then(Value::as_bool) == Some(true)
+            && let Ok(schema) = serde_yaml::from_value::<openapiv3::Schema>(value.clone())
+        {
+            let location = path.split("/schema/").next().unwrap_or(path);
+            if !location.starts_with("/components/schemas/")
+                && (location.contains("/parameters/")
+                    || location.contains("/headers/")
+                    || location.contains("/content/multipart~1form-data/")
+                    || location.contains("/content/application~1x-www-form-urlencoded/")
+                    || location.contains("/content/text~1plain/"))
+            {
+                self.warn(
+                    path,
+                    "nullable values have no supported null representation in this wire format",
+                );
+            }
+            if crate::lower::default::unsupported_nullable_default(&schema) {
+                self.warn(
+                    &pointer(path, "default"),
+                    "this nullable default has no supported Rust literal and is ignored",
+                );
+            }
+            if crate::lower::constraints::unsupported_nullable_constraints(&schema)
+                && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some())
+            {
+                self.warn(path, "constraints on this nullable value type are not enforced");
+            }
+        }
         let kind = value.get("type").and_then(Value::as_str);
         if let Some(kind) = kind
             && !matches!(kind, "string" | "integer" | "number" | "boolean" | "object" | "array")
@@ -862,7 +896,7 @@ security: [{arbitrary: [custom]}]
         for (schema, keyword) in [
             ("{type: number, enum: [1.5]}", "enum"),
             ("{type: string, format: custom}", "format"),
-            ("{type: string, nullable: true}", "nullable"),
+            ("{type: string, nullable: true, default: null}", "default"),
             ("{oneOf: [{type: string}, {type: integer}]}", "oneOf"),
             ("{anyOf: [{type: string}, {type: integer}]}", "anyOf"),
             ("{type: object, additionalProperties: false}", "additionalProperties"),
@@ -882,5 +916,82 @@ security: [{arbitrary: [custom]}]
                 "{schema}",
             );
         }
+    }
+
+    #[test]
+    fn nullable_limitations_warn_before_the_typed_parse() {
+        for (schema, message) in [
+            (
+                "{type: string, nullable: true, default: null}",
+                "parser discards a null default",
+            ),
+            (
+                "{type: array, nullable: true, items: {type: string}, default: [value]}",
+                "no supported Rust literal",
+            ),
+            (
+                "{type: string, nullable: true, x-rust-type: String, minLength: 2}",
+                "constraints on this nullable value type",
+            ),
+        ] {
+            let yaml =
+                format!("components: {{schemas: {{Container: {{type: object, properties: {{field: {schema}}}}}}}}}");
+            let sweep = inspect_yaml(&yaml);
+            assert!(sweep.problems.is_empty());
+            assert!(
+                sweep
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message))
+            );
+        }
+
+        let supported = inspect_yaml("components: {schemas: {Text: {type: string, nullable: true}}}");
+        assert!(supported.warnings.is_empty());
+    }
+
+    #[test]
+    fn nullable_wire_parameters_and_custom_allof_constraints_warn() {
+        let report = inspect_yaml(
+            "paths:
+  /probe:
+    get:
+      parameters:
+        - name: query
+          in: query
+          schema: {type: string, nullable: true}
+      responses: {}
+components:
+  schemas:
+    Custom:
+      nullable: true
+      x-rust-type: i64
+      allOf:
+        - {type: string, minLength: 2}",
+        );
+        assert!(report.warnings.iter().any(|warning| {
+            return warning.message.contains("no supported null representation");
+        }));
+        assert!(report.warnings.iter().any(|warning| {
+            return warning.message.contains("inherited through allOf");
+        }));
+        let json = inspect_yaml(
+            "paths:
+  /probe:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                headers:
+                  type: array
+                  items: {type: string, nullable: true}
+      responses: {}",
+        );
+        assert!(!json.warnings.iter().any(|warning| {
+            return warning.message.contains("no supported null representation");
+        }));
     }
 }

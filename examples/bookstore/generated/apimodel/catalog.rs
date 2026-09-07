@@ -16,8 +16,26 @@ pub struct Book {
     pub id: String,
     /// Price in minor currency units (e.g. cents).
     pub price_cents: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Book::validate_tags",
+        default
+    )]
     pub tags: Option<Vec<String>>,
+}
+impl Book {
+    /// The rules the document gives `tags`, checked on the way in.
+    fn validate_tags<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Vec<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
@@ -25,22 +43,72 @@ pub struct NewBook {
     pub title: String,
     pub author: String,
     pub price_cents: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "NewBook::validate_tags",
+        default
+    )]
     pub tags: Option<Vec<String>>,
+}
+impl NewBook {
+    /// The rules the document gives `tags`, checked on the way in.
+    fn validate_tags<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Vec<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct NewReview {
     /// Star rating from 1 to 5.
     pub rating: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "NewReview::validate_comment",
+        default
+    )]
     pub comment: Option<String>,
+}
+impl NewReview {
+    /// The rules the document gives `comment`, checked on the way in.
+    fn validate_comment<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Review {
     pub id: String,
     pub rating: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Review::validate_comment",
+        default
+    )]
     pub comment: Option<String>,
+}
+impl Review {
+    /// The rules the document gives `comment`, checked on the way in.
+    fn validate_comment<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }

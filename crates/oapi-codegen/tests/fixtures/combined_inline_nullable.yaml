@@ -1,0 +1,62 @@
+openapi: "3.0.3"
+info:
+  title: Inline nullable bodies
+  version: "1.0.0"
+components:
+  schemas:
+    Nullable: { type: string }
+paths:
+  /array:
+    post:
+      operationId: array
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              nullable: true
+              items: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: array
+                nullable: true
+                items: { type: string, nullable: true }
+  /scalar:
+    post:
+      operationId: scalar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: integer, nullable: true }
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema: { type: integer, nullable: true }
+  /map:
+    post:
+      operationId: map
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              nullable: true
+              additionalProperties: { type: boolean, nullable: true }
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+                additionalProperties: { type: boolean, nullable: true }

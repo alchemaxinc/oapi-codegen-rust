@@ -96,10 +96,40 @@ impl TryFrom<i64> for Level {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Job {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Job::validate_priority",
+        default
+    )]
     pub priority: Option<Priority>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Job::validate_retries",
+        default
+    )]
     pub retries: Option<JobRetries>,
+}
+impl Job {
+    /// The rules the document gives `priority`, checked on the way in.
+    fn validate_priority<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Priority>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<Priority as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+    /// The rules the document gives `retries`, checked on the way in.
+    fn validate_retries<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<JobRetries>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<JobRetries as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]

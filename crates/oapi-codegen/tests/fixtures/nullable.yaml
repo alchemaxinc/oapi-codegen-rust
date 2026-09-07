@@ -2,9 +2,77 @@ openapi: "3.0.3"
 info:
   title: Nullable properties
   version: "1.0.0"
-paths: {}
+paths:
+  /parity:
+    post:
+      operationId: parity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              nullable: true
+              items: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NullableArray"
+  /wrapped:
+    post:
+      operationId: wrapped
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              nullable: true
+              allOf:
+                - $ref: "#/components/schemas/Plain"
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf:
+                  - $ref: "#/components/schemas/Plain"
+  /direction:
+    post:
+      operationId: exchange
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Directional"
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Directional"
 components:
   schemas:
+    NullableArray:
+      type: array
+      nullable: true
+      items: { type: string, nullable: true }
+    Directional:
+      type: object
+      nullable: true
+      required: [id, secret, value]
+      properties:
+        id: { type: string, readOnly: true }
+        secret: { type: string, writeOnly: true }
+        value: { type: string, nullable: true }
+        next:
+          $ref: "#/components/schemas/Directional"
     Account:
       type: object
       required: [id, deactivated_at]
@@ -15,3 +83,185 @@ components:
           type: string
           format: date-time
           nullable: true
+        nickname:
+          type: string
+        plain:
+          $ref: "#/components/schemas/Plain"
+        plain_state:
+          type: string
+          enum: [active, inactive]
+        patch:
+          type: string
+          nullable: true
+          minLength: 2
+        bounded:
+          type: integer
+          nullable: true
+          minimum: 1
+        only_null:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: -1
+        out_of_range:
+          type: integer
+          format: int32
+          nullable: true
+          maximum: -2147483649
+        labels:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            nullable: true
+        values:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/NullableText"
+        nullable_list:
+          type: array
+          nullable: true
+          minItems: 1
+          items: { type: string }
+        nullable_map:
+          type: object
+          nullable: true
+          minProperties: 1
+          additionalProperties: { type: string }
+        empty_list:
+          type: array
+          nullable: true
+          default: []
+          items: { type: string }
+        ignored_default:
+          type: array
+          nullable: true
+          default: [value]
+          items: { type: string }
+        child:
+          $ref: "#/components/schemas/NullableNode"
+        state:
+          $ref: "#/components/schemas/NullableState"
+        text:
+          $ref: "#/components/schemas/TextAlias"
+        direct_text:
+          $ref: "#/components/schemas/NullableText"
+        wrapped_text:
+          $ref: "#/components/schemas/WrappedText"
+        inline_wrapped_text:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/NullableText"
+        reference:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Plain"
+        inline:
+          type: object
+          nullable: true
+          required: [name]
+          properties:
+            name: { type: string }
+        custom:
+          type: string
+          nullable: true
+          x-rust-type: String
+          minLength: 2
+        skipped:
+          type: string
+          nullable: true
+          x-rust-serde-skip: true
+        local:
+          type: string
+          x-rust-type: std::time::Instant
+          x-rust-serde-skip: true
+        skipped_default:
+          type: string
+          default: ignored
+          x-rust-serde-skip: true
+        custom_allof:
+          nullable: true
+          x-rust-type: i64
+          allOf:
+            - $ref: "#/components/schemas/NullableText"
+        custom_chain:
+          $ref: "#/components/schemas/CustomChain"
+        fallback:
+          type: string
+          nullable: true
+          default: fallback
+        enum_default:
+          type: string
+          nullable: true
+          enum: [null, active]
+          default: active
+        null_default:
+          type: string
+          nullable: true
+          default: null
+    Plain:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    CustomChain:
+      nullable: true
+      allOf:
+        - $ref: "#/components/schemas/CustomAllOf"
+    CustomAllOf:
+      nullable: true
+      x-rust-type: i64
+      allOf:
+        - $ref: "#/components/schemas/NullableText"
+    NullableText:
+      type: string
+      nullable: true
+      minLength: 2
+    TextAlias:
+      $ref: "#/components/schemas/NullableText"
+    WrappedText:
+      nullable: true
+      allOf:
+        - $ref: "#/components/schemas/NullableText"
+    NullableCode:
+      type: integer
+      nullable: true
+      enum: [null, 1, 2]
+    NullableState:
+      type: string
+      nullable: true
+      enum: [null, active, inactive]
+      x-enum-varnames: ["Null", Enabled, Disabled]
+    NullableNode:
+      type: object
+      nullable: true
+      x-rust-name: Node
+      required: [name]
+      properties:
+        name: { type: string }
+        child:
+          $ref: "#/components/schemas/NullableNode"
+    RequiredValues:
+      type: object
+      required: [plain, text, state, node, bounded, defaulted]
+      properties:
+        plain: { type: string }
+        text:
+          $ref: "#/components/schemas/NullableText"
+        state:
+          $ref: "#/components/schemas/NullableState"
+        node:
+          $ref: "#/components/schemas/NullableNode"
+        bounded:
+          type: integer
+          nullable: true
+          minimum: 1
+        defaulted:
+          type: string
+          nullable: true
+          default: value
+    NullableUnion:
+      nullable: true
+      oneOf:
+        - type: string
+        - type: integer

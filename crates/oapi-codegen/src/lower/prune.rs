@@ -68,9 +68,11 @@ fn canonical(name: &str) -> String {
 fn named_ref(ty: &RustType) -> Option<String> {
     return match ty {
         RustType::Named(name) => Some(canonical(name)),
-        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) | RustType::Boxed(inner) => {
-            named_ref(inner)
-        }
+        RustType::Vec(inner)
+        | RustType::Map(inner)
+        | RustType::Option(inner)
+        | RustType::Nullable(inner)
+        | RustType::Boxed(inner) => named_ref(inner),
         _ => None,
     };
 }

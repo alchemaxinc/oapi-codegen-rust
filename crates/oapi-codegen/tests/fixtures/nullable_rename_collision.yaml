@@ -1,0 +1,7 @@
+openapi: "3.0.3"
+info: { title: Nullable rename collision, version: "1.0.0" }
+paths: {}
+components:
+  schemas:
+    Custom: { type: string, x-rust-name: Nullable }
+    Text: { type: string, nullable: true }
