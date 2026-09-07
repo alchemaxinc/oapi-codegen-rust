@@ -77,6 +77,12 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
     }
 }
 
+/// The request shape of `DirectionalAlias`.
+pub type DirectionalAliasRequest = DirectionalRequest;
+
+/// The response shape of `DirectionalAlias`.
+pub type DirectionalAliasResponse = DirectionalResponse;
+
 pub type NullableArray = Nullable<Vec<Nullable<String>>>;
 
 /// The request shape of `Directional`.

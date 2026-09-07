@@ -77,6 +77,12 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
     }
 }
 
+pub type NullableText = Nullable<String>;
+
+pub type TextAlias = NullableText;
+
+pub type WrappedText = TextAlias;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArrayResponse {
     /// Result
@@ -95,6 +101,12 @@ pub enum MapResponse {
     Ok(Nullable<std::collections::HashMap<String, Nullable<bool>>>),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AliasResponse {
+    /// Result
+    Ok(NullableText),
+}
+
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
     fn array(
@@ -109,6 +121,10 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         body: Nullable<std::collections::HashMap<String, Nullable<bool>>>,
     ) -> impl std::future::Future<Output = MapResponse> + Send;
+    fn alias(
+        &self,
+        body: WrappedText,
+    ) -> impl std::future::Future<Output = AliasResponse> + Send;
 }
 
 impl axum::response::IntoResponse for ArrayResponse {
@@ -159,12 +175,29 @@ impl axum::response::IntoResponse for MapResponse {
     }
 }
 
+impl axum::response::IntoResponse for AliasResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            AliasResponse::Ok(body) => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    200,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
+            }
+        }
+    }
+}
+
 /// Build an axum `Router` that dispatches each route to `api`.
 pub fn router<T: Api>(api: T) -> axum::Router {
     axum::Router::new()
         .route("/array", axum::routing::post(array_handler::<T>))
         .route("/scalar", axum::routing::post(scalar_handler::<T>))
         .route("/map", axum::routing::post(map_handler::<T>))
+        .route("/alias", axum::routing::post(alias_handler::<T>))
         .with_state(api)
 }
 
@@ -189,6 +222,13 @@ async fn map_handler<T: Api>(
     ): axum::Json<Nullable<std::collections::HashMap<String, Nullable<bool>>>>,
 ) -> MapResponse {
     api.map(body).await
+}
+
+async fn alias_handler<T: Api>(
+    axum::extract::State(api): axum::extract::State<T>,
+    axum::Json(body): axum::Json<WrappedText>,
+) -> AliasResponse {
+    api.alias(body).await
 }
 
 /// Errors returned by the generated client.
@@ -310,6 +350,18 @@ impl Client {
             let body: Nullable<std::collections::HashMap<String, Nullable<bool>>> = response
                 .json()?;
             return Ok(MapResponse::Ok(body));
+        }
+        return Err(ClientError::UnexpectedStatus(status));
+    }
+    pub fn alias(&self, body: WrappedText) -> Result<AliasResponse, ClientError> {
+        let url = format!("{}/alias", self.base_url);
+        let mut request = self.http.request(reqwest::Method::POST, url);
+        request = request.json(&body);
+        let response = request.send()?;
+        let status = response.status();
+        if status.as_u16() == 200 {
+            let body: NullableText = response.json()?;
+            return Ok(AliasResponse::Ok(body));
         }
         return Err(ClientError::UnexpectedStatus(status));
     }

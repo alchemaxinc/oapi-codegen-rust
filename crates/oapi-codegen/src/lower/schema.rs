@@ -165,7 +165,7 @@ impl Mapper<'_> {
                 name: self.type_name_ident(name),
                 doc: doc_of(&schema.schema_data),
                 deprecated: deprecation_of(&schema.schema_data, name)?,
-                ty: RustType::Nullable(Box::new(ty)),
+                ty: nullable_type(self.spec, ty),
             }));
         }
         let data = &schema.schema_data;
@@ -356,7 +356,7 @@ impl Mapper<'_> {
                 Err(_) => Access::ReadWrite,
             },
         };
-        let constraints = match prop {
+        let mut constraints = match prop {
             ReferenceOr::Item(schema) => crate::lower::constraints::constraints_of(schema)
                 .or_else(|| return self.single_all_of_constraints(schema, 0)),
             // The alias a `$ref` makes carries no serde attribute, so the field
@@ -367,6 +367,17 @@ impl Mapper<'_> {
                 .ok()
                 .and_then(|schema| return self.referenced_constraints(schema, 0)),
         };
+        let value_ty = match &ty {
+            RustType::Option(inner) => inner.as_ref(),
+            _ => &ty,
+        };
+        if matches!(value_ty, RustType::Nullable(_))
+            && let Some(found) = &mut constraints
+            && let Some(RustType::Nullable(inner)) = &found.checked_as
+        {
+            // The field wrapper consumes nullability before the alias checks run.
+            found.checked_as = Some(*inner.clone());
+        }
         let field = Field {
             name: ident,
             rename,
@@ -392,7 +403,7 @@ impl Mapper<'_> {
         if schema.schema_data.nullable
             && let Some(checked) = found.checked_as.take()
         {
-            found.checked_as = Some(RustType::Nullable(Box::new(checked)));
+            found.checked_as = Some(nullable_type(self.spec, checked));
         }
         return Some(found);
     }
@@ -753,7 +764,7 @@ impl Mapper<'_> {
         self.depth += 1;
         let result = self.type_from_schema_inner(hint, schema).map(|ty| {
             if schema.schema_data.nullable {
-                return RustType::Nullable(Box::new(ty));
+                return nullable_type(self.spec, ty);
             }
             return ty;
         });
@@ -852,6 +863,44 @@ impl Mapper<'_> {
         };
         return Ok(element);
     }
+}
+
+/// Add nullability once. Only local aliases reveal the nullability of a named type.
+pub(crate) fn nullable_type(spec: &Spec, ty: RustType) -> RustType {
+    if matches!(ty, RustType::Nullable(_)) {
+        return ty;
+    }
+    if let RustType::Named(name) = &ty {
+        let mut name = name.as_str();
+        let mut visited = std::collections::HashSet::new();
+        while visited.insert(name) {
+            let reference = match spec.schemas().get(name) {
+                Some(ReferenceOr::Reference { reference }) => reference,
+                Some(ReferenceOr::Item(schema)) => {
+                    if schema.schema_data.nullable {
+                        return ty;
+                    }
+                    if schema.schema_data.extensions.contains_key(X_RUST_TYPE) {
+                        break;
+                    }
+                    let SchemaKind::AllOf { all_of } = &schema.schema_kind else {
+                        break;
+                    };
+                    // A named inline allOf member uses struct merging, not an alias.
+                    let [ReferenceOr::Reference { reference }] = all_of.as_slice() else {
+                        break;
+                    };
+                    reference
+                }
+                None => break,
+            };
+            let Some(target) = ref_target_name(reference) else {
+                break;
+            };
+            name = target;
+        }
+    }
+    return RustType::Nullable(Box::new(ty));
 }
 
 /// Accumulates merged properties of an `allOf`, preserving first-seen order.
@@ -1191,6 +1240,71 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn nullable_type_follows_only_local_aliases() {
+        let doc = serde_yaml::from_str(
+            r##"
+openapi: 3.0.3
+info: { title: t, version: '1' }
+paths: {}
+components:
+  schemas:
+    Text: { type: string, nullable: true }
+    Alias: { $ref: '#/components/schemas/Text' }
+    Wrapped:
+      allOf: [{ $ref: '#/components/schemas/Alias' }]
+    List:
+      type: array
+      items: { $ref: '#/components/schemas/Text' }
+    Map:
+      type: object
+      additionalProperties: { $ref: '#/components/schemas/Text' }
+    Custom:
+      x-rust-type: String
+      allOf: [{ $ref: '#/components/schemas/Text' }]
+    Inline:
+      allOf:
+        - type: object
+          nullable: true
+          properties:
+            value: { type: string }
+    Foreign: { $ref: 'other.yaml#/components/schemas/Text' }
+    CycleA: { $ref: '#/components/schemas/CycleB' }
+    CycleB:
+      allOf: [{ $ref: '#/components/schemas/CycleA' }]
+"##,
+        )
+        .expect("parse spec");
+        let spec = Spec::from_parts(doc, PathBuf::from("inline.yaml"));
+        for name in ["Text", "Alias", "Wrapped"] {
+            let ty = RustType::Named(name.to_owned());
+            assert_eq!(nullable_type(&spec, ty.clone()), ty, "{name}");
+        }
+        for name in [
+            "List", "Map", "Custom", "Inline", "Foreign", "CycleA", "CycleB", "Missing",
+        ] {
+            let ty = RustType::Named(name.to_owned());
+            assert_eq!(
+                nullable_type(&spec, ty.clone()),
+                RustType::Nullable(Box::new(ty)),
+                "{name}"
+            );
+        }
+        let nullable = RustType::Nullable(Box::new(RustType::String));
+        assert_eq!(nullable_type(&spec, nullable.clone()), nullable);
+        for ty in [
+            RustType::Vec(Box::new(nullable.clone())),
+            RustType::Map(Box::new(nullable.clone())),
+            RustType::Option(Box::new(nullable)),
+            RustType::External {
+                module: "foreign".to_owned(),
+                name: "Text".to_owned(),
+            },
+        ] {
+            assert_eq!(nullable_type(&spec, ty.clone()), RustType::Nullable(Box::new(ty)));
+        }
+    }
 
     /// Parse an inline OpenAPI document and emit the generated Rust source.
     fn emit_yaml(yaml: &str) -> String {

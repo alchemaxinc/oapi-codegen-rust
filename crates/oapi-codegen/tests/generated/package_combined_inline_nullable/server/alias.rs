@@ -13,10 +13,10 @@ use super::super::models::*;
 use super::super::operations::*;
 use super::Api;
 
-impl axum::response::IntoResponse for ExchangeResponse {
+impl axum::response::IntoResponse for AliasResponse {
     fn into_response(self) -> axum::response::Response {
         match self {
-            ExchangeResponse::Ok(body) => {
+            AliasResponse::Ok(body) => {
                 const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
                     200,
                 ) {
@@ -29,9 +29,9 @@ impl axum::response::IntoResponse for ExchangeResponse {
     }
 }
 
-pub(super) async fn exchange_handler<T: Api>(
+pub(super) async fn alias_handler<T: Api>(
     axum::extract::State(api): axum::extract::State<T>,
-    axum::Json(body): axum::Json<DirectionalAliasRequest>,
-) -> ExchangeResponse {
-    api.exchange(body).await
+    axum::Json(body): axum::Json<WrappedText>,
+) -> AliasResponse {
+    api.alias(body).await
 }

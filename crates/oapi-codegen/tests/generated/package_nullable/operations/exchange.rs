@@ -14,5 +14,5 @@ use super::super::models::*;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExchangeResponse {
     /// Result
-    Ok(DirectionalResponse),
+    Ok(DirectionalAliasResponse),
 }

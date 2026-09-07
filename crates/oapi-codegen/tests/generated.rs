@@ -92,6 +92,10 @@ macro_rules! inline_nullable_runtime_tests {
                 ) -> MapResponse {
                     return MapResponse::Ok(body);
                 }
+
+                async fn alias(&self, body: Nullable<String>) -> AliasResponse {
+                    return AliasResponse::Ok(body);
+                }
             }
 
             let _router: axum::Router = router(Service);
@@ -200,6 +204,11 @@ fn nullable_presence_round_trips() {
         ("text", vec![serde_json::Value::Null, serde_json::json!("name")]),
         ("direct_text", vec![serde_json::Value::Null, serde_json::json!("name")]),
         ("wrapped_text", vec![serde_json::Value::Null, serde_json::json!("name")]),
+        ("nested_text", vec![serde_json::Value::Null, serde_json::json!("name")]),
+        (
+            "nested_plain_text",
+            vec![serde_json::Value::Null, serde_json::json!("name")],
+        ),
         (
             "inline_wrapped_text",
             vec![serde_json::Value::Null, serde_json::json!("name")],
@@ -238,6 +247,8 @@ fn nullable_presence_round_trips() {
         ("direct_text", serde_json::json!("x")),
         ("wrapped_text", serde_json::json!("x")),
         ("inline_wrapped_text", serde_json::json!("x")),
+        ("nested_text", serde_json::json!("x")),
+        ("nested_plain_text", serde_json::json!("x")),
         ("labels", serde_json::json!([null, null])),
         ("nullable_list", serde_json::json!([])),
         ("nullable_list", serde_json::json!([null])),
@@ -252,6 +263,56 @@ fn nullable_presence_round_trips() {
         let mut input = base.clone();
         input.as_object_mut().expect("object").remove(wire);
         assert!(serde_json::from_value::<Account>(input).is_err(), "{wire}");
+    }
+}
+
+#[test]
+fn nullable_aliases_have_one_typed_null_state() {
+    use generated::nullable::*;
+
+    let text: WrappedText = Nullable::Value("value".to_owned());
+    let _: Nullable<String> = text;
+    let custom: CustomChain = Nullable::Value(3_i64);
+    let _: Nullable<i64> = custom;
+    let directional: DirectionalAliasRequest = Nullable::Value(DirectionalValueRequest {
+        secret: "secret".to_owned(),
+        value: Nullable::Null,
+        next: None,
+    });
+    let _: DirectionalRequest = directional;
+
+    let mut account: Account =
+        serde_json::from_value(serde_json::json!({"id": "a", "deactivated_at": null})).expect("account");
+    for field in [
+        &mut account.wrapped_text,
+        &mut account.inline_wrapped_text,
+        &mut account.nested_text,
+        &mut account.nested_plain_text,
+    ] {
+        assert_eq!(*field, None);
+        *field = Some(Nullable::Null);
+        assert_eq!(*field, Some(Nullable::<String>::Null));
+        *field = Some(Nullable::Value("value".to_owned()));
+    }
+    let output = serde_json::to_value(account).expect("serialize values");
+    assert_eq!(output["wrapped_text"], "value");
+
+    let account: Account = serde_json::from_value(serde_json::json!({
+        "id": "a",
+        "deactivated_at": null,
+        "wrapped_text": null,
+        "inline_wrapped_text": null,
+        "nested_text": null,
+        "nested_plain_text": null
+    }))
+    .expect("explicit nulls");
+    for field in [
+        account.wrapped_text,
+        account.inline_wrapped_text,
+        account.nested_text,
+        account.nested_plain_text,
+    ] {
+        assert_eq!(field, Some(Nullable::<String>::Null));
     }
 }
 

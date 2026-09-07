@@ -15,6 +15,8 @@ mod array;
 mod scalar;
 #[path = "client/map.rs"]
 mod map;
+#[path = "client/alias.rs"]
+mod alias;
 
 /// Errors returned by the generated client.
 #[derive(Debug)]

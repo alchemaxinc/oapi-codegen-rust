@@ -34,7 +34,7 @@ pub trait Api: Clone + Send + Sync + 'static {
     ) -> impl std::future::Future<Output = WrappedResponse> + Send;
     fn exchange(
         &self,
-        body: DirectionalRequest,
+        body: DirectionalAliasRequest,
     ) -> impl std::future::Future<Output = ExchangeResponse> + Send;
 }
 

@@ -77,6 +77,12 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
     }
 }
 
+/// The request shape of `DirectionalAlias`.
+pub type DirectionalAliasRequest = DirectionalRequest;
+
+/// The response shape of `DirectionalAlias`.
+pub type DirectionalAliasResponse = DirectionalResponse;
+
 pub type NullableArray = Nullable<Vec<Nullable<String>>>;
 
 /// The request shape of `Directional`.
@@ -198,7 +204,19 @@ pub struct Account {
         deserialize_with = "Account::validate_inline_wrapped_text",
         default
     )]
-    pub inline_wrapped_text: Option<Nullable<NullableText>>,
+    pub inline_wrapped_text: Option<TextAlias>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_nested_text",
+        default
+    )]
+    pub nested_text: Option<Nullable<String>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_nested_plain_text",
+        default
+    )]
+    pub nested_plain_text: Option<Nullable<PlainText>>,
     #[serde(
         skip_serializing_if = "Option::is_none",
         deserialize_with = "Account::validate_reference",
@@ -589,14 +607,12 @@ impl Account {
             let item = &value;
             if let Some(item) = item.as_ref() {
                 if let Some(item) = item.as_ref() {
-                    if let Some(item) = item.as_ref() {
-                        if item.chars().nth(1usize).is_none() {
-                            return Err(
-                                serde::de::Error::custom(
-                                    "`wrapped_text` must hold 2 or more characters",
-                                ),
-                            );
-                        }
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`wrapped_text` must hold 2 or more characters",
+                            ),
+                        );
                     }
                 }
             }
@@ -606,25 +622,73 @@ impl Account {
     /// The rules the document gives `inline_wrapped_text`, checked on the way in.
     fn validate_inline_wrapped_text<'de, D>(
         deserializer: D,
-    ) -> ::core::result::Result<Option<Nullable<NullableText>>, D::Error>
+    ) -> ::core::result::Result<Option<TextAlias>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<TextAlias as serde::Deserialize>::deserialize(deserializer)?);
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`inline_wrapped_text` must hold 2 or more characters",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `nested_text`, checked on the way in.
+    fn validate_nested_text<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<String>>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = Some(
-            <Nullable<NullableText> as serde::Deserialize>::deserialize(deserializer)?,
+            <Nullable<String> as serde::Deserialize>::deserialize(deserializer)?,
         );
         {
             let item = &value;
             if let Some(item) = item.as_ref() {
                 if let Some(item) = item.as_ref() {
-                    if let Some(item) = item.as_ref() {
-                        if item.chars().nth(1usize).is_none() {
-                            return Err(
-                                serde::de::Error::custom(
-                                    "`inline_wrapped_text` must hold 2 or more characters",
-                                ),
-                            );
-                        }
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`nested_text` must hold 2 or more characters",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `nested_plain_text`, checked on the way in.
+    fn validate_nested_plain_text<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<PlainText>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<PlainText> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`nested_plain_text` must hold 2 or more characters",
+                            ),
+                        );
                     }
                 }
             }
@@ -718,7 +782,9 @@ pub struct Plain {
     pub name: String,
 }
 
-pub type CustomChain = Nullable<CustomAllOf>;
+pub type PlainText = String;
+
+pub type CustomChain = CustomAllOf;
 
 pub type CustomAllOf = Nullable<i64>;
 
@@ -726,7 +792,7 @@ pub type NullableText = Nullable<String>;
 
 pub type TextAlias = NullableText;
 
-pub type WrappedText = Nullable<NullableText>;
+pub type WrappedText = TextAlias;
 
 pub type NullableCode = Nullable<NullableCodeValue>;
 
@@ -738,7 +804,7 @@ pub type Node = Nullable<NullableNodeValue>;
 pub struct RequiredValues {
     pub plain: String,
     #[serde(deserialize_with = "RequiredValues::validate_text")]
-    pub text: NullableText,
+    pub text: WrappedText,
     pub state: NullableState,
     pub node: Node,
     #[serde(deserialize_with = "RequiredValues::validate_bounded")]
@@ -749,11 +815,11 @@ impl RequiredValues {
     /// The rules the document gives `text`, checked on the way in.
     fn validate_text<'de, D>(
         deserializer: D,
-    ) -> ::core::result::Result<NullableText, D::Error>
+    ) -> ::core::result::Result<WrappedText, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = <NullableText as serde::Deserialize>::deserialize(deserializer)?;
+        let value = <WrappedText as serde::Deserialize>::deserialize(deserializer)?;
         {
             let item = &value;
             if let Some(item) = item.as_ref() {

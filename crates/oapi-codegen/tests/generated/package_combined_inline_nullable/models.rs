@@ -76,3 +76,9 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
             );
     }
 }
+
+pub type NullableText = Nullable<String>;
+
+pub type TextAlias = NullableText;
+
+pub type WrappedText = TextAlias;

@@ -14,18 +14,15 @@ use super::super::operations::*;
 use super::{Client, ClientError};
 
 impl Client {
-    pub fn exchange(
-        &self,
-        body: DirectionalAliasRequest,
-    ) -> Result<ExchangeResponse, ClientError> {
-        let url = format!("{}/direction", self.base_url);
+    pub fn alias(&self, body: WrappedText) -> Result<AliasResponse, ClientError> {
+        let url = format!("{}/alias", self.base_url);
         let mut request = self.http.request(reqwest::Method::POST, url);
         request = request.json(&body);
         let response = request.send()?;
         let status = response.status();
         if status.as_u16() == 200 {
-            let body: DirectionalAliasResponse = response.json()?;
-            return Ok(ExchangeResponse::Ok(body));
+            let body: NullableText = response.json()?;
+            return Ok(AliasResponse::Ok(body));
         }
         return Err(ClientError::UnexpectedStatus(status));
     }

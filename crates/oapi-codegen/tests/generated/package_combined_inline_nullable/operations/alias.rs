@@ -9,15 +9,10 @@
     reason = "generated code, not first-party source"
 )]
 
-#[path = "operations/array.rs"]
-mod array;
-pub use array::*;
-#[path = "operations/scalar.rs"]
-mod scalar;
-pub use scalar::*;
-#[path = "operations/map.rs"]
-mod map;
-pub use map::*;
-#[path = "operations/alias.rs"]
-mod alias;
-pub use alias::*;
+use super::super::models::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AliasResponse {
+    /// Result
+    Ok(NullableText),
+}

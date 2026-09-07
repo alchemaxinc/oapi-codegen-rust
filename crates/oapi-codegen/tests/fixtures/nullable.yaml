@@ -49,16 +49,24 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Directional"
+              nullable: true
+              allOf:
+                - $ref: "#/components/schemas/DirectionalAlias"
       responses:
         "200":
           description: Result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Directional"
+                nullable: true
+                allOf:
+                  - $ref: "#/components/schemas/DirectionalAlias"
 components:
   schemas:
+    DirectionalAlias:
+      nullable: true
+      allOf:
+        - $ref: "#/components/schemas/Directional"
     NullableArray:
       type: array
       nullable: true
@@ -151,7 +159,21 @@ components:
         inline_wrapped_text:
           nullable: true
           allOf:
-            - $ref: "#/components/schemas/NullableText"
+            - nullable: true
+              allOf:
+                - $ref: "#/components/schemas/TextAlias"
+        nested_text:
+          nullable: true
+          allOf:
+            - nullable: true
+              allOf:
+                - { type: string, nullable: true, minLength: 2 }
+        nested_plain_text:
+          nullable: true
+          allOf:
+            - nullable: true
+              allOf:
+                - $ref: "#/components/schemas/PlainText"
         reference:
           nullable: true
           allOf:
@@ -204,6 +226,9 @@ components:
       required: [name]
       properties:
         name: { type: string }
+    PlainText:
+      type: string
+      minLength: 2
     CustomChain:
       nullable: true
       allOf:
@@ -222,7 +247,7 @@ components:
     WrappedText:
       nullable: true
       allOf:
-        - $ref: "#/components/schemas/NullableText"
+        - $ref: "#/components/schemas/TextAlias"
     NullableCode:
       type: integer
       nullable: true
@@ -247,7 +272,7 @@ components:
       properties:
         plain: { type: string }
         text:
-          $ref: "#/components/schemas/NullableText"
+          $ref: "#/components/schemas/WrappedText"
         state:
           $ref: "#/components/schemas/NullableState"
         node:

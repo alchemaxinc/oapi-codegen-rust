@@ -1660,7 +1660,7 @@ impl Lowerer<'_> {
             }
         };
         return Ok(if schema.schema_data.nullable {
-            RustType::Nullable(Box::new(ty))
+            crate::lower::schema::nullable_type(self.spec, ty)
         } else {
             ty
         });

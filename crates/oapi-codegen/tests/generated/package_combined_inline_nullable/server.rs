@@ -21,6 +21,9 @@ use scalar::scalar_handler;
 #[path = "server/map.rs"]
 mod map;
 use map::map_handler;
+#[path = "server/alias.rs"]
+mod alias;
+use alias::alias_handler;
 
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
@@ -36,6 +39,10 @@ pub trait Api: Clone + Send + Sync + 'static {
         &self,
         body: Nullable<std::collections::HashMap<String, Nullable<bool>>>,
     ) -> impl std::future::Future<Output = MapResponse> + Send;
+    fn alias(
+        &self,
+        body: WrappedText,
+    ) -> impl std::future::Future<Output = AliasResponse> + Send;
 }
 
 /// Build an axum `Router` that dispatches each route to `api`.
@@ -44,5 +51,6 @@ pub fn router<T: Api>(api: T) -> axum::Router {
         .route("/array", axum::routing::post(array_handler::<T>))
         .route("/scalar", axum::routing::post(scalar_handler::<T>))
         .route("/map", axum::routing::post(map_handler::<T>))
+        .route("/alias", axum::routing::post(alias_handler::<T>))
         .with_state(api)
 }
