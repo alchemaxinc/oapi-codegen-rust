@@ -9,8 +9,986 @@
     reason = "generated code, not first-party source"
 )]
 
+/// A present JSON value, including explicit null.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(untagged)]
+pub enum Nullable<T> {
+    /// Explicit JSON null.
+    #[default]
+    Null,
+    /// A non-null value.
+    Value(T),
+}
+impl<T> Nullable<T> {
+    /// Borrow the non-null value.
+    pub fn as_ref(&self) -> Option<&T> {
+        return match self {
+            Self::Null => None,
+            Self::Value(value) => Some(value),
+        };
+    }
+}
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct NullableVisitor<T>(::core::marker::PhantomData<T>);
+        impl<'de, T: serde::Deserialize<'de>> serde::de::Visitor<'de>
+        for NullableVisitor<T> {
+            type Value = Nullable<T>;
+            fn expecting(
+                &self,
+                formatter: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
+                return formatter.write_str("a present value or null");
+            }
+            fn visit_newtype_struct<D>(
+                self,
+                deserializer: D,
+            ) -> ::core::result::Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                return <Option<T> as serde::Deserialize>::deserialize(deserializer)
+                    .map(|value| {
+                        return match value {
+                            Some(value) => Nullable::Value(value),
+                            None => Nullable::Null,
+                        };
+                    });
+            }
+            fn visit_map<M>(
+                self,
+                map: M,
+            ) -> ::core::result::Result<Self::Value, M::Error>
+            where
+                M: serde::de::MapAccess<'de>,
+            {
+                return T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(Nullable::Value);
+            }
+        }
+        return deserializer
+            .deserialize_newtype_struct(
+                "Nullable",
+                NullableVisitor(::core::marker::PhantomData),
+            );
+    }
+}
+
+/// The request shape of `DirectionalAlias`.
+pub type DirectionalAliasRequest = DirectionalRequest;
+
+/// The response shape of `DirectionalAlias`.
+pub type DirectionalAliasResponse = DirectionalResponse;
+
+pub type NullableArray = Nullable<Vec<Nullable<String>>>;
+
+/// The request shape of `Directional`.
+pub type DirectionalRequest = Nullable<DirectionalValueRequest>;
+
+/// The response shape of `Directional`.
+pub type DirectionalResponse = Nullable<DirectionalValueResponse>;
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Account {
     pub id: String,
-    pub deactivated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub deactivated_at: Nullable<chrono::DateTime<chrono::Utc>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_nickname",
+        default
+    )]
+    pub nickname: Option<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_plain",
+        default
+    )]
+    pub plain: Option<Plain>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_plain_state",
+        default
+    )]
+    pub plain_state: Option<AccountPlainState>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_patch",
+        default
+    )]
+    pub patch: Option<Nullable<String>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_bounded",
+        default
+    )]
+    pub bounded: Option<Nullable<u64>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_only_null",
+        default
+    )]
+    pub only_null: Option<Nullable<u64>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_out_of_range",
+        default
+    )]
+    pub out_of_range: Option<Nullable<i32>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_labels",
+        default
+    )]
+    pub labels: Option<Vec<Nullable<String>>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_values",
+        default
+    )]
+    pub values: Option<std::collections::HashMap<String, NullableText>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_nullable_list",
+        default
+    )]
+    pub nullable_list: Option<Nullable<Vec<String>>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_nullable_map",
+        default
+    )]
+    pub nullable_map: Option<Nullable<std::collections::HashMap<String, String>>>,
+    #[serde(default = "Account::default_empty_list")]
+    pub empty_list: Nullable<Vec<String>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_ignored_default",
+        default
+    )]
+    pub ignored_default: Option<Nullable<Vec<String>>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_child",
+        default
+    )]
+    pub child: Option<Node>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_state",
+        default
+    )]
+    pub state: Option<NullableState>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_text",
+        default
+    )]
+    pub text: Option<TextAlias>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_direct_text",
+        default
+    )]
+    pub direct_text: Option<NullableText>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_wrapped_text",
+        default
+    )]
+    pub wrapped_text: Option<WrappedText>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_inline_wrapped_text",
+        default
+    )]
+    pub inline_wrapped_text: Option<TextAlias>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_nested_text",
+        default
+    )]
+    pub nested_text: Option<Nullable<String>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_nested_plain_text",
+        default
+    )]
+    pub nested_plain_text: Option<Nullable<PlainText>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_reference",
+        default
+    )]
+    pub reference: Option<Nullable<Plain>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_inline",
+        default
+    )]
+    pub inline: Option<Nullable<AccountInline>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_custom",
+        default
+    )]
+    pub custom: Option<Nullable<String>>,
+    #[serde(skip)]
+    pub skipped: Option<Nullable<String>>,
+    #[serde(skip)]
+    pub local: Option<std::time::Instant>,
+    #[serde(skip)]
+    pub skipped_default: String,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_custom_allof",
+        default
+    )]
+    pub custom_allof: Option<Nullable<i64>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_custom_chain",
+        default
+    )]
+    pub custom_chain: Option<CustomChain>,
+    #[serde(default = "Account::default_fallback")]
+    pub fallback: Nullable<String>,
+    #[serde(default = "Account::default_enum_default")]
+    pub enum_default: Nullable<AccountEnumDefault>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Account::validate_null_default",
+        default
+    )]
+    pub null_default: Option<Nullable<String>>,
+}
+impl Account {
+    /// The rules the document gives `nickname`, checked on the way in.
+    fn validate_nickname<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+    /// The rules the document gives `plain`, checked on the way in.
+    fn validate_plain<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Plain>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<Plain as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+    /// The rules the document gives `plain_state`, checked on the way in.
+    fn validate_plain_state<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<AccountPlainState>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <AccountPlainState as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `patch`, checked on the way in.
+    fn validate_patch<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`patch` must hold 2 or more characters",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `bounded`, checked on the way in.
+    fn validate_bounded<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<u64>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<u64> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if *item < 1 {
+                        return Err(
+                            serde::de::Error::custom("`bounded` must be 1 or more"),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `only_null`, checked on the way in.
+    fn validate_only_null<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<u64>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<u64> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if {
+                        let _ = item;
+                        true
+                    } {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`only_null` has no non-null value within the declared bounds",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `out_of_range`, checked on the way in.
+    fn validate_out_of_range<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<i32>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<i32> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if {
+                        let _ = item;
+                        true
+                    } {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`out_of_range` has no non-null value within the declared bounds",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `labels`, checked on the way in.
+    fn validate_labels<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<Nullable<String>>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Vec<Nullable<String>> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if {
+                    let mut seen = std::collections::HashSet::with_capacity(item.len());
+                    item.iter().any(|entry| return !seen.insert(entry))
+                } {
+                    return Err(
+                        serde::de::Error::custom("`labels` must not repeat an item"),
+                    );
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `values`, checked on the way in.
+    fn validate_values<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<
+        Option<std::collections::HashMap<String, NullableText>>,
+        D::Error,
+    >
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <std::collections::HashMap<
+                String,
+                NullableText,
+            > as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `nullable_list`, checked on the way in.
+    fn validate_nullable_list<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<Vec<String>>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<Vec<String>> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.len() < 1usize {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`nullable_list` must hold 1 or more items",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `nullable_map`, checked on the way in.
+    fn validate_nullable_map<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<
+        Option<Nullable<std::collections::HashMap<String, String>>>,
+        D::Error,
+    >
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<
+                std::collections::HashMap<String, String>,
+            > as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.len() < 1usize {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`nullable_map` must hold 1 or more properties",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The `default` the document gives `empty_list`.
+    fn default_empty_list() -> Nullable<Vec<String>> {
+        Nullable::Value(Default::default())
+    }
+    /// The rules the document gives `ignored_default`, checked on the way in.
+    fn validate_ignored_default<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<Vec<String>>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<Vec<String>> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `child`, checked on the way in.
+    fn validate_child<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Node>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<Node as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+    /// The rules the document gives `state`, checked on the way in.
+    fn validate_state<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<NullableState>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <NullableState as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `text`, checked on the way in.
+    fn validate_text<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<TextAlias>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<TextAlias as serde::Deserialize>::deserialize(deserializer)?);
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`text` must hold 2 or more characters",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `direct_text`, checked on the way in.
+    fn validate_direct_text<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<NullableText>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <NullableText as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`direct_text` must hold 2 or more characters",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `wrapped_text`, checked on the way in.
+    fn validate_wrapped_text<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<WrappedText>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <WrappedText as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`wrapped_text` must hold 2 or more characters",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `inline_wrapped_text`, checked on the way in.
+    fn validate_inline_wrapped_text<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<TextAlias>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<TextAlias as serde::Deserialize>::deserialize(deserializer)?);
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`inline_wrapped_text` must hold 2 or more characters",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `nested_text`, checked on the way in.
+    fn validate_nested_text<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`nested_text` must hold 2 or more characters",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `nested_plain_text`, checked on the way in.
+    fn validate_nested_plain_text<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<PlainText>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<PlainText> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if let Some(item) = item.as_ref() {
+                    if item.chars().nth(1usize).is_none() {
+                        return Err(
+                            serde::de::Error::custom(
+                                "`nested_plain_text` must hold 2 or more characters",
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `reference`, checked on the way in.
+    fn validate_reference<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<Plain>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<Plain> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `inline`, checked on the way in.
+    fn validate_inline<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<AccountInline>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<AccountInline> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `custom`, checked on the way in.
+    fn validate_custom<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `custom_allof`, checked on the way in.
+    fn validate_custom_allof<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<i64>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<i64> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `custom_chain`, checked on the way in.
+    fn validate_custom_chain<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<CustomChain>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <CustomChain as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The `default` the document gives `fallback`.
+    fn default_fallback() -> Nullable<String> {
+        Nullable::Value("fallback".to_owned())
+    }
+    /// The `default` the document gives `enum_default`.
+    fn default_enum_default() -> Nullable<AccountEnumDefault> {
+        Nullable::Value(AccountEnumDefault::Active)
+    }
+    /// The rules the document gives `null_default`, checked on the way in.
+    fn validate_null_default<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct Plain {
+    pub name: String,
+}
+
+pub type PlainText = String;
+
+pub type CustomChain = CustomAllOf;
+
+pub type CustomAllOf = Nullable<i64>;
+
+pub type NullableText = Nullable<String>;
+
+pub type TextAlias = NullableText;
+
+pub type WrappedText = TextAlias;
+
+pub type NullableCode = Nullable<NullableCodeValue>;
+
+pub type NullableState = Nullable<NullableStateValue>;
+
+pub type Node = Nullable<NullableNodeValue>;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct RequiredValues {
+    pub plain: String,
+    #[serde(deserialize_with = "RequiredValues::validate_text")]
+    pub text: WrappedText,
+    pub state: NullableState,
+    pub node: Node,
+    #[serde(deserialize_with = "RequiredValues::validate_bounded")]
+    pub bounded: Nullable<u64>,
+    pub defaulted: Nullable<String>,
+}
+impl RequiredValues {
+    /// The rules the document gives `text`, checked on the way in.
+    fn validate_text<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<WrappedText, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <WrappedText as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if item.chars().nth(1usize).is_none() {
+                    return Err(
+                        serde::de::Error::custom("`text` must hold 2 or more characters"),
+                    );
+                }
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `bounded`, checked on the way in.
+    fn validate_bounded<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Nullable<u64>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <Nullable<u64> as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if *item < 1 {
+                    return Err(serde::de::Error::custom("`bounded` must be 1 or more"));
+                }
+            }
+        }
+        return Ok(value);
+    }
+}
+
+pub type NullableUnion = Nullable<NullableUnionValue>;
+
+/// The request shape of `DirectionalValue`. A `readOnly` property is not part of it.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct DirectionalValueRequest {
+    pub secret: String,
+    pub value: Nullable<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "DirectionalValueRequest::validate_next",
+        default
+    )]
+    pub next: Option<Box<DirectionalRequest>>,
+}
+impl DirectionalValueRequest {
+    /// The rules the document gives `next`, checked on the way in.
+    fn validate_next<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Box<DirectionalRequest>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Box<DirectionalRequest> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+}
+
+/// The response shape of `DirectionalValue`. A `writeOnly` property is not part of it.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct DirectionalValueResponse {
+    pub id: String,
+    pub value: Nullable<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "DirectionalValueResponse::validate_next",
+        default
+    )]
+    pub next: Option<Box<DirectionalResponse>>,
+}
+impl DirectionalValueResponse {
+    /// The rules the document gives `next`, checked on the way in.
+    fn validate_next<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Box<DirectionalResponse>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Box<DirectionalResponse> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum AccountPlainState {
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "inactive")]
+    Inactive,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct AccountInline {
+    pub name: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum AccountEnumDefault {
+    #[serde(rename = "active")]
+    Active,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(try_from = "i64", into = "i64")]
+#[repr(i64)]
+pub enum NullableCodeValue {
+    Value1 = 1,
+    Value2 = 2,
+}
+impl From<NullableCodeValue> for i64 {
+    fn from(value: NullableCodeValue) -> Self {
+        return match value {
+            NullableCodeValue::Value1 => 1,
+            NullableCodeValue::Value2 => 2,
+        };
+    }
+}
+impl TryFrom<i64> for NullableCodeValue {
+    type Error = String;
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        return match value {
+            1 => Ok(NullableCodeValue::Value1),
+            2 => Ok(NullableCodeValue::Value2),
+            other => {
+                Err(format!("`{}` is not a value of `{}`", other, "NullableCodeValue"))
+            }
+        };
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum NullableStateValue {
+    #[serde(rename = "active")]
+    Enabled,
+    #[serde(rename = "inactive")]
+    Disabled,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct NullableNodeValue {
+    pub name: String,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "NullableNodeValue::validate_child",
+        default
+    )]
+    pub child: Option<Box<Node>>,
+}
+impl NullableNodeValue {
+    /// The rules the document gives `child`, checked on the way in.
+    fn validate_child<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Box<Node>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<Box<Node> as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum NullableUnionValue {
+    String(String),
+    I64(i64),
 }

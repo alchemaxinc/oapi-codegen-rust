@@ -71,7 +71,7 @@ pub fn emit_package(
 
     let mut package = Builder::new(stem);
 
-    let models = super::module_items(module, &derives)?;
+    let models = super::module_items(module, &derives, super::uses_nullable(module, Some(service)))?;
     let has_models = !models.is_empty();
     package.add(MODELS, models)?;
     package.add(SERVER_URLS, super::server_url_items(server_urls)?)?;

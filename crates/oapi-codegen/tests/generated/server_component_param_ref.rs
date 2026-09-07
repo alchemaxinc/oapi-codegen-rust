@@ -11,8 +11,24 @@
 
 #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct GetWidgetQuery {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "GetWidgetQuery::validate_verbose",
+        default
+    )]
     pub verbose: Option<bool>,
+}
+impl GetWidgetQuery {
+    /// The rules the document gives `verbose`, checked on the way in.
+    fn validate_verbose<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<bool>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<bool as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(Debug, Clone)]

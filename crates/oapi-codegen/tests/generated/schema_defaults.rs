@@ -9,6 +9,74 @@
     reason = "generated code, not first-party source"
 )]
 
+/// A present JSON value, including explicit null.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(untagged)]
+pub enum Nullable<T> {
+    /// Explicit JSON null.
+    #[default]
+    Null,
+    /// A non-null value.
+    Value(T),
+}
+impl<T> Nullable<T> {
+    /// Borrow the non-null value.
+    pub fn as_ref(&self) -> Option<&T> {
+        return match self {
+            Self::Null => None,
+            Self::Value(value) => Some(value),
+        };
+    }
+}
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct NullableVisitor<T>(::core::marker::PhantomData<T>);
+        impl<'de, T: serde::Deserialize<'de>> serde::de::Visitor<'de>
+        for NullableVisitor<T> {
+            type Value = Nullable<T>;
+            fn expecting(
+                &self,
+                formatter: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
+                return formatter.write_str("a present value or null");
+            }
+            fn visit_newtype_struct<D>(
+                self,
+                deserializer: D,
+            ) -> ::core::result::Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                return <Option<T> as serde::Deserialize>::deserialize(deserializer)
+                    .map(|value| {
+                        return match value {
+                            Some(value) => Nullable::Value(value),
+                            None => Nullable::Null,
+                        };
+                    });
+            }
+            fn visit_map<M>(
+                self,
+                map: M,
+            ) -> ::core::result::Result<Self::Value, M::Error>
+            where
+                M: serde::de::MapAccess<'de>,
+            {
+                return T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(Nullable::Value);
+            }
+        }
+        return deserializer
+            .deserialize_newtype_struct(
+                "Nullable",
+                NullableVisitor(::core::marker::PhantomData),
+            );
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum Status {
     #[serde(rename = "in-progress")]
@@ -37,11 +105,19 @@ pub struct Widget {
     pub attributes: std::collections::HashMap<String, String>,
     #[serde(default = "Widget::default_state")]
     pub state: WidgetState,
-    #[serde(skip_serializing_if = "Option::is_none", default = "Widget::default_note")]
-    pub note: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cleared: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default = "Widget::default_note")]
+    pub note: Nullable<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Widget::validate_cleared",
+        default
+    )]
+    pub cleared: Option<Nullable<String>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Widget::validate_extra",
+        default
+    )]
     pub extra: Option<String>,
 }
 impl Widget {
@@ -78,8 +154,30 @@ impl Widget {
         WidgetState::InProgress
     }
     /// The `default` the document gives `note`.
-    fn default_note() -> Option<String> {
-        Some("none given".to_owned())
+    fn default_note() -> Nullable<String> {
+        Nullable::Value("none given".to_owned())
+    }
+    /// The rules the document gives `cleared`, checked on the way in.
+    fn validate_cleared<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Nullable<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Nullable<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `extra`, checked on the way in.
+    fn validate_extra<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
     }
 }
 

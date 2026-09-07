@@ -17,6 +17,22 @@ pub struct Order {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct OrderShipping {
     pub street: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "OrderShipping::validate_note",
+        default
+    )]
     pub note: Option<String>,
+}
+impl OrderShipping {
+    /// The rules the document gives `note`, checked on the way in.
+    fn validate_note<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }

@@ -16,14 +16,54 @@ pub struct Base {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Timestamped {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Timestamped::validate_created_at",
+        default
+    )]
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+impl Timestamped {
+    /// The rules the document gives `created_at`, checked on the way in.
+    fn validate_created_at<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<chrono::DateTime<chrono::Utc>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <chrono::DateTime<
+                chrono::Utc,
+            > as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Entity {
     pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Entity::validate_created_at",
+        default
+    )]
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub name: String,
+}
+impl Entity {
+    /// The rules the document gives `created_at`, checked on the way in.
+    fn validate_created_at<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<chrono::DateTime<chrono::Utc>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <chrono::DateTime<
+                chrono::Utc,
+            > as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
