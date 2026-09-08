@@ -19,9 +19,43 @@ pub struct Dog {
     pub bark: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Pet {
     Cat(Cat),
     Dog(Dog),
+}
+impl<'de> serde::Deserialize<'de> for Pet {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <Cat as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Cat(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <Dog as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Dog(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
+    }
 }

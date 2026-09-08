@@ -986,9 +986,43 @@ impl NullableNodeValue {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum NullableUnionValue {
     String(String),
     I64(i64),
+}
+impl<'de> serde::Deserialize<'de> for NullableUnionValue {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <String as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::String(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <i64 as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::I64(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
+    }
 }

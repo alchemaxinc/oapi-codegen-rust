@@ -271,13 +271,10 @@ pub enum EnumKind {
         /// The permitted values, in document order.
         variants: Vec<IntegerVariant>,
     },
-    /// A `#[serde(untagged)]` union over the given newtype variants.
-    ///
-    /// Untagged (rather than internally tagged) is used even when the OpenAPI
-    /// schema has a discriminator: OpenAPI variant schemas typically carry the
-    /// discriminator property themselves, which is incompatible with serde's
-    /// internally-tagged representation.
+    /// A tag-free enum whose deserializer requires exactly one Rust payload match.
     Union(Vec<UnionVariant>),
+    /// A raw JSON wrapper with typed views and directional deserialization checks.
+    AnyOf(Vec<UnionVariant>),
 }
 
 /// A unit variant of a string enum.

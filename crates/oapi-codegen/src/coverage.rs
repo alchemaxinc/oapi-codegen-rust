@@ -539,8 +539,10 @@ impl Sweep<'_> {
         }
         if matches!(context, Context::Schema | Context::PropertySchema) {
             match key {
-                "oneOf" => self.warn(path, "oneOf uses first-match deserialization, not exclusive matching"),
-                "anyOf" => self.warn(path, "anyOf retains only the first matching representation"),
+                "oneOf" | "anyOf" => self.warn(
+                    path,
+                    "Rust deserialization checks do not enforce all schema constraints, which can affect union match counts",
+                ),
                 "allOf"
                     if value.as_sequence().is_some_and(|members| {
                         return match members.as_slice() {
@@ -915,6 +917,12 @@ security: [{arbitrary: [custom]}]
                     .any(|warning| return warning.path.ends_with(keyword)),
                 "{schema}",
             );
+            if matches!(keyword, "oneOf" | "anyOf") {
+                assert!(sweep.warnings.iter().any(|warning| {
+                    return warning.message.contains("Rust deserialization checks")
+                        && warning.message.contains("can affect union match counts");
+                }));
+            }
         }
     }
 

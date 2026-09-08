@@ -9,6 +9,210 @@
     reason = "generated code, not first-party source"
 )]
 
+/// The request shape of `UnionEnvelope`.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct UnionEnvelopeRequest {
+    pub exclusive: ExclusiveAccountRequest,
+    pub inclusive: InclusiveAccountRequest,
+}
+
+/// The response shape of `UnionEnvelope`.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct UnionEnvelopeResponse {
+    pub exclusive: ExclusiveAccountResponse,
+    pub inclusive: InclusiveAccountResponse,
+}
+
+/// The request shape of `ExclusiveAccount`.
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum ExclusiveAccountRequest {
+    Account(AccountRequest),
+    Bool(bool),
+}
+impl<'de> serde::Deserialize<'de> for ExclusiveAccountRequest {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <AccountRequest as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Account(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <bool as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Bool(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
+    }
+}
+
+/// The response shape of `ExclusiveAccount`.
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum ExclusiveAccountResponse {
+    Account(AccountResponse),
+    Bool(bool),
+}
+impl<'de> serde::Deserialize<'de> for ExclusiveAccountResponse {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <AccountResponse as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Account(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <bool as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Bool(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
+    }
+}
+
+/// The request shape of `InclusiveAccount`.
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+#[serde(transparent)]
+pub struct InclusiveAccountRequest {
+    value: serde_json::Value,
+}
+impl InclusiveAccountRequest {
+    /// Borrow the complete JSON value.
+    pub fn as_value(&self) -> &serde_json::Value {
+        return &self.value;
+    }
+    /// Consume the wrapper and return the complete JSON value.
+    pub fn into_value(self) -> serde_json::Value {
+        return self.value;
+    }
+    ///Decode the `Account` Rust alternative.
+    pub fn as_account(
+        &self,
+    ) -> ::std::result::Result<AccountRequest, serde_json::Error> {
+        return <AccountRequest as serde::Deserialize>::deserialize(&self.value);
+    }
+    ///Decode the `Bool` Rust alternative.
+    pub fn as_bool(&self) -> ::std::result::Result<bool, serde_json::Error> {
+        return <bool as serde::Deserialize>::deserialize(&self.value);
+    }
+}
+impl ::std::convert::TryFrom<serde_json::Value> for InclusiveAccountRequest {
+    type Error = serde_json::Error;
+    fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
+        if !(<AccountRequest as serde::Deserialize>::deserialize(&value).is_ok()
+            || <bool as serde::Deserialize>::deserialize(&value).is_ok())
+        {
+            return ::std::result::Result::Err(
+                <serde_json::Error as serde::de::Error>::custom(
+                    "anyOf matched no Rust alternative",
+                ),
+            );
+        }
+        return ::std::result::Result::Ok(Self { value });
+    }
+}
+impl<'de> serde::Deserialize<'de> for InclusiveAccountRequest {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        return <Self as ::std::convert::TryFrom<serde_json::Value>>::try_from(value)
+            .map_err(serde::de::Error::custom);
+    }
+}
+
+/// The response shape of `InclusiveAccount`.
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+#[serde(transparent)]
+pub struct InclusiveAccountResponse {
+    value: serde_json::Value,
+}
+impl InclusiveAccountResponse {
+    /// Borrow the complete JSON value.
+    pub fn as_value(&self) -> &serde_json::Value {
+        return &self.value;
+    }
+    /// Consume the wrapper and return the complete JSON value.
+    pub fn into_value(self) -> serde_json::Value {
+        return self.value;
+    }
+    ///Decode the `Account` Rust alternative.
+    pub fn as_account(
+        &self,
+    ) -> ::std::result::Result<AccountResponse, serde_json::Error> {
+        return <AccountResponse as serde::Deserialize>::deserialize(&self.value);
+    }
+    ///Decode the `Bool` Rust alternative.
+    pub fn as_bool(&self) -> ::std::result::Result<bool, serde_json::Error> {
+        return <bool as serde::Deserialize>::deserialize(&self.value);
+    }
+}
+impl ::std::convert::TryFrom<serde_json::Value> for InclusiveAccountResponse {
+    type Error = serde_json::Error;
+    fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
+        if !(<AccountResponse as serde::Deserialize>::deserialize(&value).is_ok()
+            || <bool as serde::Deserialize>::deserialize(&value).is_ok())
+        {
+            return ::std::result::Result::Err(
+                <serde_json::Error as serde::de::Error>::custom(
+                    "anyOf matched no Rust alternative",
+                ),
+            );
+        }
+        return ::std::result::Result::Ok(Self { value });
+    }
+}
+impl<'de> serde::Deserialize<'de> for InclusiveAccountResponse {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        return <Self as ::std::convert::TryFrom<serde_json::Value>>::try_from(value)
+            .map_err(serde::de::Error::custom);
+    }
+}
+
 /// An account, used as a request body and as a response body.
 ///
 /// The request shape of `Account`. A `readOnly` property is not part of it.
@@ -49,6 +253,12 @@ pub struct AccountFilter {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct AuditEntry {
     pub action: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExchangeUnionResponse {
+    /// The union response.
+    Ok(UnionEnvelopeResponse),
 }
 
 /// List every account.
@@ -144,6 +354,10 @@ where
 
 /// Server behaviour: implement one method per operation.
 pub trait Api: Clone + Send + Sync + 'static {
+    fn exchange_union(
+        &self,
+        body: UnionEnvelopeRequest,
+    ) -> impl std::future::Future<Output = ExchangeUnionResponse> + Send;
     /// List every account.
     fn list_accounts(
         &self,
@@ -166,6 +380,22 @@ pub trait Api: Clone + Send + Sync + 'static {
         account_id: String,
         body: UploadAvatarMultipart,
     ) -> impl std::future::Future<Output = UploadAvatarResponse> + Send;
+}
+
+impl axum::response::IntoResponse for ExchangeUnionResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            ExchangeUnionResponse::Ok(body) => {
+                const STATUS: axum::http::StatusCode = match axum::http::StatusCode::from_u16(
+                    200,
+                ) {
+                    Ok(status) => status,
+                    Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
+                };
+                (STATUS, axum::Json(body)).into_response()
+            }
+        }
+    }
 }
 
 impl axum::response::IntoResponse for ListAccountsResponse {
@@ -251,6 +481,7 @@ impl axum::response::IntoResponse for UploadAvatarResponse {
 /// Build an axum `Router` that dispatches each route to `api`.
 pub fn router<T: Api>(api: T) -> axum::Router {
     axum::Router::new()
+        .route("/union", axum::routing::post(exchange_union_handler::<T>))
         .route(
             "/accounts",
             axum::routing::get(list_accounts_handler::<T>)
@@ -263,6 +494,13 @@ pub fn router<T: Api>(api: T) -> axum::Router {
             axum::routing::put(upload_avatar_handler::<T>),
         )
         .with_state(api)
+}
+
+async fn exchange_union_handler<T: Api>(
+    axum::extract::State(api): axum::extract::State<T>,
+    axum::Json(body): axum::Json<UnionEnvelopeRequest>,
+) -> ExchangeUnionResponse {
+    api.exchange_union(body).await
 }
 
 async fn list_accounts_handler<T: Api>(
@@ -383,6 +621,21 @@ impl Client {
             base_url: base_url.into(),
             http,
         };
+    }
+    pub fn exchange_union(
+        &self,
+        body: UnionEnvelopeRequest,
+    ) -> Result<ExchangeUnionResponse, ClientError> {
+        let url = format!("{}/union", self.base_url);
+        let mut request = self.http.request(reqwest::Method::POST, url);
+        request = request.json(&body);
+        let response = request.send()?;
+        let status = response.status();
+        if status.as_u16() == 200 {
+            let body: UnionEnvelopeResponse = response.json()?;
+            return Ok(ExchangeUnionResponse::Ok(body));
+        }
+        return Err(ClientError::UnexpectedStatus(status));
     }
     /// List every account.
     pub fn list_accounts(&self) -> Result<ListAccountsResponse, ClientError> {

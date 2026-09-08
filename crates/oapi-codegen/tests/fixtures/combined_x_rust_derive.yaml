@@ -83,6 +83,14 @@ components:
           type: string
         opaque:
           $ref: "#/components/schemas/Opaque"
+        exclusive:
+          oneOf:
+            - $ref: "#/components/schemas/Opaque"
+            - type: boolean
+        inclusive:
+          anyOf:
+            - $ref: "#/components/schemas/Opaque"
+            - type: boolean
     UploadRequest:
       type: object
       required: [opaque, note]

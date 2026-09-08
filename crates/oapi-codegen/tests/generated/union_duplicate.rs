@@ -10,22 +10,17 @@
 )]
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Card {
-    pub number: String,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct Bank {
-    pub iban: String,
+pub struct Cat {
+    pub meow: String,
 }
 
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
-pub enum Payment {
-    Card(Card),
-    Bank(Bank),
+pub enum Pet {
+    Cat(Cat),
+    Cat2(Cat),
 }
-impl<'de> serde::Deserialize<'de> for Payment {
+impl<'de> serde::Deserialize<'de> for Pet {
     fn deserialize<__Deserializer: serde::Deserializer<'de>>(
         deserializer: __Deserializer,
     ) -> ::std::result::Result<Self, __Deserializer::Error> {
@@ -33,7 +28,7 @@ impl<'de> serde::Deserialize<'de> for Payment {
             deserializer,
         )?;
         let mut selected = ::std::option::Option::None;
-        if let ::std::result::Result::Ok(payload) = <Card as serde::Deserialize>::deserialize(
+        if let ::std::result::Result::Ok(payload) = <Cat as serde::Deserialize>::deserialize(
             &value,
         ) {
             if selected.is_some() {
@@ -41,9 +36,9 @@ impl<'de> serde::Deserialize<'de> for Payment {
                     serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
                 );
             }
-            selected = ::std::option::Option::Some(Self::Card(payload));
+            selected = ::std::option::Option::Some(Self::Cat(payload));
         }
-        if let ::std::result::Result::Ok(payload) = <Bank as serde::Deserialize>::deserialize(
+        if let ::std::result::Result::Ok(payload) = <Cat as serde::Deserialize>::deserialize(
             &value,
         ) {
             if selected.is_some() {
@@ -51,7 +46,7 @@ impl<'de> serde::Deserialize<'de> for Payment {
                     serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
                 );
             }
-            selected = ::std::option::Option::Some(Self::Bank(payload));
+            selected = ::std::option::Option::Some(Self::Cat2(payload));
         }
         return selected
             .ok_or_else(|| serde::de::Error::custom(

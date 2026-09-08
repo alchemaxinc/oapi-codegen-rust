@@ -38,11 +38,11 @@ use crate::naming::to_ident;
 
 /// Box every field and variant of `module` that closes a type cycle.
 ///
-/// Fails when a cycle runs only through aliases, because a `Box` there still
-/// expands forever.
+/// Reject alias-only cycles and union cycles that consume no input.
 pub fn box_recursive_types(module: &mut Module) -> Result<()> {
     let graph = Graph::of(module);
     graph.check_alias_cycles()?;
+    graph.check_union_cycles(module)?;
 
     for item in &mut module.items {
         let owner = canonical(item.name());
@@ -53,7 +53,7 @@ pub fn box_recursive_types(module: &mut Module) -> Result<()> {
                 }
             }
             Item::Enum(enumeration) => {
-                if let EnumKind::Union(variants) = &mut enumeration.kind {
+                if let EnumKind::Union(variants) | EnumKind::AnyOf(variants) = &mut enumeration.kind {
                     for variant in variants {
                         box_held(&mut variant.ty, &owner, &graph);
                     }
@@ -110,7 +110,7 @@ impl Graph {
                     }
                 }
                 Item::Enum(enumeration) => {
-                    if let EnumKind::Union(variants) = &enumeration.kind {
+                    if let EnumKind::Union(variants) | EnumKind::AnyOf(variants) = &enumeration.kind {
                         for variant in variants {
                             collect_held(&variant.ty, &mut targets);
                         }
@@ -172,6 +172,37 @@ impl Graph {
                        can box, or break the chain of `$ref`s."
                     .to_owned(),
             });
+        }
+        return Ok(());
+    }
+
+    fn check_union_cycles(&self, module: &Module) -> Result<()> {
+        // Object properties consume input; transparent union and alias edges do not.
+        let edges: Vec<Vec<usize>> = self
+            .edges
+            .iter()
+            .zip(&module.items)
+            .map(|(targets, item)| {
+                return if matches!(item, Item::Struct(_)) {
+                    Vec::new()
+                } else {
+                    targets.clone()
+                };
+            })
+            .collect();
+        let component = components(&edges);
+        for (node, targets) in edges.iter().enumerate() {
+            if !self.is_alias(node)
+                && targets
+                    .iter()
+                    .any(|target| return component.get(node) == component.get(*target))
+            {
+                return Err(Error::UnsupportedSchema {
+                    path: self.name_of(node),
+                    reason: "union recursion must pass through an object property or array element to consume input"
+                        .to_owned(),
+                });
+            }
         }
         return Ok(());
     }
@@ -539,25 +570,27 @@ mod tests {
         assert_eq!(field_type(&module, "Holder"), named("Node"));
     }
 
-    /// A union variant holds its type the way a field does, so it is boxed too.
     #[test]
-    fn a_union_variant_that_holds_its_own_enum_is_boxed() {
+    fn a_union_cycle_through_an_object_is_boxed() {
         let mut module = Module {
-            items: vec![Item::Enum(Enum {
-                name: to_ident("Expression", Case::Pascal),
-                doc: None,
-                deprecated: None,
-                kind: EnumKind::Union(vec![
-                    UnionVariant {
-                        name: to_ident("Text", Case::Pascal),
-                        ty: RustType::String,
-                    },
-                    UnionVariant {
-                        name: to_ident("Nested", Case::Pascal),
-                        ty: named("Expression"),
-                    },
-                ]),
-            })],
+            items: vec![
+                Item::Enum(Enum {
+                    name: to_ident("Expression", Case::Pascal),
+                    doc: None,
+                    deprecated: None,
+                    kind: EnumKind::Union(vec![
+                        UnionVariant {
+                            name: to_ident("Text", Case::Pascal),
+                            ty: RustType::String,
+                        },
+                        UnionVariant {
+                            name: to_ident("Nested", Case::Pascal),
+                            ty: named("Nested"),
+                        },
+                    ]),
+                }),
+                one_field("Nested", "expression", named("Expression")),
+            ],
         };
         box_recursive_types(&mut module).expect("no alias cycle in this module");
         let Item::Enum(enumeration) = &module.items[0] else {
@@ -567,7 +600,50 @@ mod tests {
             panic!("the enum is a union");
         };
         assert_eq!(variants[0].ty, RustType::String);
-        assert_eq!(variants[1].ty, boxed(named("Expression")));
+        assert_eq!(variants[1].ty, boxed(named("Nested")));
+        assert_eq!(field_type(&module, "Nested"), boxed(named("Expression")));
+    }
+
+    #[test]
+    fn non_consuming_union_cycles_are_rejected() {
+        for inclusive in [false, true] {
+            for through_alias in [false, true] {
+                let variants = vec![
+                    UnionVariant {
+                        name: to_ident("Text", Case::Pascal),
+                        ty: RustType::String,
+                    },
+                    UnionVariant {
+                        name: to_ident("Loop", Case::Pascal),
+                        ty: named(if through_alias { "Alias" } else { "Loop" }),
+                    },
+                ];
+                let mut module = Module {
+                    items: vec![Item::Enum(Enum {
+                        name: to_ident("Loop", Case::Pascal),
+                        doc: None,
+                        deprecated: None,
+                        kind: if inclusive {
+                            EnumKind::AnyOf(variants)
+                        } else {
+                            EnumKind::Union(variants)
+                        },
+                    })],
+                };
+                if through_alias {
+                    module.items.push(Item::Alias(Alias {
+                        name: to_ident("Alias", Case::Pascal),
+                        doc: None,
+                        deprecated: None,
+                        ty: named("Loop"),
+                    }));
+                }
+                assert!(matches!(
+                    box_recursive_types(&mut module),
+                    Err(Error::UnsupportedSchema { .. })
+                ));
+            }
+        }
     }
 
     /// An alias offers nothing to box, so a cycle running through one is broken

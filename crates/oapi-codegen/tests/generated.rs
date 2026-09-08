@@ -400,6 +400,8 @@ mod generated {
     pub mod client_negotiated_request;
     #[path = "client_negotiated_response.rs"]
     pub mod client_negotiated_response;
+    #[path = "client_union_traits.rs"]
+    pub mod client_union_traits;
     #[path = "client_widgets.rs"]
     pub mod client_widgets;
     #[path = "combined_inline_nullable.rs"]
@@ -442,6 +444,14 @@ mod generated {
     pub mod package_combined_inline_nullable;
     #[path = "package_nullable.rs"]
     pub mod package_nullable;
+    #[path = "server_union_traits.rs"]
+    pub mod server_union_traits;
+    #[path = "union_duplicate.rs"]
+    pub mod union_duplicate;
+    #[path = "union_prelude_names.rs"]
+    pub mod union_prelude_names;
+    #[path = "union_semantics.rs"]
+    pub mod union_semantics;
 
     #[path = "compose_shared.rs"]
     pub mod compose_shared;
@@ -542,6 +552,216 @@ mod generated {
     pub mod package_combined_x_rust_derive;
 }
 
+#[test]
+fn union_models_do_not_shadow_prelude_traits_or_types() {
+    use generated::union_prelude_names::PreludeAny;
+    use generated::union_prelude_names::PreludeOne;
+    use generated::union_prelude_names::Result;
+    use generated::union_prelude_names::TryFrom;
+
+    let text: TryFrom = "text".to_owned();
+    let other: Result = text.clone();
+    assert!(serde_json::from_value::<PreludeOne>(serde_json::json!(text)).is_ok());
+    assert!(serde_json::from_value::<PreludeOne>(serde_json::json!(true)).is_ok());
+    let model = PreludeAny::try_from(serde_json::json!(other)).expect("string alternative matches");
+    assert_eq!(model.as_result().expect("decode string"), "text");
+    assert!(serde_json::from_str::<PreludeAny>("false").is_ok());
+    assert!(PreludeAny::try_from(serde_json::json!(42_i32)).is_err());
+}
+
+#[test]
+fn oneof_counts_successful_rust_deserializations() {
+    use generated::union_semantics::Numeric;
+
+    for json in ["null", "true", "\"text\"", "1"] {
+        assert!(serde_json::from_str::<Numeric>(json).is_err(), "{json}");
+    }
+    for json in ["1.0", "1.5"] {
+        assert!(matches!(
+            serde_json::from_str::<Numeric>(json).expect("only f64 decodes"),
+            Numeric::F64(_)
+        ));
+    }
+}
+
+#[test]
+fn oneof_disjoint_schema_bounds_remain_ambiguous_rust_aliases() {
+    use generated::union_semantics::High;
+    use generated::union_semantics::Low;
+    use generated::union_semantics::Ranges;
+
+    for value in [0_u64, 10, 11, 20, 21] {
+        let json = serde_json::json!(value);
+        assert!(serde_json::from_value::<Low>(json.clone()).is_ok());
+        assert!(serde_json::from_value::<High>(json.clone()).is_ok());
+        assert!(serde_json::from_value::<Ranges>(json).is_err(), "{value}");
+    }
+}
+
+#[test]
+fn oneof_checks_required_properties_and_closed_objects() {
+    use generated::union_semantics::ClosedChoice;
+    use generated::union_semantics::Objects;
+
+    for json in [r#"{}"#, r#"{"left":"a","right":"b"}"#, r#"{"left":null}"#] {
+        assert!(serde_json::from_str::<Objects>(json).is_err(), "{json}");
+    }
+    assert!(serde_json::from_str::<Objects>(r#"{"left":"a","extra":42}"#).is_ok());
+    assert!(serde_json::from_str::<ClosedChoice>(r#"{"left":"a","extra":42}"#).is_err());
+    assert!(serde_json::from_str::<ClosedChoice>(r#"{"left":"a","right":"b"}"#).is_ok());
+}
+
+#[test]
+fn union_decoding_checks_nested_unions_enums_and_merged_objects() {
+    use generated::union_semantics::Colors;
+    use generated::union_semantics::Composed;
+    use generated::union_semantics::Nested;
+    use generated::union_semantics::NestedAny;
+
+    for json in [r#""blue""#, r#""unknown""#, "42"] {
+        assert!(serde_json::from_str::<Colors>(json).is_err(), "{json}");
+        assert!(serde_json::from_str::<Nested>(json).is_err(), "{json}");
+    }
+    for json in [r#""red""#, r#""green""#] {
+        assert!(serde_json::from_str::<Colors>(json).is_ok(), "{json}");
+        assert!(serde_json::from_str::<Nested>(json).is_ok(), "{json}");
+    }
+    assert!(serde_json::from_str::<Nested>("true").is_ok());
+    assert!(serde_json::from_str::<NestedAny>(r#"{"left":"a","right":"b"}"#).is_ok());
+    assert!(serde_json::from_str::<Composed>(r#"{"left":"a","tag":"tagged"}"#).is_ok());
+    for json in [r#"{"left":"a"}"#, r#"{"left":"a","tag":"wrong"}"#] {
+        assert!(serde_json::from_str::<Composed>(json).is_err(), "{json}");
+    }
+}
+
+#[test]
+fn discriminator_and_duplicate_alternatives_do_not_hide_overlap() {
+    use generated::union_duplicate::Pet;
+    use generated::union_semantics::Discriminated;
+    use generated::union_semantics::DuplicateAny;
+
+    assert!(serde_json::from_str::<Pet>(r#"{"meow":"yes"}"#).is_err());
+    assert!(serde_json::from_str::<Pet>("{}").is_err());
+    assert!(serde_json::from_str::<DuplicateAny>(r#"{"left":"a","extra":1}"#).is_ok());
+    assert!(serde_json::from_str::<Discriminated>(r#"{"kind":"chosen","left":"a","right":"b"}"#).is_err());
+    assert!(serde_json::from_str::<Discriminated>(r#"{"right":"b"}"#).is_ok());
+    let chosen: Discriminated =
+        serde_json::from_str(r#"{"left":"a"}"#).expect("mapping does not require a discriminator");
+    assert!(matches!(&chosen, Discriminated::Chosen(_)));
+    assert_eq!(
+        serde_json::to_value(chosen).expect("serialize without added discriminator"),
+        serde_json::json!({"left":"a"})
+    );
+}
+
+#[test]
+fn anyof_preserves_the_entire_json_value_and_exposes_all_matching_views() {
+    use generated::union_semantics::RawObjects;
+
+    let value = serde_json::json!({"left":"a","right":"b","extra":{"array":[null,true,1.5_f64]}});
+    let model = RawObjects::try_from(value.clone()).expect("both alternatives match");
+    assert_eq!(model.as_value(), &value);
+    assert_eq!(model.as_left().expect("left view").left, "a");
+    assert_eq!(model.as_right().expect("right view").right, "b");
+    assert_eq!(serde_json::to_value(&model).expect("serialize"), value);
+    let back: RawObjects = serde_json::from_value(value.clone()).expect("deserialize");
+    assert_eq!(back.into_value(), value);
+    let only_left = RawObjects::try_from(serde_json::json!({"left":"a"})).expect("left matches");
+    let missing_right: Result<generated::union_semantics::Right, serde_json::Error> = only_left.as_right();
+    assert!(missing_right.is_err());
+    let no_match: Result<RawObjects, serde_json::Error> = RawObjects::try_from(serde_json::json!({}));
+    assert!(no_match.is_err());
+    assert!(serde_json::from_str::<RawObjects>("null").is_err());
+}
+
+#[test]
+fn union_recursion_through_properties_consumes_input() {
+    use generated::recursive_schema::Expression;
+
+    for input in [
+        serde_json::json!("leaf"),
+        serde_json::json!({"nested": "leaf"}),
+        serde_json::json!({"nested": {"nested": "leaf"}}),
+    ] {
+        let value: Expression = serde_json::from_value(input.clone()).expect("recursive expression");
+        assert_eq!(serde_json::to_value(value).expect("serialize expression"), input);
+    }
+    assert!(serde_json::from_value::<Expression>(serde_json::json!({"nested": true})).is_err());
+}
+
+#[test]
+fn inline_and_recursive_unions_decode_without_losing_json() {
+    use generated::union_semantics::Containers;
+    use generated::union_semantics::Recursive;
+
+    let input = serde_json::json!({"choice":true,"raw":{"left":"a","right":"b","extra":1_i32}});
+    let model: Containers = serde_json::from_value(input.clone()).expect("inline unions");
+    assert_eq!(serde_json::to_value(model).expect("serialize"), input);
+    for input in [serde_json::json!("leaf"), serde_json::json!(["leaf", ["nested"], []])] {
+        let model: Recursive = serde_json::from_value(input.clone()).expect("recursive union");
+        assert_eq!(model.into_value(), input);
+    }
+
+    assert!(serde_json::from_str::<Recursive>(r#"["leaf",42]"#).is_err());
+}
+
+#[test]
+fn union_matching_uses_the_projected_request_and_response_types() {
+    use generated::combined_read_write_only::UnionEnvelopeRequest;
+    use generated::combined_read_write_only::UnionEnvelopeResponse;
+
+    let request = serde_json::json!({"email":"a@example.test","password":"secret"});
+    let response = serde_json::json!({"email":"a@example.test","id":"42"});
+    let request = serde_json::json!({"exclusive":request,"inclusive":request});
+    let response = serde_json::json!({"exclusive":response,"inclusive":response});
+    let parsed: UnionEnvelopeRequest = serde_json::from_value(request.clone()).expect("request projection");
+    assert_eq!(parsed.inclusive.as_value(), &request["inclusive"]);
+    let parsed: UnionEnvelopeResponse = serde_json::from_value(response.clone()).expect("response projection");
+    assert_eq!(parsed.inclusive.as_value(), &response["inclusive"]);
+    assert!(serde_json::from_value::<UnionEnvelopeRequest>(response).is_err());
+    assert!(serde_json::from_value::<UnionEnvelopeResponse>(request).is_err());
+}
+
+#[test]
+fn union_matching_does_not_add_traits_to_foreign_payloads() {
+    use generated::server_union_traits::InputExclusive;
+    use generated::server_union_traits::InputInclusive;
+    use generated::server_union_traits::OutputInclusive;
+
+    let exclusive: InputExclusive = serde_json::from_str(r#""incoming""#).expect("non-Clone payload");
+    match exclusive {
+        InputExclusive::Incoming(payload) => assert_eq!(payload.0, "incoming"),
+        InputExclusive::Bool(_) => panic!("expected the decoded foreign payload"),
+    }
+    let input: InputInclusive = serde_json::from_str(r#""incoming""#).expect("deserialize-only payload");
+    let payload = input.as_incoming().expect("typed conversion");
+    assert_eq!(payload.0, "incoming");
+    for value in [serde_json::json!("outgoing"), serde_json::json!({"unvalidated":42_i32})] {
+        let output = OutputInclusive::from(value.clone());
+        assert_eq!(output.as_value(), &value);
+        assert_eq!(serde_json::to_value(&output).expect("serialize-only payload"), value);
+        assert_eq!(output.into_value(), value);
+    }
+}
+
+#[test]
+fn client_union_matching_keeps_foreign_traits_directional() {
+    use generated::client_union_traits::InputInclusive;
+    use generated::client_union_traits::OutputExclusive;
+    use generated::client_union_traits::OutputInclusive;
+
+    let exclusive: OutputExclusive = serde_json::from_str(r#""outgoing""#).expect("non-Clone response payload");
+    match exclusive {
+        OutputExclusive::Outgoing(payload) => assert_eq!(payload.0, "outgoing"),
+        OutputExclusive::Bool(_) => panic!("expected the decoded foreign payload"),
+    }
+    let output: OutputInclusive = serde_json::from_str(r#""outgoing""#).expect("deserialize-only response");
+    assert_eq!(output.as_outgoing().expect("typed conversion").0, "outgoing");
+    let value = serde_json::json!({"unvalidated":true});
+    let input = InputInclusive::from(value.clone());
+    assert_eq!(serde_json::to_value(input).expect("serialize-only request"), value);
+}
+
 /// Stand-in for the foreign types the `ext_x_rust_derive` fixture points its
 /// `x-rust-type` targets at (`crate::restricted`).
 ///
@@ -553,6 +773,12 @@ mod generated {
     reason = "test-only stand-in for the x-rust-derive fixture's foreign targets; nothing here is constructed"
 )]
 mod restricted {
+    #[derive(serde::Serialize)]
+    pub struct SerializeOnly(pub String);
+
+    #[derive(serde::Deserialize)]
+    pub struct DeserializeOnly(pub String);
+
     /// Declares `Debug` alone.
     #[derive(serde::Serialize, serde::Deserialize, Debug)]
     pub struct Opaque(pub String);

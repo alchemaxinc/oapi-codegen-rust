@@ -102,11 +102,45 @@ pub struct Kid {
     pub parent: Box<Parent>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Expression {
     String(String),
-    Expression(Box<Expression>),
+    Nested(Box<ExpressionNested>),
+}
+impl<'de> serde::Deserialize<'de> for Expression {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <String as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::String(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <Box<
+            ExpressionNested,
+        > as serde::Deserialize>::deserialize(&value) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Nested(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
+    }
 }
 
 pub type Wrapper = Holder;
@@ -114,4 +148,9 @@ pub type Wrapper = Holder;
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Holder {
     pub wrapped: Box<Wrapper>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct ExpressionNested {
+    pub nested: Box<Expression>,
 }

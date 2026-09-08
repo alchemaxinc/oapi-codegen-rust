@@ -1,7 +1,6 @@
 //! Lowering OpenAPI schemas into the [`crate::ir`] representation.
 
 use openapiv3::AdditionalProperties;
-use openapiv3::Discriminator;
 use openapiv3::IntegerFormat;
 use openapiv3::IntegerType;
 use openapiv3::ObjectType;
@@ -188,9 +187,12 @@ impl Mapper<'_> {
                 Item::Enum(self.integer_enum(name, &it.enumeration, &repr, data)?)
             }
             SchemaKind::Type(Type::Object(obj)) => self.object_to_item(name, obj, data)?,
-            SchemaKind::OneOf { one_of } | SchemaKind::AnyOf { any_of: one_of } => {
-                Item::Enum(self.make_union(name, one_of, data)?)
-            }
+            SchemaKind::OneOf { one_of } | SchemaKind::AnyOf { any_of: one_of } => Item::Enum(self.make_union(
+                name,
+                one_of,
+                data,
+                matches!(schema.schema_kind, SchemaKind::AnyOf { .. }),
+            )?),
             SchemaKind::AllOf { all_of } => match self.single_ref_all_of(all_of)? {
                 Some(target) => Item::Alias(Alias {
                     name: self.type_name_ident(name),
@@ -313,7 +315,7 @@ impl Mapper<'_> {
                         return match item {
                             Item::Enum(enom) if enom.name == ident => match &enom.kind {
                                 EnumKind::Strings(variants) => Some(variants.clone()),
-                                EnumKind::Union(_) | EnumKind::Integers { .. } => None,
+                                EnumKind::Union(_) | EnumKind::AnyOf(_) | EnumKind::Integers { .. } => None,
                             },
                             _ => None,
                         };
@@ -538,32 +540,45 @@ impl Mapper<'_> {
         }
         return Ok(());
     }
-    fn make_union(&mut self, name: &str, members: &[ReferenceOr<Schema>], data: &SchemaData) -> Result<Enum> {
-        let variants = match &data.discriminator {
-            Some(disc) if !disc.mapping.is_empty() => self.union_variants_from_mapping(disc)?,
-            Some(_) | None => self.union_variants_from_members(name, members)?,
-        };
-        check_variant_types(name, &variants)?;
+
+    fn make_union(
+        &mut self,
+        name: &str,
+        members: &[ReferenceOr<Schema>],
+        data: &SchemaData,
+        any_of: bool,
+    ) -> Result<Enum> {
+        if members.is_empty() {
+            return Err(Error::UnsupportedSchema {
+                path: name.to_owned(),
+                reason: "a union must contain at least one alternative".to_owned(),
+            });
+        }
+        let variants = self.union_variants_from_members(name, members, data)?;
+        if any_of {
+            let mut methods = std::collections::HashSet::from(["as_value".to_owned(), "into_value".to_owned()]);
+            for variant in &variants {
+                let method = format!("as_{}", to_ident(variant.name.logical(), Case::Snake).logical());
+                if !methods.insert(method.clone()) {
+                    return Err(Error::UnsupportedSchema {
+                        path: name.to_owned(),
+                        reason: format!(
+                            "anyOf accessor `{method}` collides with another method. Rename the alternative with x-rust-name"
+                        ),
+                    });
+                }
+            }
+        }
         return Ok(Enum {
             name: self.type_name_ident(name),
             doc: doc_of(data),
             deprecated: deprecation_of(data, name)?,
-            kind: EnumKind::Union(variants),
+            kind: if any_of {
+                EnumKind::AnyOf(variants)
+            } else {
+                EnumKind::Union(variants)
+            },
         });
-    }
-
-    /// Variant list derived from a discriminator mapping (value -> $ref).
-    fn union_variants_from_mapping(&self, disc: &Discriminator) -> Result<Vec<UnionVariant>> {
-        let mut variants = Vec::with_capacity(disc.mapping.len());
-        let mut seen = std::collections::HashSet::new();
-        for (value, reference) in &disc.mapping {
-            let target = self.schema_ref_target(reference, "a discriminator mapping")?;
-            variants.push(UnionVariant {
-                name: crate::naming::deconflict_ident(to_ident(value, Case::Pascal), &mut seen),
-                ty: RustType::Named(target),
-            });
-        }
-        return Ok(variants);
     }
 
     /// Variant list derived from the `oneOf`/`anyOf` member schemas directly.
@@ -571,6 +586,7 @@ impl Mapper<'_> {
         &mut self,
         name: &str,
         members: &[ReferenceOr<Schema>],
+        data: &SchemaData,
     ) -> Result<Vec<UnionVariant>> {
         let mut variants = Vec::with_capacity(members.len());
         let mut seen = std::collections::HashSet::new();
@@ -579,12 +595,16 @@ impl Mapper<'_> {
             let variant = match member {
                 ReferenceOr::Reference { reference } => {
                     let target = self.schema_ref_target(reference, "a union member")?;
-                    // Name the variant from the *resolved* type name, so an
-                    // `x-rust-name` override or a configured collision suffix
-                    // reaches the variant too. The raw target name would give a
-                    // variant that contradicts its own payload type.
+                    let variant_name = data
+                        .discriminator
+                        .as_ref()
+                        .and_then(|disc| return disc.mapping.iter().find(|(_, mapped)| return *mapped == reference))
+                        .map_or_else(
+                            || return self.type_name_ident(&target),
+                            |(value, _)| return to_ident(value, Case::Pascal),
+                        );
                     UnionVariant {
-                        name: crate::naming::deconflict_ident(self.type_name_ident(&target), &mut seen),
+                        name: crate::naming::deconflict_ident(variant_name, &mut seen),
                         ty: RustType::Named(target),
                     }
                 }
@@ -806,7 +826,12 @@ impl Mapper<'_> {
             }
             SchemaKind::Type(Type::Object(obj)) => self.inline_object_type(hint, obj, data)?,
             SchemaKind::OneOf { one_of } | SchemaKind::AnyOf { any_of: one_of } => {
-                let enom = self.make_union(hint, one_of, data)?;
+                let enom = self.make_union(
+                    hint,
+                    one_of,
+                    data,
+                    matches!(schema.schema_kind, SchemaKind::AnyOf { .. }),
+                )?;
                 self.extra.push(Item::Enum(enom));
                 RustType::Named(hint.to_owned())
             }
@@ -1040,31 +1065,6 @@ fn type_variant_name(ty: &RustType) -> Option<&'static str> {
         RustType::Bytes => Some("Bytes"),
         _ => None,
     };
-}
-
-/// Reject a union that holds one type more than once.
-///
-/// The emitted enum is `#[serde(untagged)]`. Serde reads the variants in order
-/// and takes the first that fits, so a repeated type makes the later variant
-/// unreachable. A value built with that variant comes back as the earlier one,
-/// which changes the value and reports nothing.
-fn check_variant_types(name: &str, variants: &[UnionVariant]) -> Result<()> {
-    let mut diagnostics = crate::lower::validate::Diagnostics::new();
-    for (index, variant) in variants.iter().enumerate() {
-        let Some(earlier) = variants.iter().take(index).find(|other| return other.ty == variant.ty) else {
-            continue;
-        };
-        diagnostics.push(Error::UnsupportedSchema {
-            path: name.to_owned(),
-            reason: format!(
-                "the union holds `{}` twice, as `{}` and as `{}`",
-                variant.ty.label(),
-                earlier.name.logical(),
-                variant.name.logical()
-            ),
-        });
-    }
-    return diagnostics.into_result();
 }
 
 /// Map an integer schema to a Rust type.

@@ -1,0 +1,19 @@
+openapi: "3.0.3"
+info:
+  title: Union prelude name collisions
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    TryFrom:
+      type: string
+    Result:
+      type: string
+    PreludeOne:
+      oneOf:
+        - $ref: "#/components/schemas/TryFrom"
+        - type: boolean
+    PreludeAny:
+      anyOf:
+        - $ref: "#/components/schemas/Result"
+        - type: boolean
