@@ -11,25 +11,89 @@
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Ok {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Ok::validate_id",
+        default
+    )]
     pub id: Option<String>,
+}
+impl Ok {
+    /// The rules the document gives `id`, checked on the way in.
+    fn validate_id<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Err {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Err::validate_message",
+        default
+    )]
     pub message: Option<String>,
+}
+impl Err {
+    /// The rules the document gives `message`, checked on the way in.
+    fn validate_message<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Some {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Some::validate_value",
+        default
+    )]
     pub value: Option<String>,
+}
+impl Some {
+    /// The rules the document gives `value`, checked on the way in.
+    fn validate_value<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct None {
     pub note: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "None::validate_holder",
+        default
+    )]
     pub holder: Option<Some>,
+}
+impl None {
+    /// The rules the document gives `holder`, checked on the way in.
+    fn validate_holder<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Some>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<Some as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }

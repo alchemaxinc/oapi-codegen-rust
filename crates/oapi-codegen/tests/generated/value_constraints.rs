@@ -226,12 +226,17 @@ impl Account {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = <Option<String> as serde::Deserialize>::deserialize(deserializer)?;
-        if let Some(item) = value.as_ref() {
-            if item.chars().nth(10usize).is_some() {
-                return Err(
-                    serde::de::Error::custom("`note` must hold 10 or fewer characters"),
-                );
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if item.chars().nth(10usize).is_some() {
+                    return Err(
+                        serde::de::Error::custom(
+                            "`note` must hold 10 or fewer characters",
+                        ),
+                    );
+                }
             }
         }
         return Ok(value);
@@ -243,17 +248,24 @@ impl Account {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = <Option<Email> as serde::Deserialize>::deserialize(deserializer)?;
-        if let Some(item) = value.as_ref() {
-            if item.chars().nth(2usize).is_none() {
-                return Err(
-                    serde::de::Error::custom("`email` must hold 3 or more characters"),
-                );
-            }
-            if item.chars().nth(60usize).is_some() {
-                return Err(
-                    serde::de::Error::custom("`email` must hold 60 or fewer characters"),
-                );
+        let value = Some(<Email as serde::Deserialize>::deserialize(deserializer)?);
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if item.chars().nth(2usize).is_none() {
+                    return Err(
+                        serde::de::Error::custom(
+                            "`email` must hold 3 or more characters",
+                        ),
+                    );
+                }
+                if item.chars().nth(60usize).is_some() {
+                    return Err(
+                        serde::de::Error::custom(
+                            "`email` must hold 60 or fewer characters",
+                        ),
+                    );
+                }
             }
         }
         return Ok(value);

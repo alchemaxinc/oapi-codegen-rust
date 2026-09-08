@@ -12,14 +12,60 @@
 #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ListBooksQuery {
     /// Restrict the listing to a single author.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ListBooksQuery::validate_author",
+        default
+    )]
     pub author: Option<String>,
     /// Only return books carrying every given tag.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ListBooksQuery::validate_tag",
+        default
+    )]
     pub tag: Option<Vec<String>>,
     /// Maximum number of items to return.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ListBooksQuery::validate_limit",
+        default
+    )]
     pub limit: Option<i32>,
+}
+impl ListBooksQuery {
+    /// The rules the document gives `author`, checked on the way in.
+    fn validate_author<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
+    /// The rules the document gives `tag`, checked on the way in.
+    fn validate_tag<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Vec<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `limit`, checked on the way in.
+    fn validate_limit<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<i32>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<i32 as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 /// List books, optionally filtered.

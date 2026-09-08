@@ -49,6 +49,9 @@ pub(crate) fn inclusive_minimum(it: &openapiv3::IntegerType) -> Option<i64> {
 /// A keyword the generator cannot check on its own type is left alone. The
 /// parser accepts `minLength` on an integer, for example, and nothing reads it.
 pub(crate) fn constraints_of(schema: &Schema) -> Option<Constraints> {
+    if unsupported_nullable_constraints(schema) {
+        return None;
+    }
     let mut found = Constraints::default();
     match &schema.schema_kind {
         SchemaKind::Type(Type::String(st)) => {
@@ -106,6 +109,27 @@ pub(crate) fn constraints_of(schema: &Schema) -> Option<Constraints> {
     return Some(found);
 }
 
+pub(crate) fn unsupported_nullable_constraints(schema: &Schema) -> bool {
+    if !schema.schema_data.nullable {
+        return false;
+    }
+    if schema.schema_data.extensions.contains_key(X_RUST_TYPE) {
+        return true;
+    }
+    return match &schema.schema_kind {
+        SchemaKind::Type(Type::String(value)) => {
+            !value.enumeration.is_empty()
+                || !matches!(
+                    crate::lower::schema::string_format_type(&value.format),
+                    RustType::String
+                )
+        }
+        SchemaKind::Type(Type::Integer(value)) => !value.enumeration.is_empty(),
+        SchemaKind::Type(Type::Object(value)) => !value.properties.is_empty(),
+        _ => false,
+    };
+}
+
 /// The keywords a `$ref` target gives a field, and the type they check.
 ///
 /// A `$ref` to a constrained scalar makes a type alias, and an alias carries no
@@ -125,7 +149,11 @@ pub(crate) fn constraints_through_ref(target: &Schema) -> Option<Constraints> {
         SchemaKind::Type(Type::Number(nt)) if nt.enumeration.is_empty() => RustType::F64,
         _ => return None,
     };
-    found.checked_as = Some(checked_as);
+    found.checked_as = Some(if target.schema_data.nullable {
+        RustType::Nullable(Box::new(checked_as))
+    } else {
+        checked_as
+    });
     return Some(found);
 }
 
@@ -250,7 +278,7 @@ pub(crate) fn check_constraints(field: &Field) -> Result<()> {
         return Ok(());
     };
     let checked = match &constraints.checked_as {
-        Some(ty) => ty,
+        Some(ty) => ty.innermost(),
         None => field.ty.innermost(),
     };
     let name = field.name.logical();
@@ -269,15 +297,44 @@ pub(crate) fn check_constraints(field: &Field) -> Result<()> {
     }
     // An empty range names the fault on its own. A bound the type cannot hold is
     // the same fault seen from further away, so only one of the two is reported.
-    match empty_range_reason(constraints, checked) {
-        Some(reason) => diagnostics.push(Error::UnsupportedSchema {
-            path: name.to_owned(),
-            reason,
-        }),
-        None => check_width(constraints, checked, name, &mut diagnostics),
+    if !accepts_only_null(field) {
+        match empty_range_reason(constraints, checked) {
+            Some(reason) => diagnostics.push(Error::UnsupportedSchema {
+                path: name.to_owned(),
+                reason,
+            }),
+            None => check_width(constraints, checked, name, &mut diagnostics),
+        }
     }
     check_reach(constraints, checked, name, &mut diagnostics);
     return diagnostics.into_result();
+}
+
+pub(crate) fn accepts_only_null(field: &Field) -> bool {
+    let Some(constraints) = &field.constraints else {
+        return false;
+    };
+    let nullable = has_nullable_wrapper(&field.ty) || constraints.checked_as.as_ref().is_some_and(has_nullable_wrapper);
+    if !nullable {
+        return false;
+    }
+    let checked = constraints.checked_as.as_ref().unwrap_or(&field.ty).innermost();
+    if empty_range_reason(constraints, checked).is_some() {
+        return true;
+    }
+    let Some((low, high)) = integer_limits(checked) else {
+        return false;
+    };
+    return int_bound(constraints.maximum).is_some_and(|maximum| return maximum < low)
+        || high.is_some_and(|high| return int_bound(constraints.minimum).is_some_and(|minimum| return minimum > high));
+}
+
+fn has_nullable_wrapper(ty: &RustType) -> bool {
+    return match ty {
+        RustType::Nullable(_) => true,
+        RustType::Option(inner) | RustType::Boxed(inner) => has_nullable_wrapper(inner),
+        _ => false,
+    };
 }
 
 /// Reject a bound too wide for the type the field holds.

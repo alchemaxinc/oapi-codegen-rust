@@ -20,8 +20,24 @@ pub struct Pet {
 #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct NewPet {
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "NewPet::validate_tag",
+        default
+    )]
     pub tag: Option<String>,
+}
+impl NewPet {
+    /// The rules the document gives `tag`, checked on the way in.
+    fn validate_tag<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, Debug, Clone, PartialEq)]

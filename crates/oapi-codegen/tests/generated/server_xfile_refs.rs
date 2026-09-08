@@ -12,8 +12,25 @@
 #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ListThingsQuery {
     /// Maximum number of items to return.
-    #[serde(rename = "pageSize", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "pageSize",
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ListThingsQuery::validate_page_size",
+        default
+    )]
     pub page_size: Option<i32>,
+}
+impl ListThingsQuery {
+    /// The rules the document gives `page_size`, checked on the way in.
+    fn validate_page_size<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<i32>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<i32 as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 /// List things.

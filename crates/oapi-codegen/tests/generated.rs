@@ -11,6 +11,378 @@
 //! attribute that turns off every lint that is about first-party source, and
 //! `include!` cannot carry one. So this file needs no lint exceptions of its own.
 
+#[test]
+fn nullable_form_values_preserve_scalar_conversion() {
+    use generated::nullable::Nullable;
+
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct Values {
+        count: Nullable<i64>,
+        enabled: Nullable<bool>,
+        ratio: Nullable<f64>,
+    }
+
+    let form = "count=3&enabled=true&ratio=1.5";
+    let expected = Values {
+        count: Nullable::Value(3),
+        enabled: Nullable::Value(true),
+        ratio: Nullable::Value(1.5_f64),
+    };
+    let parsed: Values = serde_urlencoded::from_str(form).expect("nullable form scalars");
+    assert_eq!(parsed, expected);
+    assert_eq!(serde_urlencoded::to_string(&parsed).expect("serialize form"), form);
+    let wrapped: Nullable<Values> = serde_urlencoded::from_str(form).expect("nullable form object");
+    assert_eq!(wrapped, Nullable::Value(expected));
+    assert_eq!(serde_urlencoded::to_string(&wrapped).expect("serialize object"), form);
+    for input in ["enabled=true&ratio=1.5", "count=bad&enabled=true&ratio=1.5"] {
+        assert!(serde_urlencoded::from_str::<Values>(input).is_err());
+    }
+    assert!(serde_json::from_str::<Values>(r#"{"enabled":true,"ratio":1.5}"#).is_err());
+}
+
+#[test]
+fn nullable_custom_types_skip_inherited_constraints_and_serde() {
+    use generated::nullable::Account;
+
+    for value in [serde_json::Value::Null, serde_json::json!(1_i64)] {
+        let input = serde_json::json!({
+            "id": "a",
+            "deactivated_at": null,
+            "custom_allof": value,
+            "custom_chain": value,
+            "local": {"ignored": true}
+        });
+        let account: Account = serde_json::from_value(input).expect("custom integer or null");
+        assert!(account.local.is_none());
+        assert!(account.skipped_default.is_empty());
+        let output = serde_json::to_value(account).expect("serialize custom fields");
+        assert_eq!(output["custom_allof"], value);
+        assert_eq!(output["custom_chain"], value);
+        assert!(output.get("local").is_none());
+        assert!(output.get("skipped_default").is_none());
+    }
+    for field in ["custom_allof", "custom_chain"] {
+        let mut input = serde_json::json!({"id": "a", "deactivated_at": null});
+        input[field] = serde_json::json!("not an integer");
+        assert!(serde_json::from_value::<Account>(input).is_err());
+    }
+}
+
+macro_rules! inline_nullable_runtime_tests {
+    ($name:ident, $module:ident) => {
+        #[test]
+        fn $name() {
+            use generated::$module::*;
+
+            #[derive(Clone)]
+            struct Service;
+
+            impl Api for Service {
+                async fn array(&self, body: Nullable<Vec<Nullable<String>>>) -> ArrayResponse {
+                    return ArrayResponse::Ok(body);
+                }
+
+                async fn scalar(&self, body: Nullable<i64>) -> ScalarResponse {
+                    return ScalarResponse::Ok(body);
+                }
+
+                async fn map(
+                    &self,
+                    body: Nullable<std::collections::HashMap<String, Nullable<bool>>>,
+                ) -> MapResponse {
+                    return MapResponse::Ok(body);
+                }
+
+                async fn alias(&self, body: Nullable<String>) -> AliasResponse {
+                    return AliasResponse::Ok(body);
+                }
+            }
+
+            let _router: axum::Router = router(Service);
+            for input in [serde_json::json!(null), serde_json::json!([null, "value"])] {
+                let body = serde_json::from_value::<Nullable<Vec<Nullable<String>>>>(input.clone())
+                    .expect("nullable array");
+                let ArrayResponse::Ok(body) = ArrayResponse::Ok(body);
+                assert_eq!(serde_json::to_value(body).expect("serialize array response"), input);
+            }
+            for input in [serde_json::json!(null), serde_json::json!(4_i64)] {
+                let body = serde_json::from_value::<Nullable<i64>>(input.clone()).expect("nullable integer");
+                let ScalarResponse::Ok(body) = ScalarResponse::Ok(body);
+                assert_eq!(serde_json::to_value(body).expect("serialize scalar response"), input);
+            }
+            for input in [serde_json::json!(null), serde_json::json!({"a": null, "b": true})] {
+                let body = serde_json::from_value::<Nullable<std::collections::HashMap<String, Nullable<bool>>>>(
+                    input.clone(),
+                )
+                .expect("nullable map");
+                let MapResponse::Ok(body) = MapResponse::Ok(body);
+                assert_eq!(serde_json::to_value(body).expect("serialize map response"), input);
+            }
+            for input in [serde_json::json!([1_i64]), serde_json::json!({}), serde_json::json!("bad")] {
+                assert!(serde_json::from_value::<Nullable<Vec<Nullable<String>>>>(input).is_err());
+            }
+            assert!(serde_json::from_value::<Nullable<i64>>(serde_json::json!("bad")).is_err());
+            assert!(
+                serde_json::from_value::<Nullable<std::collections::HashMap<String, Nullable<bool>>>>(
+                    serde_json::json!({"a": "bad"})
+                )
+                .is_err()
+            );
+        }
+    };
+}
+
+inline_nullable_runtime_tests!(inline_nullable_flat_json_round_trips, combined_inline_nullable);
+inline_nullable_runtime_tests!(
+    inline_nullable_package_json_round_trips,
+    package_combined_inline_nullable
+);
+
+#[test]
+fn nullable_inline_and_referenced_bodies_have_the_same_json_type() {
+    use generated::package_nullable::Nullable;
+    use generated::package_nullable::NullableArray;
+    use generated::package_nullable::ParityResponse;
+    use generated::package_nullable::Plain;
+    use generated::package_nullable::WrappedResponse;
+
+    for input in [serde_json::json!(null), serde_json::json!([null, "value"])] {
+        let inline: Nullable<Vec<Nullable<String>>> = serde_json::from_value(input.clone()).expect("inline array");
+        let referenced: NullableArray = inline;
+        let ParityResponse::Ok(body) = ParityResponse::Ok(referenced);
+        assert_eq!(serde_json::to_value(body).expect("referenced response"), input);
+    }
+    for input in [serde_json::json!(null), serde_json::json!({"name": "value"})] {
+        let body: Nullable<Plain> = serde_json::from_value(input.clone()).expect("nullable reference");
+        let WrappedResponse::Ok(body) = WrappedResponse::Ok(body);
+        assert_eq!(serde_json::to_value(body).expect("wrapped response"), input);
+    }
+    assert!(serde_json::from_value::<Nullable<Plain>>(serde_json::json!({})).is_err());
+}
+
+#[test]
+fn nullable_presence_round_trips() {
+    use generated::nullable::Account;
+    use generated::nullable::Nullable;
+
+    let base = serde_json::json!({"id": "a", "deactivated_at": null});
+    let account: Account = serde_json::from_value(base.clone()).expect("required nullable null");
+    assert!(matches!(account.deactivated_at, Nullable::Null));
+    assert!(account.nickname.is_none());
+    assert!(account.patch.is_none());
+    assert!(matches!(account.fallback, Nullable::Value(ref value) if value == "fallback"));
+    assert!(matches!(
+        account.enum_default,
+        Nullable::Value(generated::nullable::AccountEnumDefault::Active)
+    ));
+    assert!(account.null_default.is_none());
+    assert!(account.ignored_default.is_none());
+    assert!(matches!(account.empty_list, Nullable::Value(ref value) if value.is_empty()));
+    for (wire, values) in [
+        ("nickname", vec![serde_json::json!("name")]),
+        ("plain", vec![serde_json::json!({"name": "n"})]),
+        ("plain_state", vec![serde_json::json!("active")]),
+        ("patch", vec![serde_json::Value::Null, serde_json::json!("name")]),
+        ("bounded", vec![serde_json::Value::Null, serde_json::json!(2_i32)]),
+        ("only_null", vec![serde_json::Value::Null]),
+        ("out_of_range", vec![serde_json::Value::Null]),
+        ("labels", vec![serde_json::json!([null, "name"])]),
+        ("values", vec![serde_json::json!({"a": null, "b": "name"})]),
+        (
+            "nullable_list",
+            vec![serde_json::Value::Null, serde_json::json!(["name"])],
+        ),
+        (
+            "nullable_map",
+            vec![serde_json::Value::Null, serde_json::json!({"key": "name"})],
+        ),
+        (
+            "child",
+            vec![serde_json::Value::Null, serde_json::json!({"name": "n", "child": null})],
+        ),
+        ("state", vec![serde_json::Value::Null, serde_json::json!("active")]),
+        ("text", vec![serde_json::Value::Null, serde_json::json!("name")]),
+        ("direct_text", vec![serde_json::Value::Null, serde_json::json!("name")]),
+        ("wrapped_text", vec![serde_json::Value::Null, serde_json::json!("name")]),
+        ("nested_text", vec![serde_json::Value::Null, serde_json::json!("name")]),
+        (
+            "nested_plain_text",
+            vec![serde_json::Value::Null, serde_json::json!("name")],
+        ),
+        (
+            "inline_wrapped_text",
+            vec![serde_json::Value::Null, serde_json::json!("name")],
+        ),
+        (
+            "reference",
+            vec![serde_json::Value::Null, serde_json::json!({"name": "n"})],
+        ),
+        (
+            "inline",
+            vec![serde_json::Value::Null, serde_json::json!({"name": "n"})],
+        ),
+        ("custom", vec![serde_json::Value::Null, serde_json::json!("name")]),
+        ("fallback", vec![serde_json::Value::Null, serde_json::json!("custom")]),
+    ] {
+        for value in values {
+            let mut input = base.clone();
+            input[wire] = value.clone();
+            let parsed: Account = serde_json::from_value(input).expect(wire);
+            let output = serde_json::to_value(parsed).expect("serialize");
+            assert_eq!(output.get(wire), Some(&value), "{wire}");
+        }
+    }
+    let output = serde_json::to_value(account).expect("serialize absent fields");
+    assert!(output.get("patch").is_none());
+    assert!(output.get("nickname").is_none());
+    for (wire, value) in [
+        ("nickname", serde_json::Value::Null),
+        ("plain", serde_json::Value::Null),
+        ("plain_state", serde_json::Value::Null),
+        ("patch", serde_json::json!("x")),
+        ("bounded", serde_json::json!(0_i32)),
+        ("only_null", serde_json::json!(1_i32)),
+        ("out_of_range", serde_json::json!(i32::MIN)),
+        ("id", serde_json::Value::Null),
+        ("direct_text", serde_json::json!("x")),
+        ("wrapped_text", serde_json::json!("x")),
+        ("inline_wrapped_text", serde_json::json!("x")),
+        ("nested_text", serde_json::json!("x")),
+        ("nested_plain_text", serde_json::json!("x")),
+        ("labels", serde_json::json!([null, null])),
+        ("nullable_list", serde_json::json!([])),
+        ("nullable_list", serde_json::json!([null])),
+        ("nullable_map", serde_json::json!({})),
+        ("nullable_map", serde_json::json!({"key": null})),
+    ] {
+        let mut input = base.clone();
+        input[wire] = value;
+        assert!(serde_json::from_value::<Account>(input).is_err(), "{wire}");
+    }
+    for wire in ["id", "deactivated_at"] {
+        let mut input = base.clone();
+        input.as_object_mut().expect("object").remove(wire);
+        assert!(serde_json::from_value::<Account>(input).is_err(), "{wire}");
+    }
+}
+
+#[test]
+fn nullable_aliases_have_one_typed_null_state() {
+    use generated::nullable::*;
+
+    let text: WrappedText = Nullable::Value("value".to_owned());
+    let _: Nullable<String> = text;
+    let custom: CustomChain = Nullable::Value(3_i64);
+    let _: Nullable<i64> = custom;
+    let directional: DirectionalAliasRequest = Nullable::Value(DirectionalValueRequest {
+        secret: "secret".to_owned(),
+        value: Nullable::Null,
+        next: None,
+    });
+    let _: DirectionalRequest = directional;
+
+    let mut account: Account =
+        serde_json::from_value(serde_json::json!({"id": "a", "deactivated_at": null})).expect("account");
+    for field in [
+        &mut account.wrapped_text,
+        &mut account.inline_wrapped_text,
+        &mut account.nested_text,
+        &mut account.nested_plain_text,
+    ] {
+        assert_eq!(*field, None);
+        *field = Some(Nullable::Null);
+        assert_eq!(*field, Some(Nullable::<String>::Null));
+        *field = Some(Nullable::Value("value".to_owned()));
+    }
+    let output = serde_json::to_value(account).expect("serialize values");
+    assert_eq!(output["wrapped_text"], "value");
+
+    let account: Account = serde_json::from_value(serde_json::json!({
+        "id": "a",
+        "deactivated_at": null,
+        "wrapped_text": null,
+        "inline_wrapped_text": null,
+        "nested_text": null,
+        "nested_plain_text": null
+    }))
+    .expect("explicit nulls");
+    for field in [
+        account.wrapped_text,
+        account.inline_wrapped_text,
+        account.nested_text,
+        account.nested_plain_text,
+    ] {
+        assert_eq!(field, Some(Nullable::<String>::Null));
+    }
+}
+
+#[test]
+fn required_nullable_references_and_constraints_require_presence() {
+    use generated::nullable::RequiredValues;
+
+    let base = serde_json::json!({
+        "plain": "value", "text": null, "state": null, "node": null,
+        "bounded": null, "defaulted": null
+    });
+    let parsed: RequiredValues = serde_json::from_value(base.clone()).expect("present nulls");
+    assert_eq!(serde_json::to_value(parsed).expect("serialize"), base);
+    for wire in ["plain", "text", "state", "node", "bounded", "defaulted"] {
+        let mut input = base.clone();
+        input.as_object_mut().expect("object").remove(wire);
+        assert!(serde_json::from_value::<RequiredValues>(input).is_err(), "{wire}");
+    }
+    for (wire, value) in [("text", serde_json::json!("x")), ("bounded", serde_json::json!(0_i32))] {
+        let mut input = base.clone();
+        input[wire] = value;
+        assert!(serde_json::from_value::<RequiredValues>(input).is_err(), "{wire}");
+    }
+}
+
+#[test]
+fn nullable_named_types_accept_null_outside_properties() {
+    use generated::nullable::Node;
+    use generated::nullable::NullableCode;
+    use generated::nullable::NullableState;
+    use generated::nullable::NullableText;
+    use generated::nullable::NullableUnion;
+    use generated::nullable::TextAlias;
+
+    assert!(serde_json::from_str::<Node>("null").is_ok());
+    assert!(serde_json::from_str::<NullableState>("null").is_ok());
+    assert!(serde_json::from_str::<NullableText>("null").is_ok());
+    assert!(serde_json::from_str::<TextAlias>("null").is_ok());
+    assert!(serde_json::from_str::<NullableUnion>("null").is_ok());
+    assert!(serde_json::from_str::<NullableUnion>("1").is_ok());
+    assert!(serde_json::from_str::<NullableUnion>("\"value\"").is_ok());
+    assert!(serde_json::from_str::<NullableState>("\"unknown\"").is_err());
+    assert!(serde_json::from_str::<NullableCode>("null").is_ok());
+    assert!(serde_json::from_str::<NullableCode>("1").is_ok());
+    assert!(serde_json::from_str::<NullableCode>("3").is_err());
+}
+
+#[test]
+fn nullable_directional_models_retain_presence_and_recursion() {
+    use generated::nullable::DirectionalRequest;
+    use generated::nullable::DirectionalResponse;
+
+    for value in [
+        serde_json::Value::Null,
+        serde_json::json!({"secret": "s", "value": null, "next": null}),
+    ] {
+        let parsed: DirectionalRequest = serde_json::from_value(value.clone()).expect("request");
+        assert_eq!(serde_json::to_value(parsed).expect("serialize"), value);
+    }
+    for value in [
+        serde_json::Value::Null,
+        serde_json::json!({"id": "i", "value": null, "next": null}),
+    ] {
+        let parsed: DirectionalResponse = serde_json::from_value(value.clone()).expect("response");
+        assert_eq!(serde_json::to_value(parsed).expect("serialize"), value);
+    }
+    assert!(serde_json::from_value::<DirectionalRequest>(serde_json::json!({"secret": "s"})).is_err());
+    assert!(serde_json::from_value::<DirectionalResponse>(serde_json::json!({"id": "i"})).is_err());
+}
+
 mod generated {
     #[path = "allof_merge.rs"]
     pub mod allof_merge;
@@ -32,6 +404,8 @@ mod generated {
     pub mod client_union_traits;
     #[path = "client_widgets.rs"]
     pub mod client_widgets;
+    #[path = "combined_inline_nullable.rs"]
+    pub mod combined_inline_nullable;
     #[path = "combined_keyword_operations.rs"]
     pub mod combined_keyword_operations;
     #[path = "combined_prelude_value_names.rs"]
@@ -66,6 +440,10 @@ mod generated {
     pub mod object_additional_properties;
     #[path = "object_deny_unknown_fields.rs"]
     pub mod object_deny_unknown_fields;
+    #[path = "package_combined_inline_nullable.rs"]
+    pub mod package_combined_inline_nullable;
+    #[path = "package_nullable.rs"]
+    pub mod package_nullable;
     #[path = "server_union_traits.rs"]
     pub mod server_union_traits;
     #[path = "union_duplicate.rs"]

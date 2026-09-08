@@ -20,22 +20,83 @@ pub struct ListBooksQuery {
     /// Region filter; the operation-level definition wins.
     pub region: String,
     /// Restrict results to a single author.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ListBooksQuery::validate_author",
+        default
+    )]
     pub author: Option<String>,
     #[serde(default = "ListBooksQuery::default_limit")]
     pub limit: i32,
     pub available: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ListBooksQuery::validate_tags",
+        default
+    )]
     pub tags: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ListBooksQuery::validate_status",
+        default
+    )]
     pub status: Option<Vec<String>>,
-    #[serde(rename = "pageToken", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "pageToken",
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ListBooksQuery::validate_page_token",
+        default
+    )]
     pub page_token: Option<String>,
 }
 impl ListBooksQuery {
+    /// The rules the document gives `author`, checked on the way in.
+    fn validate_author<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
     /// The `default` the document gives `limit`.
     fn default_limit() -> i32 {
         20
+    }
+    /// The rules the document gives `tags`, checked on the way in.
+    fn validate_tags<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Vec<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `status`, checked on the way in.
+    fn validate_status<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<String>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Vec<String> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `page_token`, checked on the way in.
+    fn validate_page_token<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
     }
 }
 

@@ -327,6 +327,11 @@ const TEST_TABLE: &[Feature] = &[
         fixture: Some("nullable"),
     },
     Feature {
+        element: "meta.nullable.presence-and-direction",
+        status: Status::Supported,
+        fixture: Some("nullable"),
+    },
+    Feature {
         element: "meta.title",
         status: Status::Ignored,
         fixture: None,
@@ -623,6 +628,7 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// flat crate-root layout in which the server and client share one file and the
 /// same per-operation types alongside the component models.
 const COMBINED_FIXTURES: &[&str] = &[
+    "combined_inline_nullable",
     "combined_keyword_operations",
     "combined_read_write_only",
     "combined_prelude_value_names",
@@ -658,6 +664,8 @@ const COMBINED_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// take one name. Both need a `response-type-suffix` to reach the clash, so both
 /// succeed with the default config and fail with that option set.
 const NAMING_COLLISION_FIXTURES: &[&str] = &[
+    "nullable_name_collision",
+    "nullable_rename_collision",
     "type_name_collision_error",
     "type_name_collision_suffix",
     "type_name_collision_pruned",
@@ -1352,6 +1360,7 @@ macro_rules! combined_generated_tests {
 }
 
 combined_generated_tests!(
+    combined_inline_nullable,
     combined_keyword_operations,
     combined_read_write_only,
     combined_prelude_value_names,
@@ -1424,6 +1433,8 @@ macro_rules! package_generated_tests {
 }
 
 package_generated_tests!(
+    combined_inline_nullable,
+    nullable,
     combined_keyword_operations,
     combined_prelude_value_names,
     combined_server_client,
@@ -2328,6 +2339,34 @@ fn reserved_interface_name_is_target_scoped() {
         .expect("a schema named `Api` must not collide when only the client is generated");
 }
 
+#[test]
+fn nullable_helper_name_is_reserved_only_when_emitted() {
+    for fixture in ["nullable_name_collision", "nullable_rename_collision"] {
+        let path = tests_dir().join("fixtures").join(format!("{fixture}.yaml"));
+        let mut config = oapi_codegen::Config::default();
+        config.generate.models = true;
+        assert!(matches!(
+            oapi_codegen::generate(&path, &config),
+            Err(oapi_codegen::Error::TypeNameCollision { name, .. }) if name == "Nullable"
+        ));
+        config.output_options.exclude_schemas = vec!["Text".to_owned()];
+        let source = oapi_codegen::generate(&path, &config).expect("unused helper name is available");
+        assert!(source.contains("pub type Nullable = String;"));
+        assert!(!source.contains("pub enum Nullable"));
+    }
+    let path = tests_dir().join("fixtures/combined_inline_nullable.yaml");
+    let mut config = combined_config();
+    config.output_options.skip_prune = true;
+    assert!(matches!(
+        oapi_codegen::generate(&path, &config),
+        Err(oapi_codegen::Error::TypeNameCollision { name, .. }) if name == "Nullable"
+    ));
+    assert!(matches!(
+        oapi_codegen::generate_package(&path, &config, std::path::Path::new("unused.rs")),
+        Err(oapi_codegen::Error::TypeNameCollision { name, .. }) if name == "Nullable"
+    ));
+}
+
 /// Whether `generated` declares `name` as a `trait`, `struct`, or `enum` item.
 /// The match requires an item keyword before the name and a non-identifier
 /// character after it, so a longer identifier that merely shares the prefix
@@ -2348,9 +2387,12 @@ fn declares_type(generated: &str, name: &str) -> bool {
 #[test]
 fn reserved_names_are_declared_in_combined_output() {
     let dir = tests_dir();
-    let fixture = dir.join("fixtures").join("combined_server_client.yaml");
+    let fixture = dir.join("fixtures").join("nullable.yaml");
     let generated =
         oapi_codegen::generate(&fixture, &combined_config()).expect("generating combined server+client output failed");
+    assert!(generated.contains("DirectionalValueRequest"));
+    assert!(generated.contains("DirectionalValueResponse"));
+    assert!(!generated.contains("struct Account"));
     let targets = oapi_codegen::emit::Targets {
         server: true,
         client: true,

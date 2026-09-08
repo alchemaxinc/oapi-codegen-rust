@@ -15,10 +15,44 @@ pub type Opaque = crate::restricted::Opaque;
 pub struct Thing {
     pub id: String,
     pub opaque: Opaque,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Thing::validate_exclusive",
+        default
+    )]
     pub exclusive: Option<ThingExclusive>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Thing::validate_inclusive",
+        default
+    )]
     pub inclusive: Option<ThingInclusive>,
+}
+impl Thing {
+    /// The rules the document gives `exclusive`, checked on the way in.
+    fn validate_exclusive<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<ThingExclusive>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <ThingExclusive as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `inclusive`, checked on the way in.
+    fn validate_inclusive<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<ThingInclusive>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <ThingInclusive as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, Debug)]

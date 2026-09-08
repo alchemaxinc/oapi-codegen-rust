@@ -13,8 +13,24 @@ use super::super::models::*;
 
 #[derive(serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ProbeQuery {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ProbeQuery::validate_maybe",
+        default
+    )]
     pub maybe: Option<String>,
+}
+impl ProbeQuery {
+    /// The rules the document gives `maybe`, checked on the way in.
+    fn validate_maybe<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

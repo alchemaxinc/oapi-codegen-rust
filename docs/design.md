@@ -657,28 +657,61 @@ The function is associated, not free. This keeps it out of the crate root, where
 every generated type lives. Field names are unique within a struct, so these
 names are unique too.
 
-`nullable` is the exception. There `null` is a value that the property carries.
-The `Option` stays, and the default fills its `Some` side. A `default: null` does
-nothing. The parser reads it as no default at all, and serde already leaves a
-missing `Option` as `None`.
+A nullable property uses `Nullable<T>`. A non-null default fills its
+`Nullable::Value` variant. The parser discards `default: null`, so it cannot
+fill an absent property with explicit null. The generator reports this limitation.
 
-The generator ignores a `default` on a **required** property. The property is
-always present. Use the default, and a payload that omits a required property
-becomes valid.
+The generator ignores a `default` on a **required** property. A required property must remain present.
 
-Only a value with a literal form works: a string, a number, a boolean, an enum
-value, an empty array, and an empty object. "An empty object" means a free-form
-map, from `additionalProperties`. A `default: {}` on a property with named
-properties is an error, because a struct has no such literal. A non-empty array,
-a non-empty object, and a value of the wrong type are errors too, not silent
-drops. A dropped default leaves the document and the code in disagreement. An
-`int32` property with a default outside the range of `i32` is an error for the
-same reason. The alternative is generated code that does not compile.
+Supported defaults include strings, numbers, booleans, string enum values, empty arrays, and empty maps.
+An empty object means a map from `additionalProperties`, not a struct with named properties.
+Unsupported defaults on non-nullable properties produce errors. Unsupported defaults on nullable properties produce warnings and are ignored.
+A default of the wrong type or outside the Rust integer range remains an error.
 
 A query parameter follows the same rule. A `default: 20` on `limit` gives a
 plain `i32` field. The default applies when the request omits `limit`. An empty
 `?limit=` is not an omission. It is the text `""`, and a parse of it into an
 `i32` fails.
+
+## Property presence and nullability
+
+Presence and nullability are independent:
+
+| Schema                 | Rust field            | Accepted JSON states   |
+| ---------------------- | --------------------- | ---------------------- |
+| Required, non-nullable | `T`                   | Value                  |
+| Optional, non-nullable | `Option<T>`           | Absent or value        |
+| Required, nullable     | `Nullable<T>`         | Null or value          |
+| Optional, nullable     | `Option<Nullable<T>>` | Absent, null, or value |
+
+`Nullable::Null` represents JSON null. `Nullable::Value(value)` represents a value.
+An absent optional field becomes `None`. An explicit null never becomes an absent field.
+Serialization omits `None` and retains `Some(Nullable::Null)`, which supports PATCH round trips.
+An optional field with a non-null default uses the default when absent, as described above.
+
+Nullable named schemas remain aliases. Named objects and enums have a separate
+`Value` type for their non-null representation. References, array items, and map values retain nullability.
+The recursion pass inserts `Box` through both presence and nullability wrappers.
+
+Inline JSON request and response bodies retain nullability for primitives, arrays, and maps.
+A single-member `allOf` can wrap a body reference with `nullable: true`.
+The generator emits and reserves the `Nullable` helper only when a model or body needs it.
+Package output imports the helper from the models module, even without component models.
+Inline nullable parameters and non-JSON body schemas produce warnings because their wire formats have no supported null representation.
+
+`x-rust-type` replaces the value type, not its presence or nullability.
+`x-rust-serde-skip` disables these rules for the skipped field.
+Skipped fields need no generated deserializer or default function.
+An `x-rust-type` override also stops inherited `allOf` constraints and produces a warning.
+`x-omitempty: false` can serialize an absent field as null, so it does not preserve PATCH states.
+Unconstrained schemas and custom types can accept null themselves.
+Union matching and allOf merging retain their documented limitations.
+
+Constraints on nullable custom types, formatted strings, enums, and objects with named properties produce warnings instead of generated checks.
+For optional nullable properties, unsupported defaults produce warnings and leave the property optional.
+This includes non-empty collections, custom types, formatted strings, integer enums, and composed schemas.
+Defaults on referenced schemas do not fill absent properties.
+The raw-document diagnostic reports null defaults before the OpenAPI parser discards them.
 
 ## The server names its security but does not enforce it
 
