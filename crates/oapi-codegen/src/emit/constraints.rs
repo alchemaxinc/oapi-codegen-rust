@@ -36,11 +36,24 @@ pub(crate) fn is_checked(field: &Field) -> bool {
 pub(crate) fn emit_validate_fn(field: &Field) -> Result<TokenStream> {
     let name = validate_fn_name(field);
     let ty = emit_type(&field.ty)?;
-    let Some(constraints) = &field.constraints else {
-        return Ok(quote! {});
+    let empty = Constraints::default();
+    let constraints = field.constraints.as_ref().unwrap_or(&empty);
+    let tests = if crate::lower::constraints::accepts_only_null(field) {
+        vec![Check {
+            test: quote! {{ let _ = item; true }},
+            message: "has no non-null value within the declared bounds".to_owned(),
+        }]
+    } else {
+        checks(constraints, checked_type(field, constraints))
     };
-    let tests = checks(constraints, checked_type(field, constraints));
-    let body = wrap(&field.ty, &tests, field.name.logical());
+    let body = wrap(&field.ty, &tests, field.name.logical(), constraints.checked_as.as_ref());
+    let read = match &field.ty {
+        RustType::Option(inner) => {
+            let inner = emit_type(inner)?;
+            quote! { Some(<#inner as serde::Deserialize>::deserialize(deserializer)?) }
+        }
+        _ => quote! { <#ty as serde::Deserialize>::deserialize(deserializer)? },
+    };
     let pattern = emit_pattern(field, constraints)?;
     let doc = format!(
         " The rules the document gives `{}`, checked on the way in.",
@@ -53,7 +66,7 @@ pub(crate) fn emit_validate_fn(field: &Field) -> Result<TokenStream> {
             D: serde::Deserializer<'de>,
         {
             #pattern
-            let value = <#ty as serde::Deserialize>::deserialize(deserializer)?;
+            let value = #read;
             #body
             return Ok(value);
         }
@@ -72,7 +85,10 @@ struct Check {
 ///
 /// An `Option` runs the rules only when it holds a value. A `Vec` carries its
 /// own rules, and is not walked into, because `items` is a schema of its own.
-fn wrap(ty: &RustType, tests: &[Check], label: &str) -> TokenStream {
+fn wrap(ty: &RustType, tests: &[Check], label: &str, checked_as: Option<&RustType>) -> TokenStream {
+    if tests.is_empty() {
+        return quote! {};
+    }
     let rules = tests.iter().map(|check| {
         let test = &check.test;
         let message = format!("`{label}` {}", check.message);
@@ -83,18 +99,25 @@ fn wrap(ty: &RustType, tests: &[Check], label: &str) -> TokenStream {
         };
     });
     let rules: Vec<TokenStream> = rules.collect();
-    if ty.is_option() {
-        return quote! {
-            if let Some(item) = value.as_ref() {
-                #(#rules)*
-            }
-        };
-    }
-    return quote! {
-        {
-            let item = &value;
-            #(#rules)*
+    let body = unwrap_checks(ty, quote! { #(#rules)* }, checked_as);
+    return quote! {{ let item = &value; #body }};
+}
+
+fn unwrap_checks(ty: &RustType, body: TokenStream, checked_as: Option<&RustType>) -> TokenStream {
+    return match ty {
+        RustType::Option(inner) | RustType::Nullable(inner) => {
+            let body = unwrap_checks(inner, body, checked_as);
+            quote! { if let Some(item) = item.as_ref() { #body } }
         }
+        RustType::Boxed(inner) => {
+            let body = unwrap_checks(inner, body, checked_as);
+            quote! {{ let item = item.as_ref(); #body }}
+        }
+        RustType::Named(_) => match checked_as {
+            Some(checked) => unwrap_checks(checked, body, None),
+            _ => body,
+        },
+        _ => body,
     };
 }
 
@@ -105,7 +128,7 @@ fn wrap(ty: &RustType, tests: &[Check], label: &str) -> TokenStream {
 /// Lowering resolves that type, so read it when it is there.
 fn checked_type<'a>(field: &'a Field, constraints: &'a Constraints) -> &'a RustType {
     return match &constraints.checked_as {
-        Some(ty) => ty,
+        Some(ty) => ty.innermost(),
         None => field.ty.innermost(),
     };
 }
@@ -300,7 +323,7 @@ fn array_checks(constraints: &Constraints, ty: &RustType, tests: &mut Vec<Check>
     if !element.is_scalar() {
         return;
     }
-    let test = if matches!(**element, RustType::F64) {
+    let test = if matches!(element.innermost(), RustType::F64) {
         quote! {
             item.iter().enumerate().any(|(index, left)| {
                 return item.iter().skip(index + 1).any(|right| return left == right);

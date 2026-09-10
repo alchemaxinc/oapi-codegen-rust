@@ -68,9 +68,11 @@ fn canonical(name: &str) -> String {
 fn named_ref(ty: &RustType) -> Option<String> {
     return match ty {
         RustType::Named(name) => Some(canonical(name)),
-        RustType::Vec(inner) | RustType::Map(inner) | RustType::Option(inner) | RustType::Boxed(inner) => {
-            named_ref(inner)
-        }
+        RustType::Vec(inner)
+        | RustType::Map(inner)
+        | RustType::Option(inner)
+        | RustType::Nullable(inner)
+        | RustType::Boxed(inner) => named_ref(inner),
         _ => None,
     };
 }
@@ -81,7 +83,7 @@ fn item_refs(item: &Item) -> Vec<String> {
         Item::Struct(s) => struct_refs(s),
         Item::Enum(enumeration) => match &enumeration.kind {
             EnumKind::Strings(_) | EnumKind::Integers { .. } => Vec::new(),
-            EnumKind::Union(variants) => variants
+            EnumKind::Union(variants) | EnumKind::AnyOf(variants) => variants
                 .iter()
                 .filter_map(|variant| return named_ref(&variant.ty))
                 .collect(),

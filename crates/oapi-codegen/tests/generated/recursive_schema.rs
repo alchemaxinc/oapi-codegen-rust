@@ -18,20 +18,78 @@ pub struct Node {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Comment {
     pub text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Comment::validate_reply",
+        default
+    )]
     pub reply: Option<Box<Comment>>,
+}
+impl Comment {
+    /// The rules the document gives `reply`, checked on the way in.
+    fn validate_reply<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Box<Comment>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Box<Comment> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Tree {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Tree::validate_children",
+        default
+    )]
     pub children: Option<Vec<Tree>>,
+}
+impl Tree {
+    /// The rules the document gives `children`, checked on the way in.
+    fn validate_children<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<Tree>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<Vec<Tree> as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Registry {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Registry::validate_entries",
+        default
+    )]
     pub entries: Option<std::collections::HashMap<String, Registry>>,
+}
+impl Registry {
+    /// The rules the document gives `entries`, checked on the way in.
+    fn validate_entries<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<
+        Option<std::collections::HashMap<String, Registry>>,
+        D::Error,
+    >
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <std::collections::HashMap<
+                String,
+                Registry,
+            > as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
@@ -44,11 +102,45 @@ pub struct Kid {
     pub parent: Box<Parent>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Expression {
     String(String),
-    Expression(Box<Expression>),
+    Nested(Box<ExpressionNested>),
+}
+impl<'de> serde::Deserialize<'de> for Expression {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <String as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::String(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <Box<
+            ExpressionNested,
+        > as serde::Deserialize>::deserialize(&value) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Nested(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
+    }
 }
 
 pub type Wrapper = Holder;
@@ -56,4 +148,9 @@ pub type Wrapper = Holder;
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Holder {
     pub wrapped: Box<Wrapper>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct ExpressionNested {
+    pub nested: Box<Expression>,
 }

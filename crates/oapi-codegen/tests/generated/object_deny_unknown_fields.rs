@@ -14,8 +14,24 @@
 #[serde(deny_unknown_fields)]
 pub struct Closed {
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Closed::validate_size",
+        default
+    )]
     pub size: Option<i64>,
+}
+impl Closed {
+    /// The rules the document gives `size`, checked on the way in.
+    fn validate_size<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<i64>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<i64 as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 /// An absent key permits an unknown key and drops it.

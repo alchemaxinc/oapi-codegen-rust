@@ -174,6 +174,171 @@ fn stderr(output: &Output) -> String {
     return String::from_utf8_lossy(&output.stderr).into_owned();
 }
 
+#[test]
+fn unknown_configuration_keys_warn_without_changing_the_output() {
+    let dir = TestDir::new("unknown-config");
+    assert_eq!(code(&dir.run(false)), SUCCESS);
+    let original = read(&dir.output());
+    dir.write(
+        "config.yaml",
+        "package: demo\nextra: true\ngenerate:\n  models: true\n  modles: true\noutput-options:\n  skip-prun: true\n",
+    );
+    let output = dir.run(true);
+    assert_eq!(code(&output), SUCCESS, "{}", stderr(&output));
+    for pointer in ["/extra", "/generate/modles", "/output-options/skip-prun"] {
+        assert!(stderr(&output).contains(pointer), "{}", stderr(&output));
+    }
+    assert_eq!(read(&dir.output()), original);
+}
+
+#[test]
+fn invalid_configuration_values_keep_their_parse_errors() {
+    let dir = TestDir::new("invalid-config");
+    for configuration in ["null", "generate: null", "generate:\n  models: wrong\n  modles: true\n"] {
+        dir.write("config.yaml", configuration);
+        let output = dir.run(false);
+        assert_eq!(code(&output), FAILURE, "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("failed to parse config"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(!dir.output().exists());
+    }
+}
+
+#[test]
+fn unknown_spec_keys_fail_before_any_output_is_replaced() {
+    let dir = TestDir::new("unknown-spec");
+    assert_eq!(code(&dir.run(false)), SUCCESS);
+    let original = read(&dir.output());
+    dir.write(
+        "spec.yaml",
+        &SPEC.replace("type: object", "type: object\n      requird: [name]\n      const: {}"),
+    );
+    for check in [false, true] {
+        let output = dir.run(check);
+        assert_eq!(code(&output), FAILURE, "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("/components/schemas/Widget/requird"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(
+            stderr(&output).contains("/components/schemas/Widget/const"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(read(&dir.output()), original);
+    }
+}
+
+#[test]
+fn ignored_features_warn_during_generation_and_check_mode() {
+    let dir = TestDir::new("unsupported-note");
+    dir.write(
+        "spec.yaml",
+        &SPEC.replace("type: object", "type: object\n      xml: {name: widget}"),
+    );
+    for check in [false, true] {
+        let output = dir.run(check);
+        assert_eq!(code(&output), SUCCESS, "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains("/components/schemas/Widget/xml"),
+            "{}",
+            stderr(&output)
+        );
+        assert!(
+            stderr(&output).contains("XML serialization is not implemented"),
+            "{}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn referenced_documents_use_the_same_key_diagnostics() {
+    let dir = TestDir::new("referenced-key");
+    dir.write("config.yaml", PACKAGE_CONFIG);
+    dir.write(
+        "spec.yaml",
+        "openapi: 3.0.3\ninfo: {title: Root, version: 1.0.0}\npaths:\n  /widgets:\n    get:\n      responses:\n        '200': {$ref: 'other.yaml#/components/responses/Widget'}\n",
+    );
+    dir.write(
+        "other.yaml",
+        "openapi: 3.0.3\ninfo: {title: Other, version: 1.0.0}\npaths: {}\ncomponents:\n  responses:\n    Widget: {description: ok, contnet: {}}\n",
+    );
+    let output = dir.run(false);
+    assert_eq!(code(&output), FAILURE, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("other.yaml#/components/responses/Widget/contnet"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!dir.output().exists());
+}
+
+#[test]
+fn referenced_document_warnings_are_emitted_once_per_loaded_document() {
+    let dir = TestDir::new("referenced-note");
+    dir.write("config.yaml", PACKAGE_CONFIG);
+    dir.write(
+        "spec.yaml",
+        "openapi: 3.0.3\ninfo: {title: Root, version: 1.0.0}\npaths:\n  /widgets:\n    get:\n      responses:\n        '200': {$ref: 'other.yaml#/components/responses/Widget'}\n        '201': {$ref: 'other.yaml#/components/responses/Widget'}\n",
+    );
+    dir.write(
+        "other.yaml",
+        "openapi: 3.0.3\ninfo: {title: Other, version: 1.0.0}\npaths: {}\nx-vendor: true\ncomponents:\n  responses:\n    Widget: {description: ok}\n",
+    );
+    let output = dir.run(false);
+    assert_eq!(code(&output), SUCCESS, "{}", stderr(&output));
+    assert_eq!(stderr(&output).matches("/x-vendor").count(), 1, "{}", stderr(&output));
+}
+
+#[test]
+fn json_documents_and_all_library_entry_points_reject_unknown_keys() {
+    let dir = TestDir::new("json-unknown");
+    dir.write(
+        "spec.yaml",
+        r#"{"openapi":"3.0.3","info":{"title":"Demo","version":"1.0.0"},"paths":{},"components":{"schemas":{"Widget":{"type":"string","const":"x"}}}}"#,
+    );
+    let spec = dir.join("spec.yaml");
+    let config = oapi_codegen::Config::load(&dir.join("config.yaml")).expect("valid configuration");
+    assert!(oapi_codegen::generate_models_string(&spec).is_err());
+    assert!(oapi_codegen::generate(&spec, &config).is_err());
+    assert!(oapi_codegen::generate_package(&spec, &config, &dir.output()).is_err());
+    let output = dir.run(false);
+    assert_eq!(code(&output), FAILURE, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("/components/schemas/Widget/const"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!dir.output().exists());
+}
+
+#[test]
+fn unconstrained_schema_fallback_warns_but_an_empty_schema_does_not() {
+    let dir = TestDir::new("schema-fallback");
+    let preamble = "openapi: 3.0.3\ninfo: {title: Demo, version: 1.0.0}\npaths: {}\ncomponents:\n  schemas:\n";
+    dir.write("spec.yaml", &format!("{preamble}    Widget: {{}}\n"));
+    let empty = dir.run(false);
+    assert_eq!(code(&empty), SUCCESS, "{}", stderr(&empty));
+    assert!(!stderr(&empty).contains("warning:"), "{}", stderr(&empty));
+    dir.write(
+        "spec.yaml",
+        &format!("{preamble}    Widget: {{type: string, minimum: 1}}\n"),
+    );
+    let constrained = dir.run(false);
+    assert_eq!(code(&constrained), SUCCESS, "{}", stderr(&constrained));
+    assert!(
+        stderr(&constrained).contains("unconstrained JSON value"),
+        "{}",
+        stderr(&constrained)
+    );
+    assert!(read(&dir.output()).contains("pub type Widget = serde_json::Value;"));
+}
+
 /// Read `path`, which every case here has already generated.
 fn read(path: &Path) -> String {
     return std::fs::read_to_string(path).unwrap_or_else(|err| panic!("reading `{}` failed: {err}", path.display()));

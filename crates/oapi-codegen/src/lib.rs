@@ -7,7 +7,9 @@
 
 pub mod cli;
 pub mod config;
+mod coverage;
 pub mod deps;
+mod diagnostic;
 pub mod emit;
 pub mod error;
 pub mod filter;
@@ -120,7 +122,11 @@ fn lower_spec(spec_path: &Path, config: &Config) -> Result<Lowered> {
             server: want_server,
             client: want_client,
         };
-        lower::check_type_name_collisions(&service, &module, &emit::reserved_type_names(targets))?;
+        let mut reserved = emit::reserved_type_names(targets);
+        if !emit::uses_nullable(&module, Some(&service)) {
+            reserved.retain(|name| return name.name != "Nullable");
+        }
+        lower::check_type_name_collisions(&service, &module, &reserved)?;
         lower::check_prelude_shadowing(&module, targets)?;
         return Ok(Lowered::Service {
             module,
@@ -134,6 +140,13 @@ fn lower_spec(spec_path: &Path, config: &Config) -> Result<Lowered> {
     lower::split_by_direction(&mut module, None);
     names.check_emitted(&module)?;
     lower::check_duplicate_models(&module)?;
+    if emit::uses_nullable(&module, None) {
+        lower::check_type_name_collisions(
+            &Service::default(),
+            &module,
+            &emit::reserved_type_names(emit::Targets::default()),
+        )?;
+    }
     lower::check_prelude_shadowing(&module, emit::Targets::default())?;
     lower::box_recursive_types(&mut module)?;
     return Ok(Lowered::Models { module, server_urls });

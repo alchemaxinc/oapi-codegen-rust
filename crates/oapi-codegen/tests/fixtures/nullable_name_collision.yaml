@@ -1,0 +1,7 @@
+openapi: "3.0.3"
+info: { title: Nullable name collision, version: "1.0.0" }
+paths: {}
+components:
+  schemas:
+    Nullable: { type: string }
+    Text: { type: string, nullable: true }

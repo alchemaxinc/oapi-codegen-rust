@@ -198,19 +198,22 @@ components:
 
 ## Union variants
 
-A `oneOf` or an `anyOf` becomes an untagged enum. Each member becomes a variant,
-and the name of that variant comes from the first rule below that applies.
+A `oneOf` becomes a tag-free enum. An `anyOf` becomes a JSON wrapper
+with typed accessors. Each alternative gets a name from the first applicable rule:
 
 | Member                                          | Variant name                                                                                                |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| A `$ref` with a discriminator mapping           | The first mapping key for that reference                                                                    |
 | Carries `x-rust-name`                           | The name it gives                                                                                           |
 | A `$ref`                                        | The name of the type it points to                                                                           |
 | A string `enum` of one value                    | That value                                                                                                  |
 | An inline member that hoists no type of its own | The type it holds: `String`, `I32`, `I64`, `U32`, `U64`, `F64`, `Bool`, `Date`, `DateTime`, `Uuid`, `Bytes` |
 | Any other inline member                         | None. Generation stops.                                                                                     |
 
-A member that hoists no type is named by the type it holds. A union cannot hold
-one type twice, so these names stay unique.
+A member that hoists no type takes the name of its Rust type.
+Repeated alternative names receive numeric suffixes.
+For an `anyOf`, the alternative name gives the `as_<alternative>()` accessor name.
+An accessor that conflicts with a reserved method produces a generation error.
 
 A member that holds one `enum` value stands for a constant, and that value says
 what the member is. A document that writes a Rust enum as a `oneOf` gives every
@@ -246,7 +249,10 @@ says which union it belongs to. `Signal::Red(SignalRed)` reads once at the use
 site and stays unique at the crate root. Two unions that both hold a member named
 `Unknown` would otherwise take one name and stop generation.
 
-Two members that lower to one type also end generation. Serde reads an untagged
-enum in order and takes the first variant that fits, so the second one never
-matches. A value built with it comes back as the first variant, which changes the
-value and reports nothing. Remove the repeated member.
+Two members can share a Rust type. A `oneOf` requires exactly one successful Rust payload decode.
+Discriminator mappings affect variant names only. They do not add or change payload properties.
+
+An `anyOf` preserves the full JSON value. Deserialize-capable wrappers require at least one successful Rust alternative decode.
+Serialize-only wrappers instead accept unvalidated JSON without a payload `Deserialize` requirement.
+Rust deserialization checks do not enforce all schema constraints. Every union produces a generation warning about this limit.
+See [Union matching](design.md#union-matching-follows-rust-deserialization) for the API and its limits.

@@ -1,0 +1,107 @@
+openapi: "3.0.3"
+info:
+  title: Inline nullable bodies
+  version: "1.0.0"
+components:
+  schemas:
+    Nullable: { type: string }
+    NullableText: { type: string, nullable: true }
+    TextAlias:
+      $ref: "#/components/schemas/NullableText"
+    WrappedText:
+      allOf:
+        - $ref: "#/components/schemas/TextAlias"
+paths:
+  /array:
+    post:
+      operationId: array
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              nullable: true
+              allOf:
+                - type: array
+                  nullable: true
+                  items:
+                    nullable: true
+                    allOf:
+                      - { type: string, nullable: true }
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf:
+                  - type: array
+                    nullable: true
+                    items: { type: string, nullable: true }
+  /scalar:
+    post:
+      operationId: scalar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              nullable: true
+              allOf:
+                - nullable: true
+                  allOf:
+                    - { type: integer, nullable: true }
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf:
+                  - { type: integer, nullable: true }
+  /map:
+    post:
+      operationId: map
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              nullable: true
+              allOf:
+                - type: object
+                  nullable: true
+                  additionalProperties: { type: boolean, nullable: true }
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf:
+                  - type: object
+                    nullable: true
+                    additionalProperties: { type: boolean, nullable: true }
+  /alias:
+    post:
+      operationId: alias
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              nullable: true
+              allOf:
+                - $ref: "#/components/schemas/WrappedText"
+      responses:
+        "200":
+          description: Result
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf:
+                  - $ref: "#/components/schemas/NullableText"

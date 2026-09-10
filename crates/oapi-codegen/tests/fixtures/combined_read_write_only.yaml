@@ -3,6 +3,20 @@ info:
   title: Combined Accounts API
   version: 1.0.0
 paths:
+  /union:
+    post:
+      operationId: exchangeUnion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UnionEnvelope" }
+      responses:
+        "200":
+          description: The union response.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UnionEnvelope" }
   /accounts:
     post:
       operationId: createAccount
@@ -77,6 +91,20 @@ paths:
           description: The avatar was stored.
 components:
   schemas:
+    UnionEnvelope:
+      type: object
+      required: [exclusive, inclusive]
+      properties:
+        exclusive: { $ref: "#/components/schemas/ExclusiveAccount" }
+        inclusive: { $ref: "#/components/schemas/InclusiveAccount" }
+    ExclusiveAccount:
+      oneOf:
+        - $ref: "#/components/schemas/Account"
+        - type: boolean
+    InclusiveAccount:
+      anyOf:
+        - $ref: "#/components/schemas/Account"
+        - type: boolean
     Account:
       description: An account, used as a request body and as a response body.
       type: object

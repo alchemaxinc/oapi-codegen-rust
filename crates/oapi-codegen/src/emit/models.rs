@@ -19,7 +19,6 @@ use crate::ir::Item;
 use crate::ir::RustType;
 use crate::ir::StringVariant;
 use crate::ir::Struct;
-use crate::ir::UnionVariant;
 use crate::naming::RustIdent;
 
 /// The full derive set for one generated model: its serde traits, plus which of
@@ -95,7 +94,7 @@ pub(crate) fn emit_item(item: &Item, derives: ModelDerives) -> Result<TokenStrea
 /// fail, because the failure lands on generated code the consumer must not edit.
 /// Dropping it costs the consumer a trait on that one model, and they can still
 /// write the impl by hand.
-fn derive_attr(derives: ModelDerives) -> TokenStream {
+pub(super) fn derive_attr(derives: ModelDerives) -> TokenStream {
     let mut parts: Vec<TokenStream> = Vec::new();
     if derives.serde.serialize {
         parts.push(quote! { serde::Serialize });
@@ -156,7 +155,7 @@ pub(crate) const DEBUG_CLONE_AND_EQ: ForeignDerives = ForeignDerives {
 };
 
 /// Render a `#[deprecated]` / `#[deprecated(note = "...")]` attribute, if any.
-fn deprecated_attr(deprecated: &Option<Deprecation>) -> TokenStream {
+pub(super) fn deprecated_attr(deprecated: &Option<Deprecation>) -> TokenStream {
     return match deprecated {
         None => quote! {},
         Some(Deprecation { note: None }) => quote! { #[deprecated] },
@@ -177,6 +176,9 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
     let mut defaults = Vec::new();
     for field in &strukt.fields {
         fields.push(emit_field(field, serde, &strukt.name)?);
+        if field.serde_skip {
+            continue;
+        }
         // Only the `Deserialize` derive reads `default`, so only it calls these
         // functions. Emitted beside any other derive set, they are dead code.
         if let (Some(value), true) = (&field.default, serde.deserialize) {
@@ -184,7 +186,7 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
         }
         // A rule runs on the way in, so it needs the `Deserialize` derive. With
         // any other derive set the function would be dead code.
-        if serde.deserialize && super::constraints::is_checked(field) {
+        if serde.deserialize && (super::constraints::is_checked(field) || field.ty.is_option()) {
             defaults.push(super::constraints::emit_validate_fn(field)?);
         }
     }
@@ -194,7 +196,12 @@ pub(crate) fn emit_struct(strukt: &Struct, derives: ModelDerives) -> Result<Toke
     let defaults = if defaults.is_empty() {
         quote! {}
     } else {
-        quote! { impl #name { #(#defaults)* } }
+        let allow_deprecated = if strukt.deprecated.is_some() {
+            quote! { #[allow(deprecated)] }
+        } else {
+            quote! {}
+        };
+        quote! { #allow_deprecated impl #name { #(#defaults)* } }
     };
 
     let additional = match &strukt.additional_properties {
@@ -268,6 +275,10 @@ fn emit_default_value(value: &DefaultValue, ty: &RustType) -> Result<TokenStream
             let inner = emit_default_value(value, inner)?;
             return Ok(quote! { Some(#inner) });
         }
+        RustType::Nullable(inner) => {
+            let inner = emit_default_value(value, inner)?;
+            return Ok(quote! { Nullable::Value(#inner) });
+        }
         RustType::Boxed(inner) => {
             let inner = emit_default_value(value, inner)?;
             return Ok(quote! { Box::new(#inner) });
@@ -329,12 +340,12 @@ fn emit_field(field: &Field, serde: SerdeDerives, owner: &RustIdent) -> Result<T
             let path = format!("{}::{}", owner.to_token(), default_fn_name(field));
             metas.push(quote! { default = #path });
         }
-        if serde.deserialize && super::constraints::is_checked(field) {
+        if serde.deserialize && (super::constraints::is_checked(field) || field.ty.is_option()) {
             let path = format!("{}::{}", owner.to_token(), super::constraints::validate_fn_name(field));
             metas.push(quote! { deserialize_with = #path });
             // `deserialize_with` makes serde read the field even when it is
             // absent, so an optional field without a `default` needs one.
-            if field.ty.is_option() && field.default.is_none() {
+            if !field.required && field.ty.is_option() && field.default.is_none() {
                 metas.push(quote! { default });
             }
         }
@@ -408,21 +419,8 @@ pub(crate) fn emit_enum(enom: &Enum, derives: ModelDerives) -> Result<TokenStrea
                 #conversions
             }
         }
-        EnumKind::Union(variants) => {
-            let mut rendered = Vec::with_capacity(variants.len());
-            for variant in variants {
-                rendered.push(emit_union_variant(variant)?);
-            }
-            quote! {
-                #doc
-                #derive_attr
-                #[serde(untagged)]
-                #deprecated
-                pub enum #name {
-                    #(#rendered)*
-                }
-            }
-        }
+        EnumKind::Union(variants) => super::union::emit_one_of(enom, variants, derives)?,
+        EnumKind::AnyOf(variants) => super::union::emit_any_of(enom, variants, derives)?,
     };
     return Ok(tokens);
 }
@@ -489,15 +487,6 @@ fn emit_string_variant(variant: &StringVariant) -> TokenStream {
         #serde_attr
         #name,
     };
-}
-
-/// Render one newtype variant of a union enum.
-fn emit_union_variant(variant: &UnionVariant) -> Result<TokenStream> {
-    let name = variant.name.to_token();
-    let ty = emit_type(&variant.ty)?;
-    return Ok(quote! {
-        #name(#ty),
-    });
 }
 
 /// Render a `type X = Y;` alias.

@@ -19,9 +19,54 @@ pub struct NumberNote {
     pub value: i64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-#[serde(untagged)]
-pub enum Note {
-    TextNote(TextNote),
-    NumberNote(NumberNote),
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+#[serde(transparent)]
+pub struct Note {
+    value: serde_json::Value,
+}
+impl Note {
+    /// Borrow the complete JSON value.
+    pub fn as_value(&self) -> &serde_json::Value {
+        return &self.value;
+    }
+    /// Consume the wrapper and return the complete JSON value.
+    pub fn into_value(self) -> serde_json::Value {
+        return self.value;
+    }
+    ///Decode the `TextNote` Rust alternative.
+    pub fn as_text_note(&self) -> ::std::result::Result<TextNote, serde_json::Error> {
+        return <TextNote as serde::Deserialize>::deserialize(&self.value);
+    }
+    ///Decode the `NumberNote` Rust alternative.
+    pub fn as_number_note(
+        &self,
+    ) -> ::std::result::Result<NumberNote, serde_json::Error> {
+        return <NumberNote as serde::Deserialize>::deserialize(&self.value);
+    }
+}
+impl ::std::convert::TryFrom<serde_json::Value> for Note {
+    type Error = serde_json::Error;
+    fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
+        if !(<TextNote as serde::Deserialize>::deserialize(&value).is_ok()
+            || <NumberNote as serde::Deserialize>::deserialize(&value).is_ok())
+        {
+            return ::std::result::Result::Err(
+                <serde_json::Error as serde::de::Error>::custom(
+                    "anyOf matched no Rust alternative",
+                ),
+            );
+        }
+        return ::std::result::Result::Ok(Self { value });
+    }
+}
+impl<'de> serde::Deserialize<'de> for Note {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        return <Self as ::std::convert::TryFrom<serde_json::Value>>::try_from(value)
+            .map_err(serde::de::Error::custom);
+    }
 }

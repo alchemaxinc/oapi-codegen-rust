@@ -11,27 +11,111 @@
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct OrderItem {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "OrderItem::validate_sku",
+        default
+    )]
     pub sku: Option<String>,
+}
+impl OrderItem {
+    /// The rules the document gives `sku`, checked on the way in.
+    fn validate_sku<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct OrderItemQuantity {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "OrderItemQuantity::validate_quantity",
+        default
+    )]
     pub quantity: Option<i64>,
+}
+impl OrderItemQuantity {
+    /// The rules the document gives `quantity`, checked on the way in.
+    fn validate_quantity<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<i64>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<i64 as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Cart {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Cart::validate_item",
+        default
+    )]
     pub item: Option<OrderItemQuantity>,
 }
+impl Cart {
+    /// The rules the document gives `item`, checked on the way in.
+    fn validate_item<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<OrderItemQuantity>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <OrderItemQuantity as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+}
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Reference {
     OrderItem(OrderItem),
     OrderItemQuantity(OrderItemQuantity),
+}
+impl<'de> serde::Deserialize<'de> for Reference {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <OrderItem as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::OrderItem(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <OrderItemQuantity as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::OrderItemQuantity(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]

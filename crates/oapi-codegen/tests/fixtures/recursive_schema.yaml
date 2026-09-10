@@ -56,12 +56,16 @@ components:
       properties:
         parent:
           $ref: "#/components/schemas/Parent"
-    # A union variant that holds the union. The variant is a field in all but
-    # name, so it takes a box too.
+    # The object property consumes input before the union recurs.
     Expression:
       oneOf:
         - type: string
-        - $ref: "#/components/schemas/Expression"
+        - x-rust-name: Nested
+          type: object
+          required: [nested]
+          properties:
+            nested:
+              $ref: "#/components/schemas/Expression"
     # A cycle that runs through an alias. The alias offers nothing to box, so the
     # struct field on the cycle takes the box instead.
     Wrapper:

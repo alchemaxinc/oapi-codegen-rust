@@ -90,6 +90,7 @@ impl Spec {
         // with a message that names a YAML shape and not a version.
         check_spec_version(&document, &value)?;
         check_top_level_keys(&value)?;
+        crate::coverage::check(&document, &value)?;
         let inner: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseSpec {
                 path: document.clone(),
@@ -140,6 +141,7 @@ impl Spec {
         // before the typed parse for the same reason.
         check_spec_version(file, &value)?;
         check_top_level_keys(&value)?;
+        crate::coverage::check(file, &value)?;
         let parsed: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseRefFile {
                 file: file.to_owned(),

@@ -27,10 +27,31 @@ pub struct AccountRequest {
 pub struct AccountResponse {
     /// Assigned by the server, so only a response carries it.
     pub id: uuid::Uuid,
-    #[serde(rename = "createdAt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "createdAt",
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "AccountResponse::validate_created_at",
+        default
+    )]
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub email: String,
     pub nickname: String,
+}
+impl AccountResponse {
+    /// The rules the document gives `created_at`, checked on the way in.
+    fn validate_created_at<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<chrono::DateTime<chrono::Utc>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <chrono::DateTime<
+                chrono::Utc,
+            > as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 /// A holder splits too, because its field type differs per direction.
@@ -39,8 +60,26 @@ pub struct AccountResponse {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct EnvelopeRequest {
     pub account: AccountRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "EnvelopeRequest::validate_accounts",
+        default
+    )]
     pub accounts: Option<Vec<AccountRequest>>,
+}
+impl EnvelopeRequest {
+    /// The rules the document gives `accounts`, checked on the way in.
+    fn validate_accounts<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<AccountRequest>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Vec<AccountRequest> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 /// A holder splits too, because its field type differs per direction.
@@ -49,8 +88,26 @@ pub struct EnvelopeRequest {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct EnvelopeResponse {
     pub account: AccountResponse,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "EnvelopeResponse::validate_accounts",
+        default
+    )]
     pub accounts: Option<Vec<AccountResponse>>,
+}
+impl EnvelopeResponse {
+    /// The rules the document gives `accounts`, checked on the way in.
+    fn validate_accounts<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<Vec<AccountResponse>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <Vec<AccountResponse> as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
 }
 
 /// An alias to a split model splits as well.
@@ -66,6 +123,22 @@ pub type AccountListResponse = Vec<AccountResponse>;
 /// No mark reaches this schema, so it keeps its name.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Untouched {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Untouched::validate_label",
+        default
+    )]
     pub label: Option<String>,
+}
+impl Untouched {
+    /// The rules the document gives `label`, checked on the way in.
+    fn validate_label<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }

@@ -190,8 +190,8 @@ An inline schema carries no name of its own, so `x-rust-name` on that schema has
 nothing to override. The remedy acts on the component schema that encloses it, or it
 moves the inline schema into a component of its own. This matches Go's
 `oapi-codegen`, which documents `x-go-name` on a component schema and on a property,
-and not on an inline schema. A member of a `oneOf` list is the one exception,
-because that member becomes a variant that needs a name of its own. See
+and not on an inline schema. A member of a `oneOf` or `anyOf` list is the exception.
+Its variant or typed accessor needs a name of its own. See
 [Union variants](extensions.md#union-variants).
 
 A per-operation type can take the name of a model. A schema named `<Op>Response` is
@@ -274,6 +274,51 @@ this document does not track it. Read the version table in the root
 A document must also declare no `webhooks:` key. That key carries operations,
 and the generator emits no handler for them. Silence about the key reads as "the
 document declares no such operation", so the generator rejects the key.
+
+## Diagnose unhandled spec content
+
+The generator inspects OpenAPI object keys before typed deserialization.
+The inspection covers the root document and each referenced document that the
+loader reads. It runs before filtering, so an excluded operation cannot hide an
+invalid key.
+
+The catalogue in `crates/oapi-codegen/src/coverage.rs` distinguishes handled keys, annotations, and
+unsupported features. An unknown key is an error with the document name and a
+JSON pointer. An invalid object, map, or array structure is also an error.
+The generator reports independent key errors together, before it writes
+output.
+
+A valid but unimplemented feature produces a warning. Examples include callbacks,
+XML serialization, response links, server overrides, and body encoding options.
+Existing errors remain errors. For example, an unsupported body type or a `not`
+schema still stops generation.
+
+Annotations that have no generated representation remain intentionally omitted.
+These include document information, schema titles, external documentation, and
+examples. Compatibility extensions with an `x-go-` prefix are also intentionally
+ignored. Other unhandled extensions produce warnings.
+
+Property names, schema names, security scheme names, and media types are data,
+not fixed OpenAPI keys. Payloads in `example`, `default`, and example `value`
+fields are also data. The inspection does not interpret their contents as
+OpenAPI objects. However, it still inspects objects inside unsupported features,
+such as callback operations.
+
+Warnings also identify several limits of the current translation. These include
+Rust union matching, merged `allOf` members, nullability, and unconstrained fallback
+types. Every `oneOf` and `anyOf` produces a warning: Rust deserialization checks
+do not enforce all schema constraints. Body selection reports discarded media entries.
+The warnings expose these limits without changing the generated types.
+The catalogue is not a complete OpenAPI value validator. Lowering still applies
+its own value and combination checks.
+
+Warnings go to stderr for library calls and CLI commands, including `--check`.
+A warning alone does not change the exit code. Drift and generation errors still
+make `--check` fail.
+
+Configuration diagnostics use the serialized shape of `Config::default()`.
+This keeps recognized configuration keys in the Rust types rather than in a
+second catalogue. Dynamic `import-mapping` entries do not enter this comparison.
 
 ## A body must declare a content type the generator can represent
 
@@ -384,26 +429,49 @@ reason: the literal does not fit.
 A `number` or `boolean` `enum` still lowers to a bare `f64` or `bool`. A float is
 not a legal discriminant, and a boolean enum names nothing useful.
 
-## A union cannot hold one type twice
+## Union matching follows Rust deserialization
 
-A `oneOf` or an `anyOf` becomes an enum with `#[serde(untagged)]`, so no tag
-appears on the wire and serde picks a variant by shape. It reads the variants in
-declaration order and takes the first that fits.
+`oneOf` and `anyOf` have different default representations. Both changes break
+compatibility with first-match deserialization.
 
-That order makes a repeated type unreachable. A union whose members give `Cat`
-twice compiles, and the second variant never matches: a value built with it
-serializes like the first and reads back as the first. The value changes, and
-nothing reports it. So a repeated type is an error, and the message names the two
-variants that share it.
+A `oneOf` remains a tag-free Rust enum. Its deserializer tries each Rust payload type against a shared reference to a `serde_json::Value`.
+Exactly one decode must succeed. Zero successes and multiple successes produce an error.
+The implementation returns the decoded variant without a payload clone. Repeated alternatives count separately.
 
-The check reads the lowered Rust type, not the schema. Two members that differ in
-the document but reach one type still collide, which is the case that matters,
-because the wire is all serde sees.
+Union recursion must pass through an object property or array element. The generator rejects cycles through only unions and aliases to prevent infinite deserialization.
 
-The check does not read shapes. Two distinct types with the same fields still
-shadow each other at run time, and the generator accepts them. Deciding that in
-general means comparing every optional field and every subset, so the generator
-draws the line at a repeated type, where the fault is exact.
+Discriminator mappings affect variant names only. They do not filter alternatives or add discriminator properties to serialized payloads.
+A discriminator field affects decoding only through its Rust representation.
+
+An `anyOf` becomes a struct with a private `serde_json::Value` field.
+In deserialize-capable directions, `TryFrom<serde_json::Value>` requires at least one successful Rust alternative decode and returns `Result<Self, serde_json::Error>`.
+`Deserialize` delegates to this constructor. Serialization preserves the full JSON value, including unknown properties and properties from other matches.
+It does not preserve source whitespace, object key order, or duplicate keys.
+
+The wrapper exposes these methods:
+
+- `as_value()` borrows the full JSON value without mutation.
+- `into_value()` consumes the wrapper and returns the full JSON value.
+- In deserialize-capable directions, `as_<alternative>()` returns `Result<T, serde_json::Error>`.
+  Each call decodes that alternative from the stored value. An error means that this Rust type cannot decode the value.
+
+Serialize-only wrappers instead provide `From<serde_json::Value>` as an explicit, unvalidated constructor.
+They have no typed accessors and require no payload `Deserialize` implementation.
+They have no public raw field or mutable raw accessor.
+An accessor name that conflicts with another method produces a generation error.
+
+### Deliberate limits
+
+Every union produces a generation warning: Rust deserialization checks do not enforce all schema constraints, which can affect match counts.
+Constraints affect matching only where the Rust representation enforces them. There is no separate schema validation engine.
+
+Two schemas with disjoint numeric bounds can lower to aliases of the same Rust type.
+Both aliases accept the same values, so their `oneOf` rejects those values as ambiguous.
+An integer JSON value can also decode as both `i64` and `f64`.
+Objects with both required property sets can match two alternatives when serde discards unknown properties.
+Nullable types and merged `allOf` objects retain their existing representation limits.
+Foreign `x-rust-type` implementations determine their own decoding behavior.
+Request and response projections retain their directional traits. Matching needs no additional payload `Clone`, `Debug`, or `Serialize` implementation.
 
 A variant takes its name from `x-rust-name`, else from the type a `$ref` names,
 else from the type an inline member holds when it hoists none of its own. An
@@ -589,28 +657,61 @@ The function is associated, not free. This keeps it out of the crate root, where
 every generated type lives. Field names are unique within a struct, so these
 names are unique too.
 
-`nullable` is the exception. There `null` is a value that the property carries.
-The `Option` stays, and the default fills its `Some` side. A `default: null` does
-nothing. The parser reads it as no default at all, and serde already leaves a
-missing `Option` as `None`.
+A nullable property uses `Nullable<T>`. A non-null default fills its
+`Nullable::Value` variant. The parser discards `default: null`, so it cannot
+fill an absent property with explicit null. The generator reports this limitation.
 
-The generator ignores a `default` on a **required** property. The property is
-always present. Use the default, and a payload that omits a required property
-becomes valid.
+The generator ignores a `default` on a **required** property. A required property must remain present.
 
-Only a value with a literal form works: a string, a number, a boolean, an enum
-value, an empty array, and an empty object. "An empty object" means a free-form
-map, from `additionalProperties`. A `default: {}` on a property with named
-properties is an error, because a struct has no such literal. A non-empty array,
-a non-empty object, and a value of the wrong type are errors too, not silent
-drops. A dropped default leaves the document and the code in disagreement. An
-`int32` property with a default outside the range of `i32` is an error for the
-same reason. The alternative is generated code that does not compile.
+Supported defaults include strings, numbers, booleans, string enum values, empty arrays, and empty maps.
+An empty object means a map from `additionalProperties`, not a struct with named properties.
+Unsupported defaults on non-nullable properties produce errors. Unsupported defaults on nullable properties produce warnings and are ignored.
+A default of the wrong type or outside the Rust integer range remains an error.
 
 A query parameter follows the same rule. A `default: 20` on `limit` gives a
 plain `i32` field. The default applies when the request omits `limit`. An empty
 `?limit=` is not an omission. It is the text `""`, and a parse of it into an
 `i32` fails.
+
+## Property presence and nullability
+
+Presence and nullability are independent:
+
+| Schema                 | Rust field            | Accepted JSON states   |
+| ---------------------- | --------------------- | ---------------------- |
+| Required, non-nullable | `T`                   | Value                  |
+| Optional, non-nullable | `Option<T>`           | Absent or value        |
+| Required, nullable     | `Nullable<T>`         | Null or value          |
+| Optional, nullable     | `Option<Nullable<T>>` | Absent, null, or value |
+
+`Nullable::Null` represents JSON null. `Nullable::Value(value)` represents a value.
+An absent optional field becomes `None`. An explicit null never becomes an absent field.
+Serialization omits `None` and retains `Some(Nullable::Null)`, which supports PATCH round trips.
+An optional field with a non-null default uses the default when absent, as described above.
+
+Nullable named schemas remain aliases. Named objects and enums have a separate
+`Value` type for their non-null representation. References, array items, and map values retain nullability.
+The recursion pass inserts `Box` through both presence and nullability wrappers.
+
+Inline JSON request and response bodies retain nullability for primitives, arrays, and maps.
+A single-member `allOf` can wrap a body reference with `nullable: true`.
+The generator emits and reserves the `Nullable` helper only when a model or body needs it.
+Package output imports the helper from the models module, even without component models.
+Inline nullable parameters and non-JSON body schemas produce warnings because their wire formats have no supported null representation.
+
+`x-rust-type` replaces the value type, not its presence or nullability.
+`x-rust-serde-skip` disables these rules for the skipped field.
+Skipped fields need no generated deserializer or default function.
+An `x-rust-type` override also stops inherited `allOf` constraints and produces a warning.
+`x-omitempty: false` can serialize an absent field as null, so it does not preserve PATCH states.
+Unconstrained schemas and custom types can accept null themselves.
+Union matching and allOf merging retain their documented limitations.
+
+Constraints on nullable custom types, formatted strings, enums, and objects with named properties produce warnings instead of generated checks.
+For optional nullable properties, unsupported defaults produce warnings and leave the property optional.
+This includes non-empty collections, custom types, formatted strings, integer enums, and composed schemas.
+Defaults on referenced schemas do not fill absent properties.
+The raw-document diagnostic reports null defaults before the OpenAPI parser discards them.
 
 ## The server names its security but does not enforce it
 

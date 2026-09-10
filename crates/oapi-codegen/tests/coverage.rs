@@ -45,6 +45,21 @@ struct Feature {
 
 /// The complete catalogue of OpenAPI 3.0 schema features and their handling.
 const TEST_TABLE: &[Feature] = &[
+    Feature {
+        element: "schema.anyOf.accessor-collision",
+        status: Status::Unsupported,
+        fixture: Some("unsupported_union_accessor_collision"),
+    },
+    Feature {
+        element: "schema.union.rust-deserialization",
+        status: Status::Supported,
+        fixture: Some("union_semantics"),
+    },
+    Feature {
+        element: "schema.union.prelude-names",
+        status: Status::Supported,
+        fixture: Some("union_prelude_names"),
+    },
     // Schema kinds
     Feature {
         element: "schema.type.string",
@@ -143,8 +158,8 @@ const TEST_TABLE: &[Feature] = &[
     },
     Feature {
         element: "schema.oneOf.duplicate-variant-type",
-        status: Status::Unsupported,
-        fixture: Some("unsupported_duplicate_union_variant"),
+        status: Status::Supported,
+        fixture: Some("union_duplicate"),
     },
     Feature {
         element: "schema.oneOf.unnamed-inline-member",
@@ -308,6 +323,11 @@ const TEST_TABLE: &[Feature] = &[
     },
     Feature {
         element: "meta.nullable",
+        status: Status::Supported,
+        fixture: Some("nullable"),
+    },
+    Feature {
+        element: "meta.nullable.presence-and-direction",
         status: Status::Supported,
         fixture: Some("nullable"),
     },
@@ -517,6 +537,7 @@ const TEST_TABLE: &[Feature] = &[
 /// [`TEST_TABLE`]): path parameters, JSON request bodies, and typed responses.
 /// Each must have a `#[test]` via [`server_generated_tests!`].
 const SERVER_FIXTURES: &[&str] = &[
+    "server_union_traits",
     "server_petstore",
     "server_refs",
     "server_query_params",
@@ -586,6 +607,7 @@ const SERVER_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// header/cookie inputs, single-content request bodies, typed responses, and
 /// security schemes (bearer, basic, and API-key credentials).
 const CLIENT_FIXTURES: &[&str] = &[
+    "client_union_traits",
     "client_widgets",
     "client_auth",
     "client_multipart_request",
@@ -606,6 +628,7 @@ const CLIENT_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// flat crate-root layout in which the server and client share one file and the
 /// same per-operation types alongside the component models.
 const COMBINED_FIXTURES: &[&str] = &[
+    "combined_inline_nullable",
     "combined_keyword_operations",
     "combined_read_write_only",
     "combined_prelude_value_names",
@@ -641,6 +664,8 @@ const COMBINED_UNSUPPORTED_FIXTURES: &[&str] = &[
 /// take one name. Both need a `response-type-suffix` to reach the clash, so both
 /// succeed with the default config and fail with that option set.
 const NAMING_COLLISION_FIXTURES: &[&str] = &[
+    "nullable_name_collision",
+    "nullable_rename_collision",
     "type_name_collision_error",
     "type_name_collision_suffix",
     "type_name_collision_pruned",
@@ -746,6 +771,9 @@ generated_tests!(
     oneof_discriminator,
     oneof_untagged,
     oneof_variant_naming,
+    union_duplicate,
+    union_semantics,
+    union_prelude_names,
     compose_shared,
     primitive_scalars,
     recursive_schema,
@@ -849,6 +877,7 @@ macro_rules! server_generated_tests {
 }
 
 server_generated_tests!(
+    server_union_traits,
     server_petstore,
     server_refs,
     server_query_params,
@@ -1221,6 +1250,7 @@ macro_rules! client_generated_tests {
 }
 
 client_generated_tests!(
+    client_union_traits,
     client_widgets,
     client_auth,
     client_multipart_request,
@@ -1330,6 +1360,7 @@ macro_rules! combined_generated_tests {
 }
 
 combined_generated_tests!(
+    combined_inline_nullable,
     combined_keyword_operations,
     combined_read_write_only,
     combined_prelude_value_names,
@@ -1402,6 +1433,8 @@ macro_rules! package_generated_tests {
 }
 
 package_generated_tests!(
+    combined_inline_nullable,
+    nullable,
     combined_keyword_operations,
     combined_prelude_value_names,
     combined_server_client,
@@ -2238,6 +2271,33 @@ fn dependency_report_reflects_generated_output() {
     for name in &names {
         assert!(KNOWN.contains(name), "report named an unexpected crate `{name}`");
     }
+
+    for stem in ["oneof_untagged", "anyof_untagged", "union_semantics"] {
+        let fixture = tests_dir().join("fixtures").join(format!("{stem}.yaml"));
+        let code = oapi_codegen::generate_models_string(&fixture).expect("union generation");
+        let dependencies = oapi_codegen::deps::required_dependencies(&code);
+        assert!(
+            dependencies
+                .iter()
+                .any(|dependency| return dependency.name == "serde_json"),
+            "{stem}"
+        );
+        assert!(
+            dependencies.iter().all(|dependency| return dependency.name != "regex"),
+            "{stem}"
+        );
+    }
+}
+
+#[test]
+fn anyof_accessor_collisions_name_the_conflicting_method() {
+    let fixture = tests_dir()
+        .join("fixtures")
+        .join("unsupported_union_accessor_collision.yaml");
+    let error = oapi_codegen::generate_models_string(&fixture).expect_err("accessor collision");
+    let message = error.to_string();
+    assert!(message.contains("as_value"), "{message}");
+    assert!(message.contains("x-rust-name"), "{message}");
 }
 
 /// with the same name at the crate root.
@@ -2279,6 +2339,34 @@ fn reserved_interface_name_is_target_scoped() {
         .expect("a schema named `Api` must not collide when only the client is generated");
 }
 
+#[test]
+fn nullable_helper_name_is_reserved_only_when_emitted() {
+    for fixture in ["nullable_name_collision", "nullable_rename_collision"] {
+        let path = tests_dir().join("fixtures").join(format!("{fixture}.yaml"));
+        let mut config = oapi_codegen::Config::default();
+        config.generate.models = true;
+        assert!(matches!(
+            oapi_codegen::generate(&path, &config),
+            Err(oapi_codegen::Error::TypeNameCollision { name, .. }) if name == "Nullable"
+        ));
+        config.output_options.exclude_schemas = vec!["Text".to_owned()];
+        let source = oapi_codegen::generate(&path, &config).expect("unused helper name is available");
+        assert!(source.contains("pub type Nullable = String;"));
+        assert!(!source.contains("pub enum Nullable"));
+    }
+    let path = tests_dir().join("fixtures/combined_inline_nullable.yaml");
+    let mut config = combined_config();
+    config.output_options.skip_prune = true;
+    assert!(matches!(
+        oapi_codegen::generate(&path, &config),
+        Err(oapi_codegen::Error::TypeNameCollision { name, .. }) if name == "Nullable"
+    ));
+    assert!(matches!(
+        oapi_codegen::generate_package(&path, &config, std::path::Path::new("unused.rs")),
+        Err(oapi_codegen::Error::TypeNameCollision { name, .. }) if name == "Nullable"
+    ));
+}
+
 /// Whether `generated` declares `name` as a `trait`, `struct`, or `enum` item.
 /// The match requires an item keyword before the name and a non-identifier
 /// character after it, so a longer identifier that merely shares the prefix
@@ -2299,9 +2387,12 @@ fn declares_type(generated: &str, name: &str) -> bool {
 #[test]
 fn reserved_names_are_declared_in_combined_output() {
     let dir = tests_dir();
-    let fixture = dir.join("fixtures").join("combined_server_client.yaml");
+    let fixture = dir.join("fixtures").join("nullable.yaml");
     let generated =
         oapi_codegen::generate(&fixture, &combined_config()).expect("generating combined server+client output failed");
+    assert!(generated.contains("DirectionalValueRequest"));
+    assert!(generated.contains("DirectionalValueResponse"));
+    assert!(!generated.contains("struct Account"));
     let targets = oapi_codegen::emit::Targets {
         server: true,
         client: true,

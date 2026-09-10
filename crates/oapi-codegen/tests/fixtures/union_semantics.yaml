@@ -1,0 +1,110 @@
+openapi: "3.0.3"
+info:
+  title: Rust union matching
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Numeric:
+      oneOf:
+        - type: integer
+        - type: number
+    Low:
+      type: integer
+      minimum: 0
+      maximum: 10
+    High:
+      type: integer
+      minimum: 11
+      maximum: 20
+    Ranges:
+      oneOf:
+        - $ref: "#/components/schemas/Low"
+        - $ref: "#/components/schemas/High"
+    Choice:
+      type: string
+      enum: [red, blue]
+    OtherChoice:
+      type: string
+      enum: [blue, green]
+    Colors:
+      oneOf:
+        - $ref: "#/components/schemas/Choice"
+        - $ref: "#/components/schemas/OtherChoice"
+    Left:
+      type: object
+      required: [left]
+      properties:
+        left: { type: string }
+    Right:
+      type: object
+      required: [right]
+      properties:
+        right: { type: string }
+    Objects:
+      oneOf:
+        - $ref: "#/components/schemas/Left"
+        - $ref: "#/components/schemas/Right"
+    RawObjects:
+      anyOf:
+        - $ref: "#/components/schemas/Left"
+        - $ref: "#/components/schemas/Right"
+    Closed:
+      type: object
+      required: [left]
+      additionalProperties: false
+      properties:
+        left: { type: string }
+    ClosedChoice:
+      oneOf:
+        - $ref: "#/components/schemas/Closed"
+        - $ref: "#/components/schemas/Right"
+    Nested:
+      oneOf:
+        - $ref: "#/components/schemas/Colors"
+        - type: boolean
+    NestedAny:
+      oneOf:
+        - $ref: "#/components/schemas/RawObjects"
+        - type: boolean
+    DuplicateAny:
+      anyOf:
+        - $ref: "#/components/schemas/Left"
+        - $ref: "#/components/schemas/Left"
+    Discriminated:
+      oneOf:
+        - $ref: "#/components/schemas/Left"
+        - $ref: "#/components/schemas/Right"
+      discriminator:
+        propertyName: kind
+        mapping:
+          chosen: "#/components/schemas/Left"
+    Merged:
+      allOf:
+        - $ref: "#/components/schemas/Left"
+        - type: object
+          required: [tag]
+          properties:
+            tag: { type: string, enum: [tagged] }
+    Composed:
+      oneOf:
+        - $ref: "#/components/schemas/Merged"
+        - type: boolean
+    Containers:
+      type: object
+      required: [choice, raw]
+      properties:
+        choice:
+          oneOf:
+            - type: string
+            - type: boolean
+        raw:
+          anyOf:
+            - $ref: "#/components/schemas/Left"
+            - $ref: "#/components/schemas/Right"
+    Recursive:
+      anyOf:
+        - type: string
+        - x-rust-name: List
+          type: array
+          items: { $ref: "#/components/schemas/Recursive" }

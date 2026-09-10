@@ -12,6 +12,22 @@
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct GetWidgetResponse {
     pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "GetWidgetResponse::validate_label",
+        default
+    )]
     pub label: Option<String>,
+}
+impl GetWidgetResponse {
+    /// The rules the document gives `label`, checked on the way in.
+    fn validate_label<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<String>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<String as serde::Deserialize>::deserialize(deserializer)?);
+        return Ok(value);
+    }
 }

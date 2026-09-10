@@ -15,4 +15,133 @@ pub type Opaque = crate::restricted::Opaque;
 pub struct Thing {
     pub id: String,
     pub opaque: Opaque,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Thing::validate_exclusive",
+        default
+    )]
+    pub exclusive: Option<ThingExclusive>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "Thing::validate_inclusive",
+        default
+    )]
+    pub inclusive: Option<ThingInclusive>,
+}
+impl Thing {
+    /// The rules the document gives `exclusive`, checked on the way in.
+    fn validate_exclusive<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<ThingExclusive>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <ThingExclusive as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `inclusive`, checked on the way in.
+    fn validate_inclusive<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<ThingInclusive>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <ThingInclusive as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, Debug)]
+#[serde(untagged)]
+pub enum ThingExclusive {
+    Opaque(Opaque),
+    Bool(bool),
+}
+impl<'de> serde::Deserialize<'de> for ThingExclusive {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        let mut selected = ::std::option::Option::None;
+        if let ::std::result::Result::Ok(payload) = <Opaque as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Opaque(payload));
+        }
+        if let ::std::result::Result::Ok(payload) = <bool as serde::Deserialize>::deserialize(
+            &value,
+        ) {
+            if selected.is_some() {
+                return ::std::result::Result::Err(
+                    serde::de::Error::custom("oneOf matched multiple Rust alternatives"),
+                );
+            }
+            selected = ::std::option::Option::Some(Self::Bool(payload));
+        }
+        return selected
+            .ok_or_else(|| serde::de::Error::custom(
+                "oneOf matched no Rust alternative",
+            ));
+    }
+}
+
+#[derive(serde::Serialize, Debug, Clone, PartialEq)]
+#[serde(transparent)]
+pub struct ThingInclusive {
+    value: serde_json::Value,
+}
+impl ThingInclusive {
+    /// Borrow the complete JSON value.
+    pub fn as_value(&self) -> &serde_json::Value {
+        return &self.value;
+    }
+    /// Consume the wrapper and return the complete JSON value.
+    pub fn into_value(self) -> serde_json::Value {
+        return self.value;
+    }
+    ///Decode the `Opaque` Rust alternative.
+    pub fn as_opaque(&self) -> ::std::result::Result<Opaque, serde_json::Error> {
+        return <Opaque as serde::Deserialize>::deserialize(&self.value);
+    }
+    ///Decode the `Bool` Rust alternative.
+    pub fn as_bool(&self) -> ::std::result::Result<bool, serde_json::Error> {
+        return <bool as serde::Deserialize>::deserialize(&self.value);
+    }
+}
+impl ::std::convert::TryFrom<serde_json::Value> for ThingInclusive {
+    type Error = serde_json::Error;
+    fn try_from(value: serde_json::Value) -> ::std::result::Result<Self, Self::Error> {
+        if !(<Opaque as serde::Deserialize>::deserialize(&value).is_ok()
+            || <bool as serde::Deserialize>::deserialize(&value).is_ok())
+        {
+            return ::std::result::Result::Err(
+                <serde_json::Error as serde::de::Error>::custom(
+                    "anyOf matched no Rust alternative",
+                ),
+            );
+        }
+        return ::std::result::Result::Ok(Self { value });
+    }
+}
+impl<'de> serde::Deserialize<'de> for ThingInclusive {
+    fn deserialize<__Deserializer: serde::Deserializer<'de>>(
+        deserializer: __Deserializer,
+    ) -> ::std::result::Result<Self, __Deserializer::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(
+            deserializer,
+        )?;
+        return <Self as ::std::convert::TryFrom<serde_json::Value>>::try_from(value)
+            .map_err(serde::de::Error::custom);
+    }
 }

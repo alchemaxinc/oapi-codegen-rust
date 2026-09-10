@@ -1,0 +1,13 @@
+openapi: "3.0.3"
+info:
+  title: Conflicting anyOf accessor
+  version: "1.0.0"
+paths: {}
+components:
+  schemas:
+    Value:
+      type: string
+    Choice:
+      anyOf:
+        - $ref: "#/components/schemas/Value"
+        - type: boolean

@@ -5,11 +5,9 @@
 //! a variant path for an enum. This pass settles that against the field type,
 //! while the schema is still in hand. The emitter then prints the result.
 //!
-//! A value with no literal form is an error, not a silent drop. A dropped
-//! default leaves the document and the code in disagreement.
+//! A value with no literal form produces an error or a diagnostic, not a silent drop.
 //!
-//! `default: null` never arrives. The parser reads it as no default at all, and
-//! serde already leaves a missing `Option` as `None`.
+//! The parser discards `default: null`. The coverage pass reports this limitation.
 
 use serde_json::Value;
 
@@ -18,6 +16,46 @@ use crate::error::Result;
 use crate::ir::DefaultValue;
 use crate::ir::RustType;
 use crate::ir::StringVariant;
+
+pub(crate) fn unsupported_nullable_default(schema: &openapiv3::Schema) -> bool {
+    use openapiv3::SchemaKind;
+    use openapiv3::Type;
+
+    if !schema.schema_data.nullable || schema.schema_data.default.is_none() {
+        return false;
+    }
+    if schema
+        .schema_data
+        .extensions
+        .contains_key(crate::lower::schema::X_RUST_TYPE)
+    {
+        return true;
+    }
+    return match &schema.schema_kind {
+        SchemaKind::Type(Type::String(value)) => {
+            !matches!(
+                crate::lower::schema::string_format_type(&value.format),
+                RustType::String
+            ) && value.enumeration.is_empty()
+        }
+        SchemaKind::Type(Type::Integer(value)) => !value.enumeration.is_empty(),
+        SchemaKind::Type(Type::Boolean(_) | Type::Number(_)) => false,
+        SchemaKind::Type(Type::Array(_)) => schema
+            .schema_data
+            .default
+            .as_ref()
+            .is_some_and(|value| return value.as_array().is_some_and(|items| return !items.is_empty())),
+        SchemaKind::Type(Type::Object(value)) => {
+            !value.properties.is_empty()
+                || schema
+                    .schema_data
+                    .default
+                    .as_ref()
+                    .is_some_and(|value| return value.as_object().is_some_and(|items| return !items.is_empty()))
+        }
+        _ => true,
+    };
+}
 
 /// Lower a `default` against the type of the property.
 ///
@@ -56,9 +94,7 @@ fn value_for(
     variants_of: &dyn Fn(&str) -> Option<Vec<StringVariant>>,
 ) -> Option<DefaultValue> {
     return match ty {
-        // A `nullable` property keeps its `Option`. The default fills the
-        // `Some` side of it.
-        RustType::Option(inner) => value_for(json, inner, variants_of),
+        RustType::Option(inner) | RustType::Nullable(inner) => value_for(json, inner, variants_of),
         RustType::Boxed(inner) => value_for(json, inner, variants_of),
         RustType::Bool => json.as_bool().map(DefaultValue::Bool),
         RustType::I64 => json.as_i64().map(DefaultValue::Int),
@@ -119,7 +155,7 @@ fn variant_for(
 /// The type, in the words a specification author uses, for the error message.
 fn describe(ty: &RustType) -> String {
     return match ty {
-        RustType::Option(inner) | RustType::Boxed(inner) => describe(inner),
+        RustType::Option(inner) | RustType::Nullable(inner) | RustType::Boxed(inner) => describe(inner),
         RustType::Bool => "a boolean".to_owned(),
         RustType::I32 => "a 32-bit integer".to_owned(),
         RustType::I64 => "an integer".to_owned(),
@@ -209,12 +245,19 @@ mod tests {
     }
 
     #[test]
-    fn a_nullable_field_defaults_to_the_some_side() {
-        let optional = RustType::Option(Box::new(RustType::String));
+    fn a_nullable_field_defaults_to_the_value_side() {
+        let optional = RustType::Nullable(Box::new(RustType::String));
         assert_eq!(
             lowered(Value::from("hi"), &optional),
             DefaultValue::Str("hi".to_owned())
         );
+    }
+
+    #[test]
+    fn the_openapi_parser_discards_explicit_null_defaults() {
+        let schema: openapiv3::Schema =
+            serde_yaml::from_str("type: string\nnullable: true\ndefault: null").expect("valid nullable schema");
+        assert!(schema.schema_data.default.is_none());
     }
 
     #[test]

@@ -202,8 +202,8 @@ fn project_item(item: &Item, direction: Direction, projections: &BTreeMap<String
             name: name_of(&enom.name),
             doc: projected_doc(&enom.doc, enom.name.logical(), direction, split, false),
             kind: match &enom.kind {
-                EnumKind::Union(variants) => EnumKind::Union(
-                    variants
+                EnumKind::Union(variants) | EnumKind::AnyOf(variants) => {
+                    let variants = variants
                         .iter()
                         .map(|variant| {
                             return UnionVariant {
@@ -211,8 +211,13 @@ fn project_item(item: &Item, direction: Direction, projections: &BTreeMap<String
                                 ty: project_type(&variant.ty, direction, projections),
                             };
                         })
-                        .collect(),
-                ),
+                        .collect();
+                    if matches!(enom.kind, EnumKind::AnyOf(_)) {
+                        EnumKind::AnyOf(variants)
+                    } else {
+                        EnumKind::Union(variants)
+                    }
+                }
                 other => other.clone(),
             },
             ..enom.clone()
@@ -279,6 +284,7 @@ fn project_type(ty: &RustType, direction: Direction, projections: &BTreeMap<Stri
         RustType::Vec(inner) => RustType::Vec(Box::new(project_type(inner, direction, projections))),
         RustType::Map(inner) => RustType::Map(Box::new(project_type(inner, direction, projections))),
         RustType::Option(inner) => RustType::Option(Box::new(project_type(inner, direction, projections))),
+        RustType::Nullable(inner) => RustType::Nullable(Box::new(project_type(inner, direction, projections))),
         RustType::Boxed(inner) => RustType::Boxed(Box::new(project_type(inner, direction, projections))),
         other => other.clone(),
     };
