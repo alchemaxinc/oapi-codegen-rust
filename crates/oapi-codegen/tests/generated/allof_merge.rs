@@ -9,6 +9,74 @@
     reason = "generated code, not first-party source"
 )]
 
+/// A present JSON value, including explicit null.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(untagged)]
+pub enum Nullable<T> {
+    /// Explicit JSON null.
+    #[default]
+    Null,
+    /// A non-null value.
+    Value(T),
+}
+impl<T> Nullable<T> {
+    /// Borrow the non-null value.
+    pub fn as_ref(&self) -> Option<&T> {
+        return match self {
+            Self::Null => None,
+            Self::Value(value) => Some(value),
+        };
+    }
+}
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct NullableVisitor<T>(::core::marker::PhantomData<T>);
+        impl<'de, T: serde::Deserialize<'de>> serde::de::Visitor<'de>
+        for NullableVisitor<T> {
+            type Value = Nullable<T>;
+            fn expecting(
+                &self,
+                formatter: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
+                return formatter.write_str("a present value or null");
+            }
+            fn visit_newtype_struct<D>(
+                self,
+                deserializer: D,
+            ) -> ::core::result::Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                return <Option<T> as serde::Deserialize>::deserialize(deserializer)
+                    .map(|value| {
+                        return match value {
+                            Some(value) => Nullable::Value(value),
+                            None => Nullable::Null,
+                        };
+                    });
+            }
+            fn visit_map<M>(
+                self,
+                map: M,
+            ) -> ::core::result::Result<Self::Value, M::Error>
+            where
+                M: serde::de::MapAccess<'de>,
+            {
+                return T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(Nullable::Value);
+            }
+        }
+        return deserializer
+            .deserialize_newtype_struct(
+                "Nullable",
+                NullableVisitor(::core::marker::PhantomData),
+            );
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct Base {
     pub id: String,
@@ -64,6 +132,297 @@ impl Entity {
                 chrono::Utc,
             > as serde::Deserialize>::deserialize(deserializer)?,
         );
+        return Ok(value);
+    }
+}
+
+pub type Count = Nullable<u64>;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Intersection {
+    #[serde(deserialize_with = "Intersection::validate_count")]
+    pub count: u64,
+    #[serde(deserialize_with = "Intersection::validate_label")]
+    pub label: String,
+    pub color: IntersectionColor,
+}
+impl Intersection {
+    /// The rules the document gives `count`, checked on the way in.
+    fn validate_count<'de, D>(deserializer: D) -> ::core::result::Result<u64, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if *item < 3 {
+                return Err(serde::de::Error::custom("`count` must be 3 or more"));
+            }
+            if *item > 9 {
+                return Err(serde::de::Error::custom("`count` must be 9 or less"));
+            }
+            if *item % 2 != 0 {
+                return Err(serde::de::Error::custom("`count` must be a multiple of 2"));
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `label`, checked on the way in.
+    fn validate_label<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<String, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let pattern = PATTERN
+            .get_or_init(|| {
+                return regex::Regex::new("^[a-z]+$")
+                    .expect("the generator read `^[a-z]+$` at generation time");
+            });
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if !pattern.is_match(item) {
+                return Err(serde::de::Error::custom("`label` must match `^[a-z]+$`"));
+            }
+            if item.chars().nth(2usize).is_none() {
+                return Err(
+                    serde::de::Error::custom("`label` must hold 3 or more characters"),
+                );
+            }
+            if item.chars().nth(6usize).is_some() {
+                return Err(
+                    serde::de::Error::custom("`label` must hold 6 or fewer characters"),
+                );
+            }
+        }
+        return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Reversed {
+    #[serde(deserialize_with = "Reversed::validate_count")]
+    pub count: u64,
+    #[serde(deserialize_with = "Reversed::validate_label")]
+    pub label: String,
+    pub color: ReversedColor,
+}
+impl Reversed {
+    /// The rules the document gives `count`, checked on the way in.
+    fn validate_count<'de, D>(deserializer: D) -> ::core::result::Result<u64, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if *item < 3 {
+                return Err(serde::de::Error::custom("`count` must be 3 or more"));
+            }
+            if *item > 9 {
+                return Err(serde::de::Error::custom("`count` must be 9 or less"));
+            }
+            if *item % 2 != 0 {
+                return Err(serde::de::Error::custom("`count` must be a multiple of 2"));
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `label`, checked on the way in.
+    fn validate_label<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<String, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let pattern = PATTERN
+            .get_or_init(|| {
+                return regex::Regex::new("^[a-z]+$")
+                    .expect("the generator read `^[a-z]+$` at generation time");
+            });
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if !pattern.is_match(item) {
+                return Err(serde::de::Error::custom("`label` must match `^[a-z]+$`"));
+            }
+            if item.chars().nth(2usize).is_none() {
+                return Err(
+                    serde::de::Error::custom("`label` must hold 3 or more characters"),
+                );
+            }
+            if item.chars().nth(6usize).is_some() {
+                return Err(
+                    serde::de::Error::custom("`label` must hold 6 or fewer characters"),
+                );
+            }
+        }
+        return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct Inline {
+    pub value: InlineValue,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct SingleClosed {
+    pub value: SingleClosedValue,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct NullableIntersection {
+    #[serde(deserialize_with = "NullableIntersection::validate_ratio")]
+    pub ratio: Nullable<f64>,
+}
+impl NullableIntersection {
+    /// The rules the document gives `ratio`, checked on the way in.
+    fn validate_ratio<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Nullable<f64>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <Nullable<f64> as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if let Some(item) = item.as_ref() {
+                if *item <= 2.5f64 {
+                    return Err(
+                        serde::de::Error::custom("`ratio` must be more than 2.5"),
+                    );
+                }
+                if *item > 4.5f64 {
+                    return Err(serde::de::Error::custom("`ratio` must be 4.5 or less"));
+                }
+                if {
+                    let steps = *item / 0.5f64;
+                    (steps - steps.round()).abs()
+                        > f64::EPSILON * steps.abs().max(1.0) * 8.0
+                } {
+                    return Err(
+                        serde::de::Error::custom("`ratio` must be a multiple of 0.5"),
+                    );
+                }
+            }
+        }
+        return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum IntersectionColor {
+    #[serde(rename = "green")]
+    Green,
+    #[serde(rename = "blue")]
+    Blue,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum ReversedColor {
+    #[serde(rename = "green")]
+    Green,
+    #[serde(rename = "blue")]
+    Blue,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum InlineValueColor {
+    #[serde(rename = "green")]
+    Green,
+    #[serde(rename = "blue")]
+    Blue,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct InlineValue {
+    #[serde(deserialize_with = "InlineValue::validate_count")]
+    pub count: u64,
+    #[serde(deserialize_with = "InlineValue::validate_label")]
+    pub label: String,
+    pub color: InlineValueColor,
+}
+impl InlineValue {
+    /// The rules the document gives `count`, checked on the way in.
+    fn validate_count<'de, D>(deserializer: D) -> ::core::result::Result<u64, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if *item < 3 {
+                return Err(serde::de::Error::custom("`count` must be 3 or more"));
+            }
+            if *item > 9 {
+                return Err(serde::de::Error::custom("`count` must be 9 or less"));
+            }
+            if *item % 2 != 0 {
+                return Err(serde::de::Error::custom("`count` must be a multiple of 2"));
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `label`, checked on the way in.
+    fn validate_label<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<String, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let pattern = PATTERN
+            .get_or_init(|| {
+                return regex::Regex::new("^[a-z]+$")
+                    .expect("the generator read `^[a-z]+$` at generation time");
+            });
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if !pattern.is_match(item) {
+                return Err(serde::de::Error::custom("`label` must match `^[a-z]+$`"));
+            }
+            if item.chars().nth(2usize).is_none() {
+                return Err(
+                    serde::de::Error::custom("`label` must hold 3 or more characters"),
+                );
+            }
+            if item.chars().nth(6usize).is_some() {
+                return Err(
+                    serde::de::Error::custom("`label` must hold 6 or fewer characters"),
+                );
+            }
+        }
+        return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SingleClosedValue {
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "SingleClosedValue::validate_flag",
+        default
+    )]
+    pub flag: Option<bool>,
+}
+impl SingleClosedValue {
+    /// The rules the document gives `flag`, checked on the way in.
+    fn validate_flag<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<bool>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(<bool as serde::Deserialize>::deserialize(deserializer)?);
         return Ok(value);
     }
 }
