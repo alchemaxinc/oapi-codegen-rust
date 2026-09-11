@@ -12,6 +12,50 @@
 //! `include!` cannot carry one. So this file needs no lint exceptions of its own.
 
 #[test]
+fn all_of_intersections_accept_only_common_payloads() {
+    use generated::allof_merge::Inline;
+    use generated::allof_merge::Intersection;
+    use generated::allof_merge::NullableIntersection;
+    use generated::allof_merge::Reversed;
+    use generated::allof_merge::SingleClosed;
+
+    for input in [
+        r#"{"count":4,"label":"abc","color":"green"}"#,
+        r#"{"count":8,"label":"abcdef","color":"blue"}"#,
+    ] {
+        assert!(serde_json::from_str::<Intersection>(input).is_ok(), "{input}");
+        assert!(serde_json::from_str::<Reversed>(input).is_ok(), "{input}");
+        assert!(serde_json::from_str::<Inline>(&format!(r#"{{"value":{input}}}"#)).is_ok());
+    }
+    for input in [
+        r#"{"count":2,"label":"abc","color":"green"}"#,
+        r#"{"count":3,"label":"abc","color":"green"}"#,
+        r#"{"count":10,"label":"abc","color":"green"}"#,
+        r#"{"count":null,"label":"abc","color":"green"}"#,
+        r#"{"count":4,"label":"ab","color":"green"}"#,
+        r#"{"count":4,"label":"abcdefg","color":"green"}"#,
+        r#"{"count":4,"label":"ABC","color":"green"}"#,
+        r#"{"count":4,"label":"abc","color":"red"}"#,
+        r#"{"count":4,"label":"abc","color":"green","extra":1}"#,
+        r#"{"label":"abc","color":"green"}"#,
+        r#"{"count":4,"color":"green"}"#,
+        r#"{"count":4,"label":"abc"}"#,
+    ] {
+        assert!(serde_json::from_str::<Intersection>(input).is_err(), "{input}");
+        assert!(serde_json::from_str::<Reversed>(input).is_err(), "{input}");
+        assert!(serde_json::from_str::<Inline>(&format!(r#"{{"value":{input}}}"#)).is_err());
+    }
+    assert!(serde_json::from_str::<SingleClosed>(r#"{"value":{"flag":true}}"#).is_ok());
+    assert!(serde_json::from_str::<SingleClosed>(r#"{"value":{"extra":true}}"#).is_err());
+    for input in [r#"{"ratio":null}"#, r#"{"ratio":3.0}"#, r#"{"ratio":4.5}"#] {
+        assert!(serde_json::from_str::<NullableIntersection>(input).is_ok(), "{input}");
+    }
+    for input in [r#"{"ratio":2.5}"#, r#"{"ratio":3.25}"#, r#"{"ratio":5.0}"#, "{}"] {
+        assert!(serde_json::from_str::<NullableIntersection>(input).is_err(), "{input}");
+    }
+}
+
+#[test]
 fn nullable_form_values_preserve_scalar_conversion() {
     use generated::nullable::Nullable;
 

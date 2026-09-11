@@ -305,7 +305,7 @@ OpenAPI objects. However, it still inspects objects inside unsupported features,
 such as callback operations.
 
 Warnings also identify several limits of the current translation. These include
-Rust union matching, merged `allOf` members, nullability, and unconstrained fallback
+Rust union matching, nullability, and unconstrained fallback
 types. Every `oneOf` and `anyOf` produces a warning: Rust deserialization checks
 do not enforce all schema constraints. Body selection reports discarded media entries.
 The warnings expose these limits without changing the generated types.
@@ -346,11 +346,27 @@ drops the payload without a message.
 The generator emits `deny_unknown_fields` only when the struct also derives
 `Deserialize`. The `Serialize` derive does not read the attribute.
 
-Two exceptions apply. A merge of `allOf` members drops the key. In JSON Schema
-each member validates the whole object, so a member with
-`additionalProperties: false` rejects every property that a sibling member
-declares. A merge that honored the key would deny the fields that the merge
-just added.
+An `allOf` object merge unions required names and intersects duplicate scalar
+properties. Numeric bounds and string lengths use the tighter limits.
+Compatible string and integer enums narrow to their common values.
+Nullability on duplicate properties requires both definitions to permit null.
+
+Each closed member must declare every merged property. Otherwise, generation
+fails, including when the forbidden property is optional.
+The merged struct preserves `additionalProperties: false`.
+Schema-valued additional properties and object property-count constraints
+produce an error during a merge.
+
+An absent format, pattern, or `multipleOf` retains the other member's constraint.
+Conflicting specified values, property types, or metadata produce an error
+instead of an order-dependent override.
+Composite overlaps require identical definitions. Enum intersections with
+nullability, scalar constraints, or positional variant names are unsupported.
+Nullable formatted-string constraints are also unsupported.
+Member access flags, defaults, extensions, discriminators, and nullability
+cannot be flattened. Single-reference aliases and nullable wrappers retain
+their existing target behavior.
+This bounded schema intersection is not a full JSON Schema validator.
 
 A query-parameter struct also drops the key. A query string commonly carries a
 parameter that the document does not declare, such as one that a proxy or an

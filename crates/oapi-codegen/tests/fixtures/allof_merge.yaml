@@ -26,3 +26,82 @@ components:
           properties:
             name:
               type: string
+    Count:
+      type: integer
+      minimum: 1
+      maximum: 20
+      multipleOf: 2
+      nullable: true
+    Intersection:
+      allOf:
+        - &wide
+          type: object
+          additionalProperties: false
+          required: [count]
+          properties:
+            count:
+              $ref: "#/components/schemas/Count"
+            label:
+              type: string
+              pattern: ^[a-z]+$
+              minLength: 2
+              maxLength: 8
+            color:
+              type: string
+              enum: [red, green, blue]
+        - &narrow
+          allOf:
+            - type: object
+              additionalProperties: false
+              required: [label, color]
+              properties:
+                count:
+                  type: integer
+                  minimum: 3
+                  maximum: 10
+                  exclusiveMaximum: true
+                label:
+                  type: string
+                  minLength: 3
+                  maxLength: 6
+                color:
+                  type: string
+                  enum: [green, blue]
+    Reversed:
+      allOf: [*narrow, *wide]
+    Inline:
+      type: object
+      required: [value]
+      properties:
+        value:
+          allOf: [*wide, *narrow]
+    SingleClosed:
+      type: object
+      required: [value]
+      properties:
+        value:
+          allOf:
+            - type: object
+              additionalProperties: false
+              properties:
+                flag:
+                  type: boolean
+    NullableIntersection:
+      allOf:
+        - type: object
+          required: [ratio]
+          properties:
+            ratio:
+              type: number
+              nullable: true
+              minimum: 1.5
+              maximum: 5.5
+              multipleOf: 0.5
+        - type: object
+          properties:
+            ratio:
+              type: number
+              nullable: true
+              minimum: 2.5
+              exclusiveMinimum: true
+              maximum: 4.5
