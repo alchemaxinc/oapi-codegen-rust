@@ -5,6 +5,7 @@
 //! [`validate`] collects independent semantic problems so one run can report
 //! every problem it finds rather than aborting on the first.
 
+mod all_of;
 /// Lowering of the validation keywords a schema declares. Used by [`schema`] and
 /// [`paths`] only.
 pub(crate) mod constraints;

@@ -206,6 +206,8 @@ components:
           x-rust-type: i64
           allOf:
             - $ref: "#/components/schemas/NullableText"
+            - type: string
+              minLength: 5
         custom_chain:
           $ref: "#/components/schemas/CustomChain"
         fallback:
@@ -238,6 +240,8 @@ components:
       x-rust-type: i64
       allOf:
         - $ref: "#/components/schemas/NullableText"
+        - type: string
+          minLength: 5
     NullableText:
       type: string
       nullable: true

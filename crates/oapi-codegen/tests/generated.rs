@@ -12,6 +12,79 @@
 //! `include!` cannot carry one. So this file needs no lint exceptions of its own.
 
 #[test]
+fn all_of_enum_intersections_have_stable_variants() {
+    use generated::allof_merge::EnumIntersection;
+    use generated::allof_merge::EnumReversed;
+
+    for label in ["a-b", "a_b"] {
+        for count in [2_i32, 3_i32] {
+            let input = serde_json::json!({"label": label, "count": count});
+            let forward: EnumIntersection = serde_json::from_value(input.clone()).expect("forward enum");
+            let reverse: EnumReversed = serde_json::from_value(input.clone()).expect("reverse enum");
+            assert_eq!(format!("{:?}", forward.label), format!("{:?}", reverse.label));
+            assert_eq!(format!("{:?}", forward.count), format!("{:?}", reverse.count));
+            assert_eq!(serde_json::to_value(forward).expect("forward wire values"), input);
+            assert_eq!(serde_json::to_value(reverse).expect("reverse wire values"), input);
+        }
+    }
+    for input in [
+        serde_json::json!({"label":"other","count":2_i32}),
+        serde_json::json!({"label":"a-b","count":1_i32}),
+        serde_json::json!({"label":"a-b","count":2_147_483_648_i64}),
+    ] {
+        assert!(serde_json::from_value::<EnumIntersection>(input.clone()).is_err());
+        assert!(serde_json::from_value::<EnumReversed>(input).is_err());
+    }
+}
+
+#[test]
+fn all_of_intersections_accept_only_common_payloads() {
+    use generated::allof_merge::IdenticalComposites;
+    use generated::allof_merge::Inline;
+    use generated::allof_merge::Intersection;
+    use generated::allof_merge::NullableIntersection;
+    use generated::allof_merge::Reversed;
+    use generated::allof_merge::SingleClosed;
+
+    for input in [
+        r#"{"count":4,"label":"abc","color":"green"}"#,
+        r#"{"count":8,"label":"abcdef","color":"blue"}"#,
+    ] {
+        assert!(serde_json::from_str::<Intersection>(input).is_ok(), "{input}");
+        assert!(serde_json::from_str::<Reversed>(input).is_ok(), "{input}");
+        assert!(serde_json::from_str::<Inline>(&format!(r#"{{"value":{input}}}"#)).is_ok());
+        assert!(serde_json::from_str::<IdenticalComposites>(&format!(r#"{{"value":{input}}}"#)).is_ok());
+    }
+    for input in [
+        r#"{"count":2,"label":"abc","color":"green"}"#,
+        r#"{"count":3,"label":"abc","color":"green"}"#,
+        r#"{"count":10,"label":"abc","color":"green"}"#,
+        r#"{"count":null,"label":"abc","color":"green"}"#,
+        r#"{"count":4,"label":"ab","color":"green"}"#,
+        r#"{"count":4,"label":"abcdefg","color":"green"}"#,
+        r#"{"count":4,"label":"ABC","color":"green"}"#,
+        r#"{"count":4,"label":"abc","color":"red"}"#,
+        r#"{"count":4,"label":"abc","color":"green","extra":1}"#,
+        r#"{"label":"abc","color":"green"}"#,
+        r#"{"count":4,"color":"green"}"#,
+        r#"{"count":4,"label":"abc"}"#,
+    ] {
+        assert!(serde_json::from_str::<Intersection>(input).is_err(), "{input}");
+        assert!(serde_json::from_str::<Reversed>(input).is_err(), "{input}");
+        assert!(serde_json::from_str::<Inline>(&format!(r#"{{"value":{input}}}"#)).is_err());
+        assert!(serde_json::from_str::<IdenticalComposites>(&format!(r#"{{"value":{input}}}"#)).is_err());
+    }
+    assert!(serde_json::from_str::<SingleClosed>(r#"{"value":{"flag":true}}"#).is_ok());
+    assert!(serde_json::from_str::<SingleClosed>(r#"{"value":{"extra":true}}"#).is_err());
+    for input in [r#"{"ratio":null}"#, r#"{"ratio":3.0}"#, r#"{"ratio":4.5}"#] {
+        assert!(serde_json::from_str::<NullableIntersection>(input).is_ok(), "{input}");
+    }
+    for input in [r#"{"ratio":2.5}"#, r#"{"ratio":3.25}"#, r#"{"ratio":5.0}"#, "{}"] {
+        assert!(serde_json::from_str::<NullableIntersection>(input).is_err(), "{input}");
+    }
+}
+
+#[test]
 fn nullable_form_values_preserve_scalar_conversion() {
     use generated::nullable::Nullable;
 
