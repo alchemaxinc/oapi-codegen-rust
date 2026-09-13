@@ -13,6 +13,7 @@
 
 #[test]
 fn all_of_intersections_accept_only_common_payloads() {
+    use generated::allof_merge::IdenticalComposites;
     use generated::allof_merge::Inline;
     use generated::allof_merge::Intersection;
     use generated::allof_merge::NullableIntersection;
@@ -26,6 +27,7 @@ fn all_of_intersections_accept_only_common_payloads() {
         assert!(serde_json::from_str::<Intersection>(input).is_ok(), "{input}");
         assert!(serde_json::from_str::<Reversed>(input).is_ok(), "{input}");
         assert!(serde_json::from_str::<Inline>(&format!(r#"{{"value":{input}}}"#)).is_ok());
+        assert!(serde_json::from_str::<IdenticalComposites>(&format!(r#"{{"value":{input}}}"#)).is_ok());
     }
     for input in [
         r#"{"count":2,"label":"abc","color":"green"}"#,
@@ -44,6 +46,7 @@ fn all_of_intersections_accept_only_common_payloads() {
         assert!(serde_json::from_str::<Intersection>(input).is_err(), "{input}");
         assert!(serde_json::from_str::<Reversed>(input).is_err(), "{input}");
         assert!(serde_json::from_str::<Inline>(&format!(r#"{{"value":{input}}}"#)).is_err());
+        assert!(serde_json::from_str::<IdenticalComposites>(&format!(r#"{{"value":{input}}}"#)).is_err());
     }
     assert!(serde_json::from_str::<SingleClosed>(r#"{"value":{"flag":true}}"#).is_ok());
     assert!(serde_json::from_str::<SingleClosed>(r#"{"value":{"extra":true}}"#).is_err());

@@ -272,6 +272,11 @@ pub struct Inline {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct IdenticalComposites {
+    pub value: IdenticalCompositesValue,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct SingleClosed {
     pub value: SingleClosedValue,
 }
@@ -350,6 +355,78 @@ pub struct InlineValue {
     pub color: InlineValueColor,
 }
 impl InlineValue {
+    /// The rules the document gives `count`, checked on the way in.
+    fn validate_count<'de, D>(deserializer: D) -> ::core::result::Result<u64, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if *item < 3 {
+                return Err(serde::de::Error::custom("`count` must be 3 or more"));
+            }
+            if *item > 9 {
+                return Err(serde::de::Error::custom("`count` must be 9 or less"));
+            }
+            if *item % 2 != 0 {
+                return Err(serde::de::Error::custom("`count` must be a multiple of 2"));
+            }
+        }
+        return Ok(value);
+    }
+    /// The rules the document gives `label`, checked on the way in.
+    fn validate_label<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<String, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let pattern = PATTERN
+            .get_or_init(|| {
+                return regex::Regex::new("^[a-z]+$")
+                    .expect("the generator read `^[a-z]+$` at generation time");
+            });
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        {
+            let item = &value;
+            if !pattern.is_match(item) {
+                return Err(serde::de::Error::custom("`label` must match `^[a-z]+$`"));
+            }
+            if item.chars().nth(2usize).is_none() {
+                return Err(
+                    serde::de::Error::custom("`label` must hold 3 or more characters"),
+                );
+            }
+            if item.chars().nth(6usize).is_some() {
+                return Err(
+                    serde::de::Error::custom("`label` must hold 6 or fewer characters"),
+                );
+            }
+        }
+        return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum IdenticalCompositesValueColor {
+    #[serde(rename = "green")]
+    Green,
+    #[serde(rename = "blue")]
+    Blue,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct IdenticalCompositesValue {
+    #[serde(deserialize_with = "IdenticalCompositesValue::validate_count")]
+    pub count: u64,
+    #[serde(deserialize_with = "IdenticalCompositesValue::validate_label")]
+    pub label: String,
+    pub color: IdenticalCompositesValueColor,
+}
+impl IdenticalCompositesValue {
     /// The rules the document gives `count`, checked on the way in.
     fn validate_count<'de, D>(deserializer: D) -> ::core::result::Result<u64, D::Error>
     where

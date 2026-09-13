@@ -75,6 +75,16 @@ components:
       properties:
         value:
           allOf: [*wide, *narrow]
+    IdenticalComposites:
+      allOf:
+        - type: object
+          required: [value]
+          properties:
+            value: &composed
+              allOf: [*wide, *narrow]
+        - type: object
+          properties:
+            value: *composed
     SingleClosed:
       type: object
       required: [value]

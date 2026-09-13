@@ -4,6 +4,7 @@ use openapiv3::ReferenceOr;
 use openapiv3::Schema;
 use openapiv3::SchemaKind;
 use openapiv3::Type;
+use openapiv3::VariantOrUnknownOrEmpty;
 
 use crate::error::Error;
 use crate::error::Result;
@@ -164,7 +165,12 @@ fn intersect(
     left: &ReferenceOr<Box<Schema>>,
     right: &ReferenceOr<Box<Schema>>,
 ) -> Result<ReferenceOr<Box<Schema>>> {
-    if left == right && matches!(left, ReferenceOr::Reference { .. }) {
+    if left == right
+        && match left {
+            ReferenceOr::Reference { .. } => true,
+            ReferenceOr::Item(schema) => matches!(schema.schema_kind, SchemaKind::AllOf { .. }),
+        }
+    {
         return Ok(left.clone());
     }
     let mut left = resolve(spec, path, left)?;
@@ -212,11 +218,15 @@ fn intersect(
             }
             narrow_enum(path, &mut a.enumeration, &b.enumeration)?;
             if !a.enumeration.is_empty()
-                && (nullable || a.pattern.is_some() || a.min_length.is_some() || a.max_length.is_some())
+                && (nullable
+                    || !matches!(a.format, VariantOrUnknownOrEmpty::Empty)
+                    || a.pattern.is_some()
+                    || a.min_length.is_some()
+                    || a.max_length.is_some())
             {
                 return Err(unsupported(
                     path,
-                    "string enum intersections with nullability or string constraints are not supported",
+                    "string enum intersections with nullability, formats, or string constraints are not supported",
                 ));
             }
         }
@@ -588,6 +598,29 @@ mod tests {
                 error.contains("Test.value") && error.contains("enum intersections"),
                 "{error}"
             );
+        }
+    }
+
+    #[test]
+    fn string_enum_formats_are_not_discarded() {
+        for format in ["uuid", "date", "date-time", "byte", "binary", "password"] {
+            let enumeration = json!({"type":"string","enum":["not-a-uuid"]});
+            let formatted = json!({"type":"string","format":format});
+            let combined = json!({"type":"string","format":format,"enum":["not-a-uuid"]});
+            for (left, right) in [
+                (&enumeration, &formatted),
+                (&formatted, &enumeration),
+                (&combined, &combined),
+            ] {
+                let composition = json!({"allOf":[object(left.clone()),object(right.clone())]});
+                for schema in [composition.clone(), object(composition)] {
+                    let error = lower(schema).expect_err("unsupported enum format").to_string();
+                    assert!(
+                        error.contains("Test") && error.contains("value") && error.contains("formats"),
+                        "{error}",
+                    );
+                }
+            }
         }
     }
 }
