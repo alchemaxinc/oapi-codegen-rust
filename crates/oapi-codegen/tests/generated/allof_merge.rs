@@ -322,27 +322,39 @@ impl NullableIntersection {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct EnumIntersection {
+    pub label: EnumIntersectionLabel,
+    pub count: EnumIntersectionCount,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct EnumReversed {
+    pub label: EnumReversedLabel,
+    pub count: EnumReversedCount,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum IntersectionColor {
-    #[serde(rename = "green")]
-    Green,
     #[serde(rename = "blue")]
     Blue,
+    #[serde(rename = "green")]
+    Green,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum ReversedColor {
-    #[serde(rename = "green")]
-    Green,
     #[serde(rename = "blue")]
     Blue,
+    #[serde(rename = "green")]
+    Green,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum InlineValueColor {
-    #[serde(rename = "green")]
-    Green,
     #[serde(rename = "blue")]
     Blue,
+    #[serde(rename = "green")]
+    Green,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
@@ -411,10 +423,10 @@ impl InlineValue {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum IdenticalCompositesValueColor {
-    #[serde(rename = "green")]
-    Green,
     #[serde(rename = "blue")]
     Blue,
+    #[serde(rename = "green")]
+    Green,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
@@ -501,5 +513,81 @@ impl SingleClosedValue {
     {
         let value = Some(<bool as serde::Deserialize>::deserialize(deserializer)?);
         return Ok(value);
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum EnumIntersectionLabel {
+    #[serde(rename = "a-b")]
+    AB,
+    #[serde(rename = "a_b")]
+    Ab2,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(try_from = "i32", into = "i32")]
+#[repr(i32)]
+pub enum EnumIntersectionCount {
+    Value2 = 2,
+    Value3 = 3,
+}
+impl From<EnumIntersectionCount> for i32 {
+    fn from(value: EnumIntersectionCount) -> Self {
+        return match value {
+            EnumIntersectionCount::Value2 => 2,
+            EnumIntersectionCount::Value3 => 3,
+        };
+    }
+}
+impl TryFrom<i32> for EnumIntersectionCount {
+    type Error = String;
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        return match value {
+            2 => Ok(EnumIntersectionCount::Value2),
+            3 => Ok(EnumIntersectionCount::Value3),
+            other => {
+                Err(
+                    format!(
+                        "`{}` is not a value of `{}`", other, "EnumIntersectionCount"
+                    ),
+                )
+            }
+        };
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum EnumReversedLabel {
+    #[serde(rename = "a-b")]
+    AB,
+    #[serde(rename = "a_b")]
+    Ab2,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(try_from = "i32", into = "i32")]
+#[repr(i32)]
+pub enum EnumReversedCount {
+    Value2 = 2,
+    Value3 = 3,
+}
+impl From<EnumReversedCount> for i32 {
+    fn from(value: EnumReversedCount) -> Self {
+        return match value {
+            EnumReversedCount::Value2 => 2,
+            EnumReversedCount::Value3 => 3,
+        };
+    }
+}
+impl TryFrom<i32> for EnumReversedCount {
+    type Error = String;
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        return match value {
+            2 => Ok(EnumReversedCount::Value2),
+            3 => Ok(EnumReversedCount::Value3),
+            other => {
+                Err(format!("`{}` is not a value of `{}`", other, "EnumReversedCount"))
+            }
+        };
     }
 }

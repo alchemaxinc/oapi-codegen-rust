@@ -18,9 +18,9 @@ fn unsupported(path: &str, reason: &str) -> Error {
     };
 }
 
-pub(super) fn merge(spec: &Spec, path: &str, members: &[ReferenceOr<Schema>]) -> Result<ObjectType> {
+pub(super) fn merge(spec: &Spec, path: &str, members: &[ReferenceOr<Schema>], depth: usize) -> Result<ObjectType> {
     let mut objects = Vec::new();
-    collect(spec, path, members, &mut objects, 0)?;
+    collect(spec, path, members, &mut objects, depth)?;
     let mut merged = ObjectType::default();
     for object in &objects {
         if matches!(object.additional_properties, Some(AdditionalProperties::Any(true))) {
@@ -28,7 +28,7 @@ pub(super) fn merge(spec: &Spec, path: &str, members: &[ReferenceOr<Schema>]) ->
         }
         for (name, property) in &object.properties {
             let property = match merged.properties.get(name) {
-                Some(previous) => intersect(spec, &format!("{path}.{name}"), previous, property)?,
+                Some(previous) => intersect(spec, &format!("{path}.{name}"), previous, property, depth)?,
                 None => property.clone(),
             };
             merged.properties.insert(name.clone(), property);
@@ -126,12 +126,12 @@ fn collect(
     return Ok(());
 }
 
-fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>) -> Result<Schema> {
+fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>, depth: usize) -> Result<Schema> {
     let mut schema = match property {
         ReferenceOr::Item(schema) => *schema.clone(),
         ReferenceOr::Reference { reference } => spec.resolve(reference)?.clone(),
     };
-    for _ in 0..MAX_SCHEMA_DEPTH {
+    for _ in depth..MAX_SCHEMA_DEPTH {
         let SchemaKind::AllOf { all_of } = &schema.schema_kind else {
             return Ok(schema);
         };
@@ -164,6 +164,7 @@ fn intersect(
     path: &str,
     left: &ReferenceOr<Box<Schema>>,
     right: &ReferenceOr<Box<Schema>>,
+    depth: usize,
 ) -> Result<ReferenceOr<Box<Schema>>> {
     if left == right
         && match left {
@@ -173,8 +174,8 @@ fn intersect(
     {
         return Ok(left.clone());
     }
-    let mut left = resolve(spec, path, left)?;
-    let mut right = resolve(spec, path, right)?;
+    let mut left = resolve(spec, path, left, depth)?;
+    let mut right = resolve(spec, path, right, depth)?;
     let nullable = left.schema_data.nullable && right.schema_data.nullable;
     left.schema_data.nullable = nullable;
     right.schema_data.nullable = nullable;
@@ -184,8 +185,11 @@ fn intersect(
             "overlapping properties have different metadata or extensions",
         ));
     }
-    if left.schema_data.extensions.contains_key("x-rust-type") && left.schema_kind != right.schema_kind {
-        return Err(unsupported(path, "custom-type property constraints differ"));
+    if left.schema_data.extensions.contains_key("x-rust-type") {
+        if left.schema_kind != right.schema_kind {
+            return Err(unsupported(path, "custom-type property constraints differ"));
+        }
+        return Ok(ReferenceOr::Item(Box::new(left)));
     }
     if left.schema_kind != right.schema_kind
         && ["x-enum-varnames", "x-enumNames"]
@@ -231,6 +235,20 @@ fn intersect(
             }
         }
         (SchemaKind::Type(Type::Integer(a)), SchemaKind::Type(Type::Integer(b))) => {
+            for integer in [&*a, b] {
+                let repr = super::schema::integer_type(integer);
+                if integer
+                    .enumeration
+                    .iter()
+                    .flatten()
+                    .any(|value| return !super::schema::fits_repr(*value, &repr))
+                {
+                    return Err(unsupported(
+                        path,
+                        "an integer enum value exceeds its representation limits",
+                    ));
+                }
+            }
             combine_keyword(path, "formats", &mut a.format, &b.format)?;
             combine_keyword(path, "multipleOf", &mut a.multiple_of, &b.multiple_of)?;
             (a.minimum, a.exclusive_minimum) =
@@ -313,10 +331,18 @@ fn check_range<T: PartialOrd>(path: &str, minimum: Option<T>, maximum: Option<T>
     return Ok(());
 }
 
-fn narrow_enum<T: Clone + PartialEq>(path: &str, left: &mut Vec<T>, right: &[T]) -> Result<()> {
+fn narrow_enum<T: Clone + Ord>(path: &str, left: &mut Vec<T>, right: &[T]) -> Result<()> {
+    for values in [left.as_slice(), right] {
+        let mut seen = std::collections::BTreeSet::new();
+        if values.iter().any(|value| return !seen.insert(value)) {
+            return Err(unsupported(path, "an enum contains duplicate values"));
+        }
+    }
+    if left == right {
+        return Ok(());
+    }
     if left.is_empty() {
         left.extend_from_slice(right);
-        return Ok(());
     }
     if !right.is_empty() {
         left.retain(|value| return right.contains(value));
@@ -324,6 +350,7 @@ fn narrow_enum<T: Clone + PartialEq>(path: &str, left: &mut Vec<T>, right: &[T])
             return Err(unsupported(path, "the enum intersection accepts no value"));
         }
     }
+    left.sort();
     return Ok(());
 }
 
@@ -467,14 +494,26 @@ mod tests {
             ),
             (
                 json!({"type":"integer","enum":[1_i64,2_i64,3_i64]}),
+                json!({"type":"integer","enum":[3_i64,2_i64]}),
+            ),
+            (
+                json!({"type":"string","enum":["a_b","a-b","other"]}),
+                json!({"type":"string","enum":["a-b","a_b"]}),
+            ),
+            (
+                json!({"type":"string","enum":["a_b","a-b"]}),
+                json!({"type":"string","enum":["a-b","a_b"]}),
+            ),
+            (
+                json!({"type":"integer","enum":[3_i64,2_i64]}),
                 json!({"type":"integer","enum":[2_i64,3_i64]}),
             ),
         ] {
             let left = serde_json::from_value(left).expect("left schema");
             let right = serde_json::from_value(right).expect("right schema");
             assert_eq!(
-                intersect(&spec, "Test.value", &left, &right).expect("forward"),
-                intersect(&spec, "Test.value", &right, &left).expect("reverse"),
+                intersect(&spec, "Test.value", &left, &right, 0).expect("forward"),
+                intersect(&spec, "Test.value", &right, &left, 0).expect("reverse"),
             );
         }
     }
@@ -519,7 +558,7 @@ mod tests {
             let expected = serde_json::from_value(expected).expect("intersection schema");
             for (left, right) in [(&left, &right), (&right, &left)] {
                 assert_eq!(
-                    intersect(&spec, "Test.value", left, right).expect("compatible intersection"),
+                    intersect(&spec, "Test.value", left, right, 0).expect("compatible intersection"),
                     expected,
                 );
             }
@@ -561,7 +600,7 @@ mod tests {
             reference: "#/components/schemas/Cycle".to_owned(),
         }];
         assert!(matches!(
-            merge(&spec, "Cycle", &members),
+            merge(&spec, "Cycle", &members, 0),
             Err(Error::SchemaDepthExceeded { .. })
         ));
     }
@@ -574,7 +613,7 @@ mod tests {
             {"type":"object","additionalProperties":true,"properties":{"value":{"type":"string"}}}
         ]))
         .expect("members");
-        let merged = merge(&spec, "Test", &members).expect("open intersection");
+        let merged = merge(&spec, "Test", &members, 0).expect("open intersection");
         assert_eq!(merged.required, ["value"]);
         assert_eq!(merged.additional_properties, Some(AdditionalProperties::Any(true)));
     }
@@ -621,6 +660,63 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn invalid_source_enums_are_rejected_before_intersection() {
+        for (invalid, valid, reason) in [
+            (
+                json!({"type":"string","enum":["a","a","b"]}),
+                json!({"type":"string","enum":["a","b"]}),
+                "duplicate",
+            ),
+            (
+                json!({"type":"string","enum":["removed","removed","b"]}),
+                json!({"type":"string","enum":["b"]}),
+                "duplicate",
+            ),
+            (
+                json!({"type":"integer","enum":[1_i64,1_i64,2_i64]}),
+                json!({"type":"integer","enum":[1_i64,2_i64]}),
+                "duplicate",
+            ),
+            (
+                json!({"type":"integer","enum":[1_i64,1_i64,2_i64]}),
+                json!({"type":"integer","enum":[2_i64]}),
+                "duplicate",
+            ),
+            (
+                json!({"type":"integer","format":"int32","enum":[2_147_483_648_i64,1_i64]}),
+                json!({"type":"integer","format":"int32","enum":[1_i64]}),
+                "representation limits",
+            ),
+            (
+                json!({"type":"integer","format":"int32","enum":[-2_147_483_649_i64,1_i64]}),
+                json!({"type":"integer","format":"int32","enum":[1_i64]}),
+                "representation limits",
+            ),
+        ] {
+            for (left, right) in [(&invalid, &valid), (&valid, &invalid)] {
+                let error = lower(json!({"allOf":[object(left.clone()),object(right.clone())]}))
+                    .expect_err("invalid source enum")
+                    .to_string();
+                assert!(error.contains("Test.value") && error.contains(reason), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn identical_custom_types_keep_control_of_enum_validation() {
+        for values in [json!([2_147_483_648_i64]), json!([1_i64, 1_i64])] {
+            let property = object(json!({
+                "type": "integer",
+                "format": "int32",
+                "enum": values,
+                "x-rust-type": "i64",
+            }));
+            lower(json!({"allOf": [property.clone(), property]}))
+                .expect("custom type replaces the declared integer representation");
         }
     }
 }

@@ -469,7 +469,7 @@ impl Mapper<'_> {
     /// Merge an `allOf` into a single flat struct, resolving `$ref` members to
     /// pull in their properties (matching oapi-codegen's behaviour).
     fn merge_all_of(&mut self, name: &str, members: &[ReferenceOr<Schema>], data: &SchemaData) -> Result<Struct> {
-        let merged = super::all_of::merge(self.spec, name, members)?;
+        let merged = super::all_of::merge(self.spec, name, members, self.depth)?;
         return self.object_to_struct(name, &merged, data);
     }
 
@@ -893,7 +893,7 @@ pub(crate) fn string_format_type(format: &VariantOrUnknownOrEmpty<StringFormat>)
 ///
 /// An unsigned `repr` holds no negative value, so a `minimum` of zero with a
 /// negative `enum` value is a document that disagrees with itself.
-fn fits_repr(value: i64, repr: &RustType) -> bool {
+pub(super) fn fits_repr(value: i64, repr: &RustType) -> bool {
     return match *repr {
         RustType::I32 => i32::try_from(value).is_ok(),
         RustType::U32 => u32::try_from(value).is_ok(),
@@ -1305,6 +1305,60 @@ components:
     fn schema_just_under_the_depth_limit_still_lowers() {
         let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH - 1));
         lower_models(&spec).expect("just under the limit should lower cleanly");
+    }
+
+    #[test]
+    fn all_of_shares_the_inline_depth_budget() {
+        let make_schema = |schema_kind| {
+            return Schema {
+                schema_data: SchemaData::default(),
+                schema_kind,
+            };
+        };
+        let compose = |schemas: Vec<Schema>| {
+            return make_schema(SchemaKind::AllOf {
+                all_of: schemas.into_iter().map(ReferenceOr::Item).collect(),
+            });
+        };
+        for overlap in [false, true] {
+            for excess in [false, true] {
+                let scalar = make_schema(SchemaKind::Type(Type::String(Default::default())));
+                let empty = make_schema(SchemaKind::Type(Type::Object(Default::default())));
+                let mut schema = if overlap { scalar.clone() } else { empty.clone() };
+                for _ in 0..(MAX_SCHEMA_DEPTH / 2 - 2 + usize::from(excess)) {
+                    schema = compose(vec![schema]);
+                }
+                if overlap {
+                    let members = [schema, scalar]
+                        .into_iter()
+                        .map(|property| {
+                            let mut object = ObjectType::default();
+                            object
+                                .properties
+                                .insert("value".to_owned(), ReferenceOr::Item(Box::new(property)));
+                            return make_schema(SchemaKind::Type(Type::Object(object)));
+                        })
+                        .collect();
+                    schema = compose(members);
+                } else {
+                    schema = compose(vec![schema, empty]);
+                }
+                for _ in 0..MAX_SCHEMA_DEPTH / 2 {
+                    schema = make_schema(SchemaKind::Type(Type::Array(openapiv3::ArrayType {
+                        items: Some(ReferenceOr::Item(Box::new(schema))),
+                        min_items: None,
+                        max_items: None,
+                        unique_items: false,
+                    })));
+                }
+                let result = lower_models(&spec_with_schema("Deep", schema));
+                if excess {
+                    assert!(matches!(result, Err(Error::SchemaDepthExceeded { .. })), "{result:?}");
+                } else {
+                    result.expect("combined depth below the limit");
+                }
+            }
+        }
     }
 
     /// Lower an inline document and return the error it gives.

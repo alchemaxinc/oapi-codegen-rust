@@ -115,3 +115,28 @@ components:
               minimum: 2.5
               exclusiveMinimum: true
               maximum: 4.5
+    EnumIntersection:
+      allOf:
+        - &enum_wide
+          type: object
+          required: [label, count]
+          properties:
+            label:
+              type: string
+              enum: [a_b, a-b, other]
+            count:
+              type: integer
+              format: int32
+              enum: [3, 2, 1]
+        - &enum_narrow
+          type: object
+          properties:
+            label:
+              type: string
+              enum: [a-b, a_b]
+            count:
+              type: integer
+              format: int32
+              enum: [2, 3]
+    EnumReversed:
+      allOf: [*enum_narrow, *enum_wide]

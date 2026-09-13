@@ -12,6 +12,32 @@
 //! `include!` cannot carry one. So this file needs no lint exceptions of its own.
 
 #[test]
+fn all_of_enum_intersections_have_stable_variants() {
+    use generated::allof_merge::EnumIntersection;
+    use generated::allof_merge::EnumReversed;
+
+    for label in ["a-b", "a_b"] {
+        for count in [2_i32, 3_i32] {
+            let input = serde_json::json!({"label": label, "count": count});
+            let forward: EnumIntersection = serde_json::from_value(input.clone()).expect("forward enum");
+            let reverse: EnumReversed = serde_json::from_value(input.clone()).expect("reverse enum");
+            assert_eq!(format!("{:?}", forward.label), format!("{:?}", reverse.label));
+            assert_eq!(format!("{:?}", forward.count), format!("{:?}", reverse.count));
+            assert_eq!(serde_json::to_value(forward).expect("forward wire values"), input);
+            assert_eq!(serde_json::to_value(reverse).expect("reverse wire values"), input);
+        }
+    }
+    for input in [
+        serde_json::json!({"label":"other","count":2_i32}),
+        serde_json::json!({"label":"a-b","count":1_i32}),
+        serde_json::json!({"label":"a-b","count":2_147_483_648_i64}),
+    ] {
+        assert!(serde_json::from_value::<EnumIntersection>(input.clone()).is_err());
+        assert!(serde_json::from_value::<EnumReversed>(input).is_err());
+    }
+}
+
+#[test]
 fn all_of_intersections_accept_only_common_payloads() {
     use generated::allof_merge::IdenticalComposites;
     use generated::allof_merge::Inline;

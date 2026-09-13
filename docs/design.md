@@ -361,7 +361,9 @@ An absent format, pattern, or `multipleOf` retains the other member's constraint
 Conflicting specified values, property types, or metadata produce an error
 instead of an order-dependent override.
 Composite overlaps require identical definitions. Enum intersections with
-nullability, formats, scalar constraints, or positional variant names are unsupported.
+nullability, scalar constraints, or positional variant names are unsupported.
+String enum intersections with formats are unsupported.
+Integer enum formats retain their representation limits.
 Nullable formatted-string constraints are also unsupported.
 Member access flags, defaults, extensions, discriminators, and nullability
 cannot be flattened. Single-reference aliases and nullable wrappers retain
