@@ -824,7 +824,10 @@ impl Mapper<'_> {
 }
 
 fn check_all_of_nullable(path: &str, schema: &Schema) -> Result<()> {
-    if schema.schema_data.nullable && matches!(&schema.schema_kind, SchemaKind::AllOf { all_of } if all_of.len() != 1) {
+    if schema.schema_data.nullable
+        && !schema.schema_data.extensions.contains_key(X_RUST_TYPE)
+        && matches!(&schema.schema_kind, SchemaKind::AllOf { all_of } if all_of.len() != 1)
+    {
         return Err(Error::UnsupportedSchema {
             path: path.to_owned(),
             reason: "allOf intersection: nullable multi-member compositions are not supported".to_owned(),
