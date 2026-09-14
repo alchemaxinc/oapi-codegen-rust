@@ -185,8 +185,9 @@ components:
           properties:
             value:
               $ref: "#/components/schemas/WrapperChain"
+        - *composite_direct
     WrappedCompositesReversed:
-      allOf: [*wrapper_b, *wrapper_a]
+      allOf: [*wrapper_b, *wrapper_a, *composite_direct]
     ObjectMap:
       allOf:
         - &object_map

@@ -138,7 +138,7 @@ fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>, depth: 
             return Ok(schema);
         };
         let [member] = all_of.as_slice() else {
-            return Err(unsupported(path, "overlapping composed properties are not supported"));
+            return Ok(schema);
         };
         let mut target = match member {
             ReferenceOr::Item(schema) => schema.clone(),
@@ -194,8 +194,24 @@ fn intersect(
             _ => left.clone(),
         });
     }
-    let mut left = resolve(spec, path, left, depth)?;
-    let mut right = resolve(spec, path, right, depth)?;
+    let normalized_left = resolve(spec, path, left, depth)?;
+    let normalized_right = resolve(spec, path, right, depth)?;
+    if matches!(normalized_left.schema_kind, SchemaKind::AllOf { .. })
+        || matches!(normalized_right.schema_kind, SchemaKind::AllOf { .. })
+    {
+        if normalized_left == normalized_right
+            && matches!(&normalized_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
+        {
+            return Ok(match (left, right) {
+                (ReferenceOr::Reference { .. }, _) => left.clone(),
+                (_, ReferenceOr::Reference { .. }) => right.clone(),
+                _ => ReferenceOr::Item(Box::new(normalized_left)),
+            });
+        }
+        return Err(unsupported(path, "overlapping composed properties are not supported"));
+    }
+    let mut left = normalized_left;
+    let mut right = normalized_right;
     let nullable = left.schema_data.nullable && right.schema_data.nullable;
     left.schema_data.nullable = nullable;
     right.schema_data.nullable = nullable;
@@ -473,7 +489,17 @@ mod tests {
         let reference_a = json!({"$ref":"#/components/schemas/A"});
         let reference_b = json!({"$ref":"#/components/schemas/B"});
         let chain = json!({"$ref":"#/components/schemas/Chain"});
-        for (left, right) in [(&reference_a, &reference_b), (&reference_a, &chain), (&wrapper, &chain)] {
+        let direct = json!({"$ref":"#/components/schemas/Composite"});
+        let nested = json!({"allOf":[wrapper.clone()]});
+        for (left, right) in [
+            (&reference_a, &reference_b),
+            (&reference_a, &chain),
+            (&wrapper, &chain),
+            (&direct, &reference_a),
+            (&direct, &chain),
+            (&direct, &nested),
+            (&reference_a, &nested),
+        ] {
             for (left, right) in [(left, right), (right, left)] {
                 let spec = spec(json!({
                     "Composite":composite, "A":wrapper, "B":wrapper, "Chain":reference_b,
