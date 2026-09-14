@@ -652,18 +652,6 @@ impl Sweep<'_> {
                 );
             }
         }
-        if kind == Some("object")
-            && value.get("additionalProperties").and_then(Value::as_bool) == Some(false)
-            && value
-                .get("properties")
-                .and_then(Value::as_mapping)
-                .is_none_or(serde_yaml::Mapping::is_empty)
-        {
-            self.warn(
-                &pointer(path, "additionalProperties"),
-                "an object without declared properties becomes a map and does not reject additional properties",
-            );
-        }
     }
 }
 
@@ -887,7 +875,6 @@ security: [{arbitrary: [custom]}]
             ("{type: string, nullable: true, default: null}", "default"),
             ("{oneOf: [{type: string}, {type: integer}]}", "oneOf"),
             ("{anyOf: [{type: string}, {type: integer}]}", "anyOf"),
-            ("{type: object, additionalProperties: false}", "additionalProperties"),
         ] {
             let yaml = format!("components: {{schemas: {{Widget: {schema}}}}}");
             let sweep = inspect_yaml(&yaml);
@@ -906,6 +893,13 @@ security: [{arbitrary: [custom]}]
                 }));
             }
         }
+    }
+
+    #[test]
+    fn empty_closed_objects_have_no_map_warning() {
+        let sweep = inspect_yaml("components: {schemas: {Empty: {type: object, additionalProperties: false}}}");
+        assert!(sweep.problems.is_empty());
+        assert!(sweep.warnings.is_empty());
     }
 
     #[test]

@@ -356,6 +356,9 @@ fails, including when the forbidden property is optional.
 The merged struct preserves `additionalProperties: false`.
 Schema-valued additional properties and object property-count constraints
 produce an error during a merge.
+An unconstrained or typed map inside a single-member `allOf` retains its map representation.
+Empty closed objects remain structs and reject additional properties.
+References through different aliases can share the same composite definition.
 
 An absent format, pattern, or `multipleOf` retains the other member's constraint.
 Conflicting specified values, property types, or metadata produce an error

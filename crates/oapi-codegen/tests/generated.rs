@@ -12,6 +12,117 @@
 //! `include!` cannot carry one. So this file needs no lint exceptions of its own.
 
 #[test]
+fn all_of_maps_preserve_entries_and_closed_objects_reject_them() {
+    use generated::allof_merge::*;
+
+    fn roundtrip<T: serde::de::DeserializeOwned + serde::Serialize>(input: &str) {
+        let value: T = serde_json::from_str(input).expect("accepted payload");
+        assert_eq!(
+            serde_json::to_value(value).expect("serialized payload"),
+            serde_json::from_str::<serde_json::Value>(input).expect("input JSON"),
+        );
+    }
+
+    roundtrip::<StringMap>(r#"{"first":"hello","second":"world"}"#);
+    roundtrip::<ObjectMap>(r#"{"first":{"label":"hello"},"second":{"label":"world"}}"#);
+    roundtrip::<EnumMap>(r#"{"first":"red","second":"blue"}"#);
+    roundtrip::<NestedMap>(r#"{"outer":{"inner":{"label":"hello"}}}"#);
+    roundtrip::<ReferencedMap>(r#"{"first":{"id":"hello"}}"#);
+    let _: ObjectMapValue = serde_json::from_str(r#"{"label":"hello"}"#).expect("object value type");
+    let _: EnumMapValue = serde_json::from_str(r#""red""#).expect("enum value type");
+    for input in [r#"{"key":{}}"#, r#"{"key":{"label":42}}"#, r#"{"key":null}"#] {
+        assert!(serde_json::from_str::<ObjectMap>(input).is_err(), "{input}");
+    }
+    for input in [r#"{"key":"green"}"#, r#"{"key":42}"#, r#"{"key":null}"#] {
+        assert!(serde_json::from_str::<EnumMap>(input).is_err(), "{input}");
+    }
+    assert!(serde_json::from_str::<NestedMap>(r#"{"outer":{"inner":{}}}"#).is_err());
+    roundtrip::<AnyMap>(r#"{"number":7,"nested":{"list":[true,null,"text"]}}"#);
+    roundtrip::<ExplicitAnyMap>(r#"{"number":7,"nested":{"list":[true,null,"text"]}}"#);
+    roundtrip::<NullableMap>("null");
+    roundtrip::<NullableMap>(r#"{"key":"value"}"#);
+    roundtrip::<EmptyClosed>("{}");
+    roundtrip::<ClosedAlias>("{}");
+    let input = r#"{"typed":{"a":"b"},"arbitrary":{"n":3,"list":[false,null]},"nullable":null,"closed":{},"named":{"c":"d"},"nested":{"value":{"e":"f"}},"objects":{"a":{"label":"hello"}},"enums":{"a":"blue"}}"#;
+    roundtrip::<InlineMaps>(input);
+    for input in [r#"{"key":42}"#, r#"{"key":null}"#, "[]", "null"] {
+        assert!(serde_json::from_str::<StringMap>(input).is_err(), "{input}");
+    }
+    assert!(serde_json::from_str::<EmptyClosed>(r#"{"extra":true}"#).is_err());
+    assert!(serde_json::from_str::<ClosedAlias>(r#"{"extra":true}"#).is_err());
+    for (field, invalid) in [
+        ("typed", serde_json::json!({"a": 42_i64})),
+        ("named", serde_json::json!({"a": false})),
+        ("nullable", serde_json::json!({"a": 42_i64})),
+        ("closed", serde_json::json!({"extra": true})),
+        ("nested", serde_json::json!({"value": {"a": 42_i64}})),
+        ("optional", serde_json::json!({"a": 42_i64})),
+        ("objects", serde_json::json!({"a": {}})),
+        ("enums", serde_json::json!({"a": "green"})),
+    ] {
+        let mut value: serde_json::Value = serde_json::from_str(input).expect("base payload");
+        value[field] = invalid;
+        assert!(serde_json::from_value::<InlineMaps>(value).is_err(), "{field}");
+    }
+    for required in ["typed", "arbitrary", "nullable", "closed", "named"] {
+        let mut value: serde_json::Value = serde_json::from_str(input).expect("base payload");
+        value.as_object_mut().expect("object").remove(required);
+        assert!(serde_json::from_value::<InlineMaps>(value).is_err(), "{required}");
+    }
+}
+
+#[test]
+fn all_of_aliased_composites_preserve_constraints() {
+    use generated::allof_merge::AliasedComposites;
+    use generated::allof_merge::AliasedCompositesReversed;
+    use generated::allof_merge::InlineRefComposites;
+    use generated::allof_merge::WrappedComposites;
+    use generated::allof_merge::WrappedCompositesReversed;
+
+    for (input, accepted) in [
+        (r#"{"value":{"count":6,"label":"valid","color":"blue"}}"#, true),
+        (r#"{"value":{"count":5,"label":"valid","color":"blue"}}"#, false),
+        (r#"{"value":{"count":10,"label":"valid","color":"blue"}}"#, false),
+        (r#"{"value":{"count":6,"label":"no","color":"blue"}}"#, false),
+        (r#"{"value":{"count":6,"label":"UPPER","color":"blue"}}"#, false),
+        (r#"{"value":{"count":6,"label":"valid","color":"red"}}"#, false),
+        (
+            r#"{"value":{"count":6,"label":"valid","color":"blue","extra":0}}"#,
+            false,
+        ),
+        (r#"{"value":{"count":null,"label":"valid","color":"blue"}}"#, false),
+        (r#"{"value":{"count":6,"color":"blue"}}"#, false),
+        (r#"{}"#, false),
+    ] {
+        assert_eq!(
+            serde_json::from_str::<AliasedComposites>(input).is_ok(),
+            accepted,
+            "{input}"
+        );
+        assert_eq!(
+            serde_json::from_str::<AliasedCompositesReversed>(input).is_ok(),
+            accepted,
+            "{input}"
+        );
+        assert_eq!(
+            serde_json::from_str::<InlineRefComposites>(input).is_ok(),
+            accepted,
+            "{input}"
+        );
+        assert_eq!(
+            serde_json::from_str::<WrappedComposites>(input).is_ok(),
+            accepted,
+            "{input}"
+        );
+        assert_eq!(
+            serde_json::from_str::<WrappedCompositesReversed>(input).is_ok(),
+            accepted,
+            "{input}"
+        );
+    }
+}
+
+#[test]
 fn all_of_enum_intersections_have_stable_variants() {
     use generated::allof_merge::EnumIntersection;
     use generated::allof_merge::EnumReversed;
