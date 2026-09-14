@@ -2584,7 +2584,7 @@ fn every_generated_struct_is_braced() {
             // else. A tuple struct opens `(` and a unit struct ends at `;`.
             let tail = rest.trim_end();
             assert!(
-                tail.ends_with('{'),
+                tail.ends_with('{') || tail.ends_with("{}"),
                 "`{}` in {} is not a braced struct, which would take a prelude value name",
                 tail,
                 path.display(),

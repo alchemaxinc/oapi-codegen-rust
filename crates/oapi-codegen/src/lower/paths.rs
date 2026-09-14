@@ -1806,6 +1806,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn all_of_inline_json_body_maps_keep_value_types_and_nullability() {
+        let document = serde_json::from_value(serde_json::json!({
+            "openapi":"3.0.3", "info":{"title":"maps","version":"1"}, "paths":{}
+        }))
+        .expect("document");
+        let spec = Spec::from_parts(document, "maps.yaml".into());
+        let import_mapping = BTreeMap::new();
+        let lowerer = Lowerer {
+            spec: &spec,
+            import_mapping: &import_mapping,
+            response_type_suffix: "",
+        };
+        for (member, expected) in [
+            (
+                serde_json::json!({"type":"object","additionalProperties":{"type":"string"}}),
+                RustType::String,
+            ),
+            (serde_json::json!({"type":"object"}), RustType::Value),
+            (
+                serde_json::json!({"type":"object","additionalProperties":true}),
+                RustType::Value,
+            ),
+        ] {
+            for nullable in [false, true] {
+                let schema = serde_json::from_value(serde_json::json!({"nullable":nullable,"allOf":[member]}))
+                    .expect("map schema");
+                let map = RustType::Map(Box::new(expected.clone()));
+                let expected = if nullable {
+                    RustType::Nullable(Box::new(map))
+                } else {
+                    map
+                };
+                assert_eq!(
+                    lowerer
+                        .inline_body_type("/maps", "post", None, &schema)
+                        .expect("map body"),
+                    expected
+                );
+            }
+        }
+        let closed = serde_json::from_value(serde_json::json!({
+            "allOf":[{"type":"object","additionalProperties":false}]
+        }))
+        .expect("closed schema");
+        let error = lowerer
+            .inline_body_type("/maps", "post", None, &closed)
+            .expect_err("closed inline body requires a named schema")
+            .to_string();
+        assert!(error.contains("closed object bodies"), "{error}");
+    }
+
+    #[test]
     fn valid_header_names_accept_tokens_and_reject_separators() {
         // Real header names with `-` and digits and `.` are accepted.
         assert!(is_valid_header_name("X-Request-Id"));

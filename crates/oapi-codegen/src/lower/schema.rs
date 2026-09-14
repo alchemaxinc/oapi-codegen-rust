@@ -201,7 +201,18 @@ impl Mapper<'_> {
                     deprecated: deprecation_of(data, name)?,
                     ty: RustType::Named(target),
                 }),
-                None => Item::Struct(self.merge_all_of(name, all_of, data)?),
+                None => {
+                    if let Some(ty) = self.single_all_of_map(name, all_of)? {
+                        Item::Alias(Alias {
+                            name: self.type_name_ident(name),
+                            doc: doc_of(data),
+                            deprecated: deprecation_of(data, name)?,
+                            ty,
+                        })
+                    } else {
+                        Item::Struct(self.merge_all_of(name, all_of, data)?)
+                    }
+                }
             },
             SchemaKind::Type(_) => {
                 let ty = self.type_from_schema(name, schema)?;
@@ -228,10 +239,9 @@ impl Mapper<'_> {
         return Ok(item);
     }
 
-    /// Lower an object schema: a struct when it has properties, otherwise a map
-    /// alias.
+    /// Lower closed objects and objects with properties as structs. Other objects become map aliases.
     fn object_to_item(&mut self, name: &str, obj: &ObjectType, data: &SchemaData) -> Result<Item> {
-        if obj.properties.is_empty() {
+        if obj.properties.is_empty() && !matches!(obj.additional_properties, Some(AdditionalProperties::Any(false))) {
             let element = self.additional_properties_type(name, obj)?;
             return Ok(Item::Alias(Alias {
                 name: self.type_name_ident(name),
@@ -450,6 +460,9 @@ impl Mapper<'_> {
     /// than synthesizing a duplicate struct. Multi-member `allOf` is genuine
     /// composition and returns `None` so the caller merges it as before.
     fn collapse_single_all_of(&mut self, hint: &str, members: &[ReferenceOr<Schema>]) -> Result<Option<RustType>> {
+        if let Some(ty) = self.single_all_of_map(hint, members)? {
+            return Ok(Some(ty));
+        }
         let [only] = members else {
             return Ok(None);
         };
@@ -464,6 +477,25 @@ impl Mapper<'_> {
             ReferenceOr::Item(schema) => self.type_from_schema(hint, schema)?,
         };
         return Ok(Some(ty));
+    }
+
+    fn single_all_of_map(&mut self, hint: &str, members: &[ReferenceOr<Schema>]) -> Result<Option<RustType>> {
+        let [ReferenceOr::Item(schema)] = members else {
+            return Ok(None);
+        };
+        let SchemaKind::Type(Type::Object(object)) = &schema.schema_kind else {
+            return Ok(None);
+        };
+        if !object.properties.is_empty()
+            || matches!(object.additional_properties, Some(AdditionalProperties::Any(false)))
+            || object.min_properties.is_some()
+            || object.max_properties.is_some()
+            || !object.required.is_empty()
+        {
+            return Ok(None);
+        }
+        super::all_of::check_member_metadata(hint, schema)?;
+        return self.type_from_schema(hint, schema).map(Some);
     }
 
     /// Merge an `allOf` into a single flat struct, resolving `$ref` members to
@@ -788,10 +820,9 @@ impl Mapper<'_> {
         return Ok(ty);
     }
 
-    /// Map an inline object: hoist a struct when it has properties, otherwise a
-    /// map of its additionalProperties element type.
+    /// Hoist closed objects and objects with properties as structs. Other objects become maps.
     fn inline_object_type(&mut self, hint: &str, obj: &ObjectType, data: &SchemaData) -> Result<RustType> {
-        if obj.properties.is_empty() {
+        if obj.properties.is_empty() && !matches!(obj.additional_properties, Some(AdditionalProperties::Any(false))) {
             let element = self.additional_properties_type(hint, obj)?;
             return Ok(RustType::Map(Box::new(element)));
         }

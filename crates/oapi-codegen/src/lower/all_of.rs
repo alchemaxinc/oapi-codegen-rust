@@ -89,20 +89,7 @@ fn collect(
             ReferenceOr::Item(schema) => schema,
             ReferenceOr::Reference { reference } => spec.resolve(reference)?,
         };
-        let data = &schema.schema_data;
-        if data.nullable
-            || data.read_only
-            || data.write_only
-            || data.deprecated
-            || data.default.is_some()
-            || !data.extensions.is_empty()
-            || data.discriminator.is_some()
-        {
-            return Err(unsupported(
-                path,
-                "member nullability, access, deprecation, defaults, extensions, or discriminators cannot be flattened",
-            ));
-        }
+        check_member_metadata(path, schema)?;
         match &schema.schema_kind {
             SchemaKind::Type(Type::Object(object)) => {
                 if object.min_properties.is_some() || object.max_properties.is_some() {
@@ -126,11 +113,26 @@ fn collect(
     return Ok(());
 }
 
+pub(super) fn check_member_metadata(path: &str, schema: &Schema) -> Result<()> {
+    let data = &schema.schema_data;
+    if data.nullable
+        || data.read_only
+        || data.write_only
+        || data.deprecated
+        || data.default.is_some()
+        || !data.extensions.is_empty()
+        || data.discriminator.is_some()
+    {
+        return Err(unsupported(
+            path,
+            "member nullability, access, deprecation, defaults, extensions, or discriminators cannot be flattened",
+        ));
+    }
+    return Ok(());
+}
+
 fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>, depth: usize) -> Result<Schema> {
-    let mut schema = match property {
-        ReferenceOr::Item(schema) => *schema.clone(),
-        ReferenceOr::Reference { reference } => spec.resolve(reference)?.clone(),
-    };
+    let mut schema = resolve_reference(spec, property)?.clone();
     for _ in depth..MAX_SCHEMA_DEPTH {
         let SchemaKind::AllOf { all_of } = &schema.schema_kind else {
             return Ok(schema);
@@ -159,6 +161,13 @@ fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>, depth: 
     });
 }
 
+fn resolve_reference<'a>(spec: &'a Spec, property: &'a ReferenceOr<Box<Schema>>) -> Result<&'a Schema> {
+    return match property {
+        ReferenceOr::Item(schema) => Ok(schema),
+        ReferenceOr::Reference { reference } => spec.resolve(reference),
+    };
+}
+
 fn intersect(
     spec: &Spec,
     path: &str,
@@ -173,6 +182,17 @@ fn intersect(
         }
     {
         return Ok(left.clone());
+    }
+    let resolved_left = resolve_reference(spec, left)?;
+    let resolved_right = resolve_reference(spec, right)?;
+    if matches!(&resolved_left.schema_kind, SchemaKind::AllOf { all_of } if all_of.len() > 1)
+        && resolved_left == resolved_right
+    {
+        return Ok(match (left, right) {
+            (ReferenceOr::Reference { .. }, _) => left.clone(),
+            (_, ReferenceOr::Reference { .. }) => right.clone(),
+            _ => left.clone(),
+        });
     }
     let mut left = resolve(spec, path, left, depth)?;
     let mut right = resolve(spec, path, right, depth)?;
@@ -380,6 +400,109 @@ mod tests {
     }
 
     #[test]
+    fn equivalent_composite_aliases_reuse_named_types() {
+        let composed = json!({"allOf":[
+            {"type":"object","required":["count"],"properties":{"count":{"type":"integer","minimum":2_i64}}},
+            {"type":"object","properties":{"count":{"type":"integer","maximum":8_i64}}}
+        ]});
+        let direct = json!({"$ref":"#/components/schemas/A"});
+        let alias = json!({"$ref":"#/components/schemas/B"});
+        let chain = json!({"$ref":"#/components/schemas/C"});
+        for (left, right) in [
+            (&direct, &alias),
+            (&alias, &chain),
+            (&direct, &chain),
+            (&composed, &chain),
+        ] {
+            for (left, right) in [(left, right), (right, left)] {
+                let spec = spec(json!({
+                    "A":composed, "B":direct, "C":alias,
+                    "Test":{"allOf":[object(left.clone()),object(right.clone())]},
+                }));
+                let names = crate::lower::rename::type_renames(&spec, None).expect("names");
+                let module = crate::lower::schema::generate_models(&spec, &names).expect("equivalent composites");
+                let strukt = module
+                    .items
+                    .iter()
+                    .find_map(|item| {
+                        return match item {
+                            crate::ir::Item::Struct(strukt) if strukt.name.logical() == "Test" => Some(strukt),
+                            _ => None,
+                        };
+                    })
+                    .expect("Test struct");
+                assert!(matches!(
+                    &strukt.fields[0].ty,
+                    crate::ir::RustType::Option(inner) if matches!(inner.as_ref(), crate::ir::RustType::Named(_))
+                ));
+                let left = serde_json::from_value(left.clone()).expect("left property");
+                let right = serde_json::from_value(right.clone()).expect("right property");
+                let expected = if matches!(left, ReferenceOr::Reference { .. }) {
+                    &left
+                } else {
+                    &right
+                };
+                assert_eq!(
+                    &intersect(&spec, "Test.value", &left, &right, 0).expect("intersection"),
+                    expected
+                );
+            }
+        }
+        for changed in [
+            json!({"allOf":[{"type":"object"},{"type":"object"}]}),
+            json!({"nullable":true,"allOf":composed["allOf"]}),
+            json!({"description":"different","allOf":composed["allOf"]}),
+            json!({"x-rust-type":"serde_json::Value","allOf":composed["allOf"]}),
+        ] {
+            let spec = spec(json!({"A":composed,"B":changed}));
+            let left = serde_json::from_value(direct.clone()).expect("left");
+            let right = serde_json::from_value(alias.clone()).expect("right");
+            for (left, right) in [(&left, &right), (&right, &left)] {
+                assert!(intersect(&spec, "Test.value", left, right, 0).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn singleton_maps_keep_types_and_reject_unenforced_constraints() {
+        for (additional, expected) in [
+            (json!({"type":"string"}), crate::ir::RustType::String),
+            (json!(true), crate::ir::RustType::Value),
+            (serde_json::Value::Null, crate::ir::RustType::Value),
+        ] {
+            let mut map = json!({"type":"object"});
+            if !additional.is_null() {
+                map["additionalProperties"] = additional;
+            }
+            let wrapper = json!({"allOf":[map.clone()]});
+            let module = lower(wrapper.clone()).expect("named map");
+            assert!(matches!(
+                &module.items[0],
+                crate::ir::Item::Alias(alias) if alias.ty == crate::ir::RustType::Map(Box::new(expected.clone()))
+            ));
+            let module = lower(object(wrapper)).expect("inline map");
+            assert!(matches!(
+                &module.items[0],
+                crate::ir::Item::Struct(strukt) if strukt.fields[0].ty
+                    == crate::ir::RustType::Option(Box::new(crate::ir::RustType::Map(Box::new(expected))))
+            ));
+            for (keyword, value) in [
+                ("minProperties", json!(1_i64)),
+                ("maxProperties", json!(2_i64)),
+                ("required", json!(["missing"])),
+            ] {
+                let mut constrained = map.clone();
+                constrained[keyword] = value;
+                let wrapper = json!({"allOf":[constrained]});
+                for schema in [wrapper.clone(), object(wrapper)] {
+                    let error = lower(schema).expect_err("unsupported map restriction").to_string();
+                    assert!(error.contains("allOf intersection"), "{error}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn incompatible_properties_report_context_in_both_orders() {
         for (left, right, reason) in [
             (json!({"type":"string"}), json!({"type":"integer"}), "property types"),
@@ -450,10 +573,6 @@ mod tests {
     #[test]
     fn unsupported_member_restrictions_are_not_discarded() {
         for (member, reason) in [
-            (
-                json!({"type":"object","additionalProperties":{"type":"string"}}),
-                "schema-valued additionalProperties",
-            ),
             (json!({"type":"object","minProperties":1_i64}), "property-count"),
             (json!({"type":"object","nullable":true}), "nullability"),
             (json!({"type":"object","default":{}}), "defaults"),
@@ -464,6 +583,13 @@ mod tests {
                 .to_string();
             assert!(error.contains("Test") && error.contains(reason), "{error}");
         }
+        let error = lower(json!({"allOf":[
+            {"type":"object","additionalProperties":{"type":"string"}},
+            {"type":"object"}
+        ]}))
+        .expect_err("map composition")
+        .to_string();
+        assert!(error.contains("schema-valued additionalProperties"), "{error}");
         for required in [json!([]), json!(["value"])] {
             let other = json!({"type":"object","required":required,"properties":{"value":{"type":"string"}}});
             let closed = json!({"type":"object","additionalProperties":false});

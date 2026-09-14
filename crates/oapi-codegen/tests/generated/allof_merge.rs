@@ -333,6 +333,96 @@ pub struct EnumReversed {
     pub count: EnumReversedCount,
 }
 
+pub type CompositeAlias = Intersection;
+
+pub type CompositeChain = CompositeAlias;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct AliasedComposites {
+    pub value: Intersection,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct AliasedCompositesReversed {
+    pub value: CompositeChain,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct InlineRefComposites {
+    pub value: CompositeChain,
+}
+
+pub type StringMap = std::collections::HashMap<String, String>;
+
+pub type AnyMap = std::collections::HashMap<String, serde_json::Value>;
+
+pub type ExplicitAnyMap = std::collections::HashMap<String, serde_json::Value>;
+
+pub type NullableMap = Nullable<std::collections::HashMap<String, String>>;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyClosed {}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ClosedTarget {}
+
+pub type ClosedAlias = ClosedTarget;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct InlineMaps {
+    pub typed: std::collections::HashMap<String, String>,
+    pub arbitrary: std::collections::HashMap<String, serde_json::Value>,
+    pub nullable: Nullable<std::collections::HashMap<String, String>>,
+    pub closed: InlineMapsClosed,
+    pub named: StringMap,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "InlineMaps::validate_optional",
+        default
+    )]
+    pub optional: Option<std::collections::HashMap<String, String>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "InlineMaps::validate_nested",
+        default
+    )]
+    pub nested: Option<InlineMapsNested>,
+}
+impl InlineMaps {
+    /// The rules the document gives `optional`, checked on the way in.
+    fn validate_optional<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<
+        Option<std::collections::HashMap<String, String>>,
+        D::Error,
+    >
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <std::collections::HashMap<
+                String,
+                String,
+            > as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `nested`, checked on the way in.
+    fn validate_nested<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<Option<InlineMapsNested>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <InlineMapsNested as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub enum IntersectionColor {
     #[serde(rename = "blue")]
@@ -590,4 +680,13 @@ impl TryFrom<i32> for EnumReversedCount {
             }
         };
     }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct InlineMapsClosed {}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct InlineMapsNested {
+    pub value: std::collections::HashMap<String, String>,
 }

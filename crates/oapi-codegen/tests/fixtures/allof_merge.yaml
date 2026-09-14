@@ -140,3 +140,79 @@ components:
               enum: [2, 3]
     EnumReversed:
       allOf: [*enum_narrow, *enum_wide]
+    CompositeAlias:
+      $ref: "#/components/schemas/Intersection"
+    CompositeChain:
+      $ref: "#/components/schemas/CompositeAlias"
+    AliasedComposites:
+      allOf:
+        - &composite_direct
+          type: object
+          required: [value]
+          properties:
+            value:
+              $ref: "#/components/schemas/Intersection"
+        - &composite_alias
+          type: object
+          properties:
+            value:
+              $ref: "#/components/schemas/CompositeChain"
+    AliasedCompositesReversed:
+      allOf: [*composite_alias, *composite_direct]
+    InlineRefComposites:
+      allOf:
+        - type: object
+          required: [value]
+          properties:
+            value: *composed
+        - *composite_alias
+    StringMap:
+      allOf:
+        - &string_map
+          type: object
+          additionalProperties:
+            type: string
+    AnyMap:
+      allOf:
+        - &any_map
+          type: object
+    ExplicitAnyMap:
+      allOf:
+        - type: object
+          additionalProperties: true
+    NullableMap:
+      nullable: true
+      allOf:
+        - *string_map
+    EmptyClosed:
+      allOf:
+        - &empty_closed
+          type: object
+          additionalProperties: false
+    ClosedTarget: *empty_closed
+    ClosedAlias:
+      allOf:
+        - $ref: "#/components/schemas/ClosedTarget"
+    InlineMaps:
+      type: object
+      required: [typed, arbitrary, nullable, closed, named]
+      properties:
+        typed:
+          allOf: [*string_map]
+        arbitrary:
+          allOf: [*any_map]
+        nullable:
+          nullable: true
+          allOf: [*string_map]
+        closed:
+          allOf: [*empty_closed]
+        named:
+          $ref: "#/components/schemas/StringMap"
+        optional:
+          allOf: [*string_map]
+        nested:
+          type: object
+          required: [value]
+          properties:
+            value:
+              allOf: [*string_map]
