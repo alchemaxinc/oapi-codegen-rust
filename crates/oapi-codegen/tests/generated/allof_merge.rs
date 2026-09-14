@@ -352,6 +352,33 @@ pub struct InlineRefComposites {
     pub value: CompositeChain,
 }
 
+pub type WrapperA = Intersection;
+
+pub type WrapperB = Intersection;
+
+pub type WrapperChain = WrapperB;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct WrappedComposites {
+    pub value: WrapperA,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct WrappedCompositesReversed {
+    pub value: WrapperChain,
+}
+
+pub type ObjectMap = std::collections::HashMap<String, ObjectMapValue>;
+
+pub type EnumMap = std::collections::HashMap<String, EnumMapValue>;
+
+pub type NestedMap = std::collections::HashMap<
+    String,
+    std::collections::HashMap<String, NestedMapValueValue>,
+>;
+
+pub type ReferencedMap = std::collections::HashMap<String, Base>;
+
 pub type StringMap = std::collections::HashMap<String, String>;
 
 pub type AnyMap = std::collections::HashMap<String, serde_json::Value>;
@@ -385,6 +412,18 @@ pub struct InlineMaps {
     pub optional: Option<std::collections::HashMap<String, String>>,
     #[serde(
         skip_serializing_if = "Option::is_none",
+        deserialize_with = "InlineMaps::validate_objects",
+        default
+    )]
+    pub objects: Option<std::collections::HashMap<String, InlineMapsObjectsValue>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "InlineMaps::validate_enums",
+        default
+    )]
+    pub enums: Option<std::collections::HashMap<String, InlineMapsEnumsValue>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
         deserialize_with = "InlineMaps::validate_nested",
         default
     )]
@@ -405,6 +444,42 @@ impl InlineMaps {
             <std::collections::HashMap<
                 String,
                 String,
+            > as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `objects`, checked on the way in.
+    fn validate_objects<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<
+        Option<std::collections::HashMap<String, InlineMapsObjectsValue>>,
+        D::Error,
+    >
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <std::collections::HashMap<
+                String,
+                InlineMapsObjectsValue,
+            > as serde::Deserialize>::deserialize(deserializer)?,
+        );
+        return Ok(value);
+    }
+    /// The rules the document gives `enums`, checked on the way in.
+    fn validate_enums<'de, D>(
+        deserializer: D,
+    ) -> ::core::result::Result<
+        Option<std::collections::HashMap<String, InlineMapsEnumsValue>>,
+        D::Error,
+    >
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Some(
+            <std::collections::HashMap<
+                String,
+                InlineMapsEnumsValue,
             > as serde::Deserialize>::deserialize(deserializer)?,
         );
         return Ok(value);
@@ -683,8 +758,39 @@ impl TryFrom<i32> for EnumReversedCount {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct ObjectMapValue {
+    pub label: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum EnumMapValue {
+    #[serde(rename = "red")]
+    Red,
+    #[serde(rename = "blue")]
+    Blue,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct NestedMapValueValue {
+    pub label: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct InlineMapsClosed {}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct InlineMapsObjectsValue {
+    pub label: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub enum InlineMapsEnumsValue {
+    #[serde(rename = "red")]
+    Red,
+    #[serde(rename = "blue")]
+    Blue,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct InlineMapsNested {

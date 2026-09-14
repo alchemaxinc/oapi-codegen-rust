@@ -166,6 +166,54 @@ components:
           properties:
             value: *composed
         - *composite_alias
+    WrapperA: &composite_wrapper
+      allOf:
+        - $ref: "#/components/schemas/Intersection"
+    WrapperB: *composite_wrapper
+    WrapperChain:
+      $ref: "#/components/schemas/WrapperB"
+    WrappedComposites:
+      allOf:
+        - &wrapper_a
+          type: object
+          required: [value]
+          properties:
+            value:
+              $ref: "#/components/schemas/WrapperA"
+        - &wrapper_b
+          type: object
+          properties:
+            value:
+              $ref: "#/components/schemas/WrapperChain"
+    WrappedCompositesReversed:
+      allOf: [*wrapper_b, *wrapper_a]
+    ObjectMap:
+      allOf:
+        - &object_map
+          type: object
+          additionalProperties:
+            type: object
+            required: [label]
+            properties:
+              label:
+                type: string
+    EnumMap:
+      allOf:
+        - &enum_map
+          type: object
+          additionalProperties:
+            type: string
+            enum: [red, blue]
+    NestedMap:
+      allOf:
+        - type: object
+          additionalProperties:
+            allOf: [*object_map]
+    ReferencedMap:
+      allOf:
+        - type: object
+          additionalProperties:
+            $ref: "#/components/schemas/Base"
     StringMap:
       allOf:
         - &string_map
@@ -210,6 +258,10 @@ components:
           $ref: "#/components/schemas/StringMap"
         optional:
           allOf: [*string_map]
+        objects:
+          allOf: [*object_map]
+        enums:
+          allOf: [*enum_map]
         nested:
           type: object
           required: [value]

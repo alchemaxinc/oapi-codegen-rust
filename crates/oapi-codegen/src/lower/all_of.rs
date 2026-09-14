@@ -185,7 +185,7 @@ fn intersect(
     }
     let resolved_left = resolve_reference(spec, left)?;
     let resolved_right = resolve_reference(spec, right)?;
-    if matches!(&resolved_left.schema_kind, SchemaKind::AllOf { all_of } if all_of.len() > 1)
+    if matches!(&resolved_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
         && resolved_left == resolved_right
     {
         return Ok(match (left, right) {
@@ -459,6 +459,79 @@ mod tests {
             let right = serde_json::from_value(alias.clone()).expect("right");
             for (left, right) in [(&left, &right), (&right, &left)] {
                 assert!(intersect(&spec, "Test.value", left, right, 0).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn equivalent_singleton_composite_wrappers_reuse_references() {
+        let composite = json!({"allOf":[
+            {"type":"object","properties":{"count":{"type":"integer","minimum":2_i64}}},
+            {"type":"object","properties":{"count":{"type":"integer","maximum":8_i64}}}
+        ]});
+        let wrapper = json!({"allOf":[{"$ref":"#/components/schemas/Composite"}]});
+        let reference_a = json!({"$ref":"#/components/schemas/A"});
+        let reference_b = json!({"$ref":"#/components/schemas/B"});
+        let chain = json!({"$ref":"#/components/schemas/Chain"});
+        for (left, right) in [(&reference_a, &reference_b), (&reference_a, &chain), (&wrapper, &chain)] {
+            for (left, right) in [(left, right), (right, left)] {
+                let spec = spec(json!({
+                    "Composite":composite, "A":wrapper, "B":wrapper, "Chain":reference_b,
+                    "Test":{"allOf":[object(left.clone()),object(right.clone())]},
+                }));
+                let names = crate::lower::rename::type_renames(&spec, None).expect("names");
+                crate::lower::schema::generate_models(&spec, &names).expect("equal wrappers");
+                let left = serde_json::from_value(left.clone()).expect("left");
+                let right = serde_json::from_value(right.clone()).expect("right");
+                let expected = if matches!(left, ReferenceOr::Reference { .. }) {
+                    &left
+                } else {
+                    &right
+                };
+                assert_eq!(
+                    &intersect(&spec, "Test.value", &left, &right, 0).expect("intersection"),
+                    expected
+                );
+            }
+        }
+        for changed in [
+            json!({"description":"different","allOf":wrapper["allOf"]}),
+            json!({"nullable":true,"allOf":wrapper["allOf"]}),
+            json!({"x-rust-type":"serde_json::Value","allOf":wrapper["allOf"]}),
+        ] {
+            let spec = spec(json!({"Composite":composite,"A":wrapper,"B":changed}));
+            let left = serde_json::from_value(reference_a.clone()).expect("left");
+            let right = serde_json::from_value(reference_b.clone()).expect("right");
+            for (left, right) in [(&left, &right), (&right, &left)] {
+                assert!(intersect(&spec, "Test.value", left, right, 0).is_err());
+            }
+        }
+        let spec = spec(json!({"A":{"allOf":[]},"B":{"allOf":[]}}));
+        let left = serde_json::from_value(reference_a).expect("left");
+        let right = serde_json::from_value(reference_b).expect("right");
+        for (left, right) in [(&left, &right), (&right, &left)] {
+            assert!(intersect(&spec, "Test.value", left, right, 0).is_err());
+        }
+        assert!(lower(json!({"allOf":[]})).is_err());
+        assert!(lower(json!({"allOf":[object(json!({"allOf":[]})),object(json!({"allOf":[]}))]})).is_err());
+    }
+
+    #[test]
+    fn map_value_hints_do_not_duplicate_container_names() {
+        for value in [
+            json!({"type":"object","properties":{"label":{"type":"string"}}}),
+            json!({"type":"string","enum":["red","blue"]}),
+            json!({"type":"integer","enum":[1_i64,2_i64]}),
+        ] {
+            let map = json!({"type":"object","additionalProperties":value});
+            for schema in [
+                map.clone(),
+                json!({"allOf":[map]}),
+                json!({"type":"object","properties":{"id":{"type":"string"}},"additionalProperties":value}),
+            ] {
+                let module = lower(schema).expect("map with inline value");
+                let names: Vec<_> = module.items.iter().map(crate::ir::Item::name).collect();
+                assert_eq!(names, ["Test", "TestValue"]);
             }
         }
     }

@@ -268,10 +268,7 @@ impl Mapper<'_> {
         let fields = sort_by_order(ordered);
 
         let additional_properties = match &obj.additional_properties {
-            Some(AdditionalProperties::Schema(schema)) => {
-                let ty = self.type_from_ref_schema(name, schema.as_ref())?;
-                Some(ty)
-            }
+            Some(AdditionalProperties::Schema(_)) => Some(self.additional_properties_type(name, obj)?),
             Some(AdditionalProperties::Any(true)) => Some(RustType::Value),
             Some(AdditionalProperties::Any(false)) | None => None,
         };
@@ -847,7 +844,9 @@ impl Mapper<'_> {
     /// Element type for an object used purely as a map (`additionalProperties`).
     fn additional_properties_type(&mut self, hint: &str, obj: &ObjectType) -> Result<RustType> {
         let element = match &obj.additional_properties {
-            Some(AdditionalProperties::Schema(schema)) => self.type_from_ref_schema(hint, schema.as_ref())?,
+            Some(AdditionalProperties::Schema(schema)) => {
+                self.type_from_ref_schema(&format!("{hint}_value"), schema.as_ref())?
+            }
             Some(AdditionalProperties::Any(_)) | None => RustType::Value,
         };
         return Ok(element);

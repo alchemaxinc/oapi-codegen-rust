@@ -24,13 +24,26 @@ fn all_of_maps_preserve_entries_and_closed_objects_reject_them() {
     }
 
     roundtrip::<StringMap>(r#"{"first":"hello","second":"world"}"#);
+    roundtrip::<ObjectMap>(r#"{"first":{"label":"hello"},"second":{"label":"world"}}"#);
+    roundtrip::<EnumMap>(r#"{"first":"red","second":"blue"}"#);
+    roundtrip::<NestedMap>(r#"{"outer":{"inner":{"label":"hello"}}}"#);
+    roundtrip::<ReferencedMap>(r#"{"first":{"id":"hello"}}"#);
+    let _: ObjectMapValue = serde_json::from_str(r#"{"label":"hello"}"#).expect("object value type");
+    let _: EnumMapValue = serde_json::from_str(r#""red""#).expect("enum value type");
+    for input in [r#"{"key":{}}"#, r#"{"key":{"label":42}}"#, r#"{"key":null}"#] {
+        assert!(serde_json::from_str::<ObjectMap>(input).is_err(), "{input}");
+    }
+    for input in [r#"{"key":"green"}"#, r#"{"key":42}"#, r#"{"key":null}"#] {
+        assert!(serde_json::from_str::<EnumMap>(input).is_err(), "{input}");
+    }
+    assert!(serde_json::from_str::<NestedMap>(r#"{"outer":{"inner":{}}}"#).is_err());
     roundtrip::<AnyMap>(r#"{"number":7,"nested":{"list":[true,null,"text"]}}"#);
     roundtrip::<ExplicitAnyMap>(r#"{"number":7,"nested":{"list":[true,null,"text"]}}"#);
     roundtrip::<NullableMap>("null");
     roundtrip::<NullableMap>(r#"{"key":"value"}"#);
     roundtrip::<EmptyClosed>("{}");
     roundtrip::<ClosedAlias>("{}");
-    let input = r#"{"typed":{"a":"b"},"arbitrary":{"n":3,"list":[false,null]},"nullable":null,"closed":{},"named":{"c":"d"},"nested":{"value":{"e":"f"}}}"#;
+    let input = r#"{"typed":{"a":"b"},"arbitrary":{"n":3,"list":[false,null]},"nullable":null,"closed":{},"named":{"c":"d"},"nested":{"value":{"e":"f"}},"objects":{"a":{"label":"hello"}},"enums":{"a":"blue"}}"#;
     roundtrip::<InlineMaps>(input);
     for input in [r#"{"key":42}"#, r#"{"key":null}"#, "[]", "null"] {
         assert!(serde_json::from_str::<StringMap>(input).is_err(), "{input}");
@@ -44,6 +57,8 @@ fn all_of_maps_preserve_entries_and_closed_objects_reject_them() {
         ("closed", serde_json::json!({"extra": true})),
         ("nested", serde_json::json!({"value": {"a": 42_i64}})),
         ("optional", serde_json::json!({"a": 42_i64})),
+        ("objects", serde_json::json!({"a": {}})),
+        ("enums", serde_json::json!({"a": "green"})),
     ] {
         let mut value: serde_json::Value = serde_json::from_str(input).expect("base payload");
         value[field] = invalid;
@@ -61,6 +76,8 @@ fn all_of_aliased_composites_preserve_constraints() {
     use generated::allof_merge::AliasedComposites;
     use generated::allof_merge::AliasedCompositesReversed;
     use generated::allof_merge::InlineRefComposites;
+    use generated::allof_merge::WrappedComposites;
+    use generated::allof_merge::WrappedCompositesReversed;
 
     for (input, accepted) in [
         (r#"{"value":{"count":6,"label":"valid","color":"blue"}}"#, true),
@@ -89,6 +106,16 @@ fn all_of_aliased_composites_preserve_constraints() {
         );
         assert_eq!(
             serde_json::from_str::<InlineRefComposites>(input).is_ok(),
+            accepted,
+            "{input}"
+        );
+        assert_eq!(
+            serde_json::from_str::<WrappedComposites>(input).is_ok(),
+            accepted,
+            "{input}"
+        );
+        assert_eq!(
+            serde_json::from_str::<WrappedCompositesReversed>(input).is_ok(),
             accepted,
             "{input}"
         );
