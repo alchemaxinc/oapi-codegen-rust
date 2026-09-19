@@ -34,4 +34,3 @@ jobs:
         with:
           token: ${{ steps.app.outputs.token }}
           pr-title: "chore: to production"
-          pr-body: ""
