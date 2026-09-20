@@ -59,7 +59,7 @@ const X_ENUM_NAMES: &str = "x-enumNames";
 /// Guards against stack exhaustion on pathological or hostile specs. Well above any
 /// realistic hand-written or generated spec, and independent of whatever
 /// recursion limit the YAML/JSON parser happens to enforce.
-const MAX_SCHEMA_DEPTH: usize = 100;
+pub(super) const MAX_SCHEMA_DEPTH: usize = 100;
 
 /// Lower every component schema in `spec` into a module of Rust items.
 ///
@@ -148,6 +148,7 @@ impl Mapper<'_> {
 
     /// Lower a top-level named schema into a single item.
     fn named_to_item(&mut self, name: &str, schema: &Schema) -> Result<Item> {
+        check_all_of_nullable(name, schema)?;
         if schema.schema_data.nullable {
             let mut non_null = schema.clone();
             non_null.schema_data.nullable = false;
@@ -200,7 +201,18 @@ impl Mapper<'_> {
                     deprecated: deprecation_of(data, name)?,
                     ty: RustType::Named(target),
                 }),
-                None => Item::Struct(self.merge_all_of(name, all_of, data)?),
+                None => {
+                    if let Some(ty) = self.single_all_of_map(name, all_of)? {
+                        Item::Alias(Alias {
+                            name: self.type_name_ident(name),
+                            doc: doc_of(data),
+                            deprecated: deprecation_of(data, name)?,
+                            ty,
+                        })
+                    } else {
+                        Item::Struct(self.merge_all_of(name, all_of, data)?)
+                    }
+                }
             },
             SchemaKind::Type(_) => {
                 let ty = self.type_from_schema(name, schema)?;
@@ -227,10 +239,9 @@ impl Mapper<'_> {
         return Ok(item);
     }
 
-    /// Lower an object schema: a struct when it has properties, otherwise a map
-    /// alias.
+    /// Lower closed objects and objects with properties as structs. Other objects become map aliases.
     fn object_to_item(&mut self, name: &str, obj: &ObjectType, data: &SchemaData) -> Result<Item> {
-        if obj.properties.is_empty() {
+        if obj.properties.is_empty() && !matches!(obj.additional_properties, Some(AdditionalProperties::Any(false))) {
             let element = self.additional_properties_type(name, obj)?;
             return Ok(Item::Alias(Alias {
                 name: self.type_name_ident(name),
@@ -257,10 +268,7 @@ impl Mapper<'_> {
         let fields = sort_by_order(ordered);
 
         let additional_properties = match &obj.additional_properties {
-            Some(AdditionalProperties::Schema(schema)) => {
-                let ty = self.type_from_ref_schema(name, schema.as_ref())?;
-                Some(ty)
-            }
+            Some(AdditionalProperties::Schema(_)) => Some(self.additional_properties_type(name, obj)?),
             Some(AdditionalProperties::Any(true)) => Some(RustType::Value),
             Some(AdditionalProperties::Any(false)) | None => None,
         };
@@ -449,6 +457,9 @@ impl Mapper<'_> {
     /// than synthesizing a duplicate struct. Multi-member `allOf` is genuine
     /// composition and returns `None` so the caller merges it as before.
     fn collapse_single_all_of(&mut self, hint: &str, members: &[ReferenceOr<Schema>]) -> Result<Option<RustType>> {
+        if let Some(ty) = self.single_all_of_map(hint, members)? {
+            return Ok(Some(ty));
+        }
         let [only] = members else {
             return Ok(None);
         };
@@ -457,88 +468,38 @@ impl Mapper<'_> {
                 let target = self.schema_ref_target(reference, "an allOf member")?;
                 RustType::Named(target)
             }
+            ReferenceOr::Item(schema) if matches!(schema.schema_kind, SchemaKind::Type(Type::Object(_))) => {
+                return Ok(None);
+            }
             ReferenceOr::Item(schema) => self.type_from_schema(hint, schema)?,
         };
         return Ok(Some(ty));
     }
 
+    fn single_all_of_map(&mut self, hint: &str, members: &[ReferenceOr<Schema>]) -> Result<Option<RustType>> {
+        let [ReferenceOr::Item(schema)] = members else {
+            return Ok(None);
+        };
+        let SchemaKind::Type(Type::Object(object)) = &schema.schema_kind else {
+            return Ok(None);
+        };
+        if !object.properties.is_empty()
+            || matches!(object.additional_properties, Some(AdditionalProperties::Any(false)))
+            || object.min_properties.is_some()
+            || object.max_properties.is_some()
+            || !object.required.is_empty()
+        {
+            return Ok(None);
+        }
+        super::all_of::check_member_metadata(hint, schema)?;
+        return self.type_from_schema(hint, schema).map(Some);
+    }
+
     /// Merge an `allOf` into a single flat struct, resolving `$ref` members to
     /// pull in their properties (matching oapi-codegen's behaviour).
     fn merge_all_of(&mut self, name: &str, members: &[ReferenceOr<Schema>], data: &SchemaData) -> Result<Struct> {
-        let mut merged = MergedObject::default();
-        self.absorb_members(name, members, &mut merged)?;
-
-        let mut ordered = Vec::with_capacity(merged.properties.len());
-        for (wire, prop) in &merged.properties {
-            let required = merged.required.iter().any(|r| {
-                return r == wire;
-            });
-            let order = prop_order(prop, &format!("{name}.{wire}"))?;
-            let field = self.field_from_prop(name, wire, prop, required)?;
-            ordered.push((order, field));
-        }
-        let fields = sort_by_order(ordered);
-
-        return Ok(Struct {
-            name: self.type_name_ident(name),
-            doc: doc_of(data),
-            deprecated: deprecation_of(data, name)?,
-            fields,
-            additional_properties: None,
-            // A merge does not read `additionalProperties` from any member. In
-            // JSON Schema each `allOf` member validates the whole object, so a
-            // member with `additionalProperties: false` rejects every property
-            // that a sibling member declares. A merge that honoured it would
-            // deny the fields it just merged in. The merge drops the key, as it
-            // already drops a member's `additionalProperties` schema.
-            deny_unknown_fields: false,
-        });
-    }
-
-    /// Recursively fold `allOf` members (objects, refs to objects, or nested
-    /// `allOf`) into a single merged object. Shares the [`MAX_SCHEMA_DEPTH`]
-    /// counter with [`Self::type_from_schema`] so nested `allOf` cannot exhaust
-    /// the stack independently of inline-type nesting.
-    fn absorb_members(&mut self, name: &str, members: &[ReferenceOr<Schema>], merged: &mut MergedObject) -> Result<()> {
-        if self.depth >= MAX_SCHEMA_DEPTH {
-            return Err(Error::SchemaDepthExceeded {
-                path: name.to_owned(),
-                limit: MAX_SCHEMA_DEPTH,
-            });
-        }
-        self.depth += 1;
-        let result = self.absorb_members_inner(name, members, merged);
-        self.depth -= 1;
-        return result;
-    }
-
-    fn absorb_members_inner(
-        &mut self,
-        name: &str,
-        members: &[ReferenceOr<Schema>],
-        merged: &mut MergedObject,
-    ) -> Result<()> {
-        for member in members {
-            let schema = match member {
-                ReferenceOr::Item(schema) => schema,
-                ReferenceOr::Reference { reference } => self.spec.resolve(reference)?,
-            };
-            match &schema.schema_kind {
-                SchemaKind::Type(Type::Object(obj)) => merged.absorb(obj),
-                SchemaKind::AllOf { all_of } => self.absorb_members(name, all_of, merged)?,
-                SchemaKind::Type(_)
-                | SchemaKind::OneOf { .. }
-                | SchemaKind::AnyOf { .. }
-                | SchemaKind::Any(_)
-                | SchemaKind::Not { .. } => {
-                    return Err(Error::UnsupportedSchema {
-                        path: name.to_owned(),
-                        reason: "allOf members must be objects or refs to objects".to_owned(),
-                    });
-                }
-            }
-        }
-        return Ok(());
+        let merged = super::all_of::merge(self.spec, name, members, self.depth)?;
+        return self.object_to_struct(name, &merged, data);
     }
 
     fn make_union(
@@ -775,6 +736,7 @@ impl Mapper<'_> {
     /// into named items. Bounds inline nesting via [`MAX_SCHEMA_DEPTH`] so a
     /// pathological spec errors cleanly instead of exhausting the stack.
     fn type_from_schema(&mut self, hint: &str, schema: &Schema) -> Result<RustType> {
+        check_all_of_nullable(hint, schema)?;
         if self.depth >= MAX_SCHEMA_DEPTH {
             return Err(Error::SchemaDepthExceeded {
                 path: hint.to_owned(),
@@ -855,10 +817,9 @@ impl Mapper<'_> {
         return Ok(ty);
     }
 
-    /// Map an inline object: hoist a struct when it has properties, otherwise a
-    /// map of its additionalProperties element type.
+    /// Hoist closed objects and objects with properties as structs. Other objects become maps.
     fn inline_object_type(&mut self, hint: &str, obj: &ObjectType, data: &SchemaData) -> Result<RustType> {
-        if obj.properties.is_empty() {
+        if obj.properties.is_empty() && !matches!(obj.additional_properties, Some(AdditionalProperties::Any(false))) {
             let element = self.additional_properties_type(hint, obj)?;
             return Ok(RustType::Map(Box::new(element)));
         }
@@ -883,11 +844,26 @@ impl Mapper<'_> {
     /// Element type for an object used purely as a map (`additionalProperties`).
     fn additional_properties_type(&mut self, hint: &str, obj: &ObjectType) -> Result<RustType> {
         let element = match &obj.additional_properties {
-            Some(AdditionalProperties::Schema(schema)) => self.type_from_ref_schema(hint, schema.as_ref())?,
+            Some(AdditionalProperties::Schema(schema)) => {
+                self.type_from_ref_schema(&format!("{hint}_value"), schema.as_ref())?
+            }
             Some(AdditionalProperties::Any(_)) | None => RustType::Value,
         };
         return Ok(element);
     }
+}
+
+fn check_all_of_nullable(path: &str, schema: &Schema) -> Result<()> {
+    if schema.schema_data.nullable
+        && !schema.schema_data.extensions.contains_key(X_RUST_TYPE)
+        && matches!(&schema.schema_kind, SchemaKind::AllOf { all_of } if all_of.len() != 1)
+    {
+        return Err(Error::UnsupportedSchema {
+            path: path.to_owned(),
+            reason: "allOf intersection: nullable multi-member compositions are not supported".to_owned(),
+        });
+    }
+    return Ok(());
 }
 
 /// Add nullability once. Only local aliases reveal the nullability of a named type.
@@ -928,27 +904,6 @@ pub(crate) fn nullable_type(spec: &Spec, ty: RustType) -> RustType {
     return RustType::Nullable(Box::new(ty));
 }
 
-/// Accumulates merged properties of an `allOf`, preserving first-seen order.
-#[derive(Default)]
-struct MergedObject {
-    properties: indexmap::IndexMap<String, ReferenceOr<Box<Schema>>>,
-    required: Vec<String>,
-}
-
-impl MergedObject {
-    /// Fold one object schema's properties and required list into the merge.
-    fn absorb(&mut self, obj: &ObjectType) {
-        for (name, prop) in &obj.properties {
-            self.properties.insert(name.clone(), prop.clone());
-        }
-        for req in &obj.required {
-            if !self.required.contains(req) {
-                self.required.push(req.clone());
-            }
-        }
-    }
-}
-
 /// Map a string `format` to a Rust type.
 pub(crate) fn string_format_type(format: &VariantOrUnknownOrEmpty<StringFormat>) -> RustType {
     let ty = match format {
@@ -968,7 +923,7 @@ pub(crate) fn string_format_type(format: &VariantOrUnknownOrEmpty<StringFormat>)
 ///
 /// An unsigned `repr` holds no negative value, so a `minimum` of zero with a
 /// negative `enum` value is a document that disagrees with itself.
-fn fits_repr(value: i64, repr: &RustType) -> bool {
+pub(super) fn fits_repr(value: i64, repr: &RustType) -> bool {
     return match *repr {
         RustType::I32 => i32::try_from(value).is_ok(),
         RustType::U32 => u32::try_from(value).is_ok(),
@@ -1380,6 +1335,60 @@ components:
     fn schema_just_under_the_depth_limit_still_lowers() {
         let spec = spec_with_schema("Deep", nested_array_schema(MAX_SCHEMA_DEPTH - 1));
         lower_models(&spec).expect("just under the limit should lower cleanly");
+    }
+
+    #[test]
+    fn all_of_shares_the_inline_depth_budget() {
+        let make_schema = |schema_kind| {
+            return Schema {
+                schema_data: SchemaData::default(),
+                schema_kind,
+            };
+        };
+        let compose = |schemas: Vec<Schema>| {
+            return make_schema(SchemaKind::AllOf {
+                all_of: schemas.into_iter().map(ReferenceOr::Item).collect(),
+            });
+        };
+        for overlap in [false, true] {
+            for excess in [false, true] {
+                let scalar = make_schema(SchemaKind::Type(Type::String(Default::default())));
+                let empty = make_schema(SchemaKind::Type(Type::Object(Default::default())));
+                let mut schema = if overlap { scalar.clone() } else { empty.clone() };
+                for _ in 0..(MAX_SCHEMA_DEPTH / 2 - 2 + usize::from(excess)) {
+                    schema = compose(vec![schema]);
+                }
+                if overlap {
+                    let members = [schema, scalar]
+                        .into_iter()
+                        .map(|property| {
+                            let mut object = ObjectType::default();
+                            object
+                                .properties
+                                .insert("value".to_owned(), ReferenceOr::Item(Box::new(property)));
+                            return make_schema(SchemaKind::Type(Type::Object(object)));
+                        })
+                        .collect();
+                    schema = compose(members);
+                } else {
+                    schema = compose(vec![schema, empty]);
+                }
+                for _ in 0..MAX_SCHEMA_DEPTH / 2 {
+                    schema = make_schema(SchemaKind::Type(Type::Array(openapiv3::ArrayType {
+                        items: Some(ReferenceOr::Item(Box::new(schema))),
+                        min_items: None,
+                        max_items: None,
+                        unique_items: false,
+                    })));
+                }
+                let result = lower_models(&spec_with_schema("Deep", schema));
+                if excess {
+                    assert!(matches!(result, Err(Error::SchemaDepthExceeded { .. })), "{result:?}");
+                } else {
+                    result.expect("combined depth below the limit");
+                }
+            }
+        }
     }
 
     /// Lower an inline document and return the error it gives.

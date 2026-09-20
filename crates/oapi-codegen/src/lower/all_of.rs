@@ -1,0 +1,947 @@
+use openapiv3::AdditionalProperties;
+use openapiv3::ObjectType;
+use openapiv3::ReferenceOr;
+use openapiv3::Schema;
+use openapiv3::SchemaKind;
+use openapiv3::Type;
+use openapiv3::VariantOrUnknownOrEmpty;
+
+use crate::error::Error;
+use crate::error::Result;
+use crate::loader::Spec;
+use crate::lower::schema::MAX_SCHEMA_DEPTH;
+
+fn unsupported(path: &str, reason: &str) -> Error {
+    return Error::UnsupportedSchema {
+        path: path.to_owned(),
+        reason: format!("allOf intersection: {reason}"),
+    };
+}
+
+pub(super) fn merge(spec: &Spec, path: &str, members: &[ReferenceOr<Schema>], depth: usize) -> Result<ObjectType> {
+    let mut objects = Vec::new();
+    collect(spec, path, members, &mut objects, depth)?;
+    let mut merged = ObjectType::default();
+    for object in &objects {
+        if matches!(object.additional_properties, Some(AdditionalProperties::Any(true))) {
+            merged.additional_properties = Some(AdditionalProperties::Any(true));
+        }
+        for (name, property) in &object.properties {
+            let property = match merged.properties.get(name) {
+                Some(previous) => intersect(spec, &format!("{path}.{name}"), previous, property, depth)?,
+                None => property.clone(),
+            };
+            merged.properties.insert(name.clone(), property);
+        }
+        for name in &object.required {
+            if !merged.required.contains(name) {
+                merged.required.push(name.clone());
+            }
+        }
+    }
+    for object in &objects {
+        if matches!(object.additional_properties, Some(AdditionalProperties::Any(false))) {
+            if merged
+                .properties
+                .keys()
+                .any(|name| return !object.properties.contains_key(name))
+                || merged
+                    .required
+                    .iter()
+                    .any(|name| return !object.properties.contains_key(name))
+            {
+                return Err(unsupported(
+                    path,
+                    "a closed member forbids a property from another member",
+                ));
+            }
+            merged.additional_properties = Some(AdditionalProperties::Any(false));
+        }
+    }
+    if merged
+        .required
+        .iter()
+        .any(|name| return !merged.properties.contains_key(name))
+    {
+        return Err(unsupported(path, "a required property has no declared schema"));
+    }
+    return Ok(merged);
+}
+
+fn collect(
+    spec: &Spec,
+    path: &str,
+    members: &[ReferenceOr<Schema>],
+    objects: &mut Vec<ObjectType>,
+    depth: usize,
+) -> Result<()> {
+    if depth >= MAX_SCHEMA_DEPTH {
+        return Err(Error::SchemaDepthExceeded {
+            path: path.to_owned(),
+            limit: MAX_SCHEMA_DEPTH,
+        });
+    }
+    if members.is_empty() {
+        return Err(unsupported(path, "an empty composition is not supported"));
+    }
+    for member in members {
+        let schema = match member {
+            ReferenceOr::Item(schema) => schema,
+            ReferenceOr::Reference { reference } => spec.resolve(reference)?,
+        };
+        check_member_metadata(path, schema)?;
+        match &schema.schema_kind {
+            SchemaKind::Type(Type::Object(object)) => {
+                if object.min_properties.is_some() || object.max_properties.is_some() {
+                    return Err(unsupported(
+                        path,
+                        "object property-count constraints cannot be flattened",
+                    ));
+                }
+                if matches!(object.additional_properties, Some(AdditionalProperties::Schema(_))) {
+                    return Err(unsupported(
+                        path,
+                        "schema-valued additionalProperties cannot be flattened",
+                    ));
+                }
+                objects.push(object.clone());
+            }
+            SchemaKind::AllOf { all_of } => collect(spec, path, all_of, objects, depth + 1)?,
+            _ => return Err(unsupported(path, "members must be objects or references to objects")),
+        }
+    }
+    return Ok(());
+}
+
+pub(super) fn check_member_metadata(path: &str, schema: &Schema) -> Result<()> {
+    let data = &schema.schema_data;
+    if data.nullable
+        || data.read_only
+        || data.write_only
+        || data.deprecated
+        || data.default.is_some()
+        || !data.extensions.is_empty()
+        || data.discriminator.is_some()
+    {
+        return Err(unsupported(
+            path,
+            "member nullability, access, deprecation, defaults, extensions, or discriminators cannot be flattened",
+        ));
+    }
+    return Ok(());
+}
+
+fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>, depth: usize) -> Result<Schema> {
+    let mut schema = resolve_reference(spec, property)?.clone();
+    for _ in depth..MAX_SCHEMA_DEPTH {
+        let SchemaKind::AllOf { all_of } = &schema.schema_kind else {
+            return Ok(schema);
+        };
+        let [member] = all_of.as_slice() else {
+            return Ok(schema);
+        };
+        let mut target = match member {
+            ReferenceOr::Item(schema) => schema.clone(),
+            ReferenceOr::Reference { reference } => spec.resolve(reference)?.clone(),
+        };
+        let mut data = schema.schema_data.clone();
+        data.nullable = false;
+        if data != openapiv3::SchemaData::default() {
+            return Err(unsupported(
+                path,
+                "overlapping reference wrappers carry unsupported metadata",
+            ));
+        }
+        target.schema_data.nullable |= schema.schema_data.nullable;
+        schema = target;
+    }
+    return Err(Error::SchemaDepthExceeded {
+        path: path.to_owned(),
+        limit: MAX_SCHEMA_DEPTH,
+    });
+}
+
+fn resolve_reference<'a>(spec: &'a Spec, property: &'a ReferenceOr<Box<Schema>>) -> Result<&'a Schema> {
+    return match property {
+        ReferenceOr::Item(schema) => Ok(schema),
+        ReferenceOr::Reference { reference } => spec.resolve(reference),
+    };
+}
+
+fn intersect(
+    spec: &Spec,
+    path: &str,
+    left: &ReferenceOr<Box<Schema>>,
+    right: &ReferenceOr<Box<Schema>>,
+    depth: usize,
+) -> Result<ReferenceOr<Box<Schema>>> {
+    if left == right
+        && match left {
+            ReferenceOr::Reference { .. } => true,
+            ReferenceOr::Item(schema) => matches!(schema.schema_kind, SchemaKind::AllOf { .. }),
+        }
+    {
+        return Ok(left.clone());
+    }
+    let resolved_left = resolve_reference(spec, left)?;
+    let resolved_right = resolve_reference(spec, right)?;
+    if matches!(&resolved_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
+        && resolved_left == resolved_right
+    {
+        return Ok(match (left, right) {
+            (ReferenceOr::Reference { .. }, _) => left.clone(),
+            (_, ReferenceOr::Reference { .. }) => right.clone(),
+            _ => left.clone(),
+        });
+    }
+    let normalized_left = resolve(spec, path, left, depth)?;
+    let normalized_right = resolve(spec, path, right, depth)?;
+    if matches!(normalized_left.schema_kind, SchemaKind::AllOf { .. })
+        || matches!(normalized_right.schema_kind, SchemaKind::AllOf { .. })
+    {
+        if normalized_left == normalized_right
+            && matches!(&normalized_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
+        {
+            return Ok(match (left, right) {
+                (ReferenceOr::Reference { .. }, _) => left.clone(),
+                (_, ReferenceOr::Reference { .. }) => right.clone(),
+                _ => ReferenceOr::Item(Box::new(normalized_left)),
+            });
+        }
+        return Err(unsupported(path, "overlapping composed properties are not supported"));
+    }
+    let mut left = normalized_left;
+    let mut right = normalized_right;
+    let nullable = left.schema_data.nullable && right.schema_data.nullable;
+    left.schema_data.nullable = nullable;
+    right.schema_data.nullable = nullable;
+    if left.schema_data != right.schema_data {
+        return Err(unsupported(
+            path,
+            "overlapping properties have different metadata or extensions",
+        ));
+    }
+    if left.schema_data.extensions.contains_key("x-rust-type") {
+        if left.schema_kind != right.schema_kind {
+            return Err(unsupported(path, "custom-type property constraints differ"));
+        }
+        return Ok(ReferenceOr::Item(Box::new(left)));
+    }
+    if left.schema_kind != right.schema_kind
+        && ["x-enum-varnames", "x-enumNames"]
+            .iter()
+            .any(|key| return left.schema_data.extensions.contains_key(*key))
+    {
+        return Err(unsupported(
+            path,
+            "enum intersections with positional variant names are not supported",
+        ));
+    }
+    match (&mut left.schema_kind, &right.schema_kind) {
+        (SchemaKind::Type(Type::String(a)), SchemaKind::Type(Type::String(b))) => {
+            combine_keyword(path, "formats", &mut a.format, &b.format)?;
+            combine_keyword(path, "patterns", &mut a.pattern, &b.pattern)?;
+            a.min_length = tighter(a.min_length, b.min_length, true);
+            a.max_length = tighter(a.max_length, b.max_length, false);
+            check_range(path, a.min_length, a.max_length)?;
+            if nullable
+                && !matches!(
+                    super::schema::string_format_type(&a.format),
+                    crate::ir::RustType::String
+                )
+                && (a.pattern.is_some() || a.min_length.is_some() || a.max_length.is_some())
+            {
+                return Err(unsupported(
+                    path,
+                    "nullable formatted-string constraints cannot be enforced",
+                ));
+            }
+            narrow_enum(path, &mut a.enumeration, &b.enumeration)?;
+            if !a.enumeration.is_empty()
+                && (nullable
+                    || !matches!(a.format, VariantOrUnknownOrEmpty::Empty)
+                    || a.pattern.is_some()
+                    || a.min_length.is_some()
+                    || a.max_length.is_some())
+            {
+                return Err(unsupported(
+                    path,
+                    "string enum intersections with nullability, formats, or string constraints are not supported",
+                ));
+            }
+        }
+        (SchemaKind::Type(Type::Integer(a)), SchemaKind::Type(Type::Integer(b))) => {
+            for integer in [&*a, b] {
+                let repr = super::schema::integer_type(integer);
+                if integer
+                    .enumeration
+                    .iter()
+                    .flatten()
+                    .any(|value| return !super::schema::fits_repr(*value, &repr))
+                {
+                    return Err(unsupported(
+                        path,
+                        "an integer enum value exceeds its representation limits",
+                    ));
+                }
+            }
+            combine_keyword(path, "formats", &mut a.format, &b.format)?;
+            combine_keyword(path, "multipleOf", &mut a.multiple_of, &b.multiple_of)?;
+            (a.minimum, a.exclusive_minimum) =
+                bound(a.minimum, a.exclusive_minimum, b.minimum, b.exclusive_minimum, true);
+            (a.maximum, a.exclusive_maximum) =
+                bound(a.maximum, a.exclusive_maximum, b.maximum, b.exclusive_maximum, false);
+            check_range(path, a.minimum, a.maximum)?;
+            narrow_enum(path, &mut a.enumeration, &b.enumeration)?;
+            if !a.enumeration.is_empty()
+                && (nullable || a.minimum.is_some() || a.maximum.is_some() || a.multiple_of.is_some())
+            {
+                return Err(unsupported(
+                    path,
+                    "integer enum intersections with nullability or numeric constraints are not supported",
+                ));
+            }
+        }
+        (SchemaKind::Type(Type::Number(a)), SchemaKind::Type(Type::Number(b))) => {
+            if [a.minimum, a.maximum, b.minimum, b.maximum]
+                .into_iter()
+                .flatten()
+                .any(|value| return !value.is_finite())
+            {
+                return Err(unsupported(path, "numeric bounds must be finite"));
+            }
+            combine_keyword(path, "formats", &mut a.format, &b.format)?;
+            combine_keyword(path, "multipleOf", &mut a.multiple_of, &b.multiple_of)?;
+            if !a.enumeration.is_empty() || !b.enumeration.is_empty() {
+                return Err(unsupported(path, "number enums are not supported in this overlap"));
+            }
+            (a.minimum, a.exclusive_minimum) =
+                bound(a.minimum, a.exclusive_minimum, b.minimum, b.exclusive_minimum, true);
+            (a.maximum, a.exclusive_maximum) =
+                bound(a.maximum, a.exclusive_maximum, b.maximum, b.exclusive_maximum, false);
+            check_range(path, a.minimum, a.maximum)?;
+        }
+        (a, b) if a == b => {}
+        _ => return Err(unsupported(path, "property types or composite constraints differ")),
+    }
+    return Ok(ReferenceOr::Item(Box::new(left)));
+}
+
+fn combine_keyword<T: Clone + Default + PartialEq>(path: &str, keyword: &str, left: &mut T, right: &T) -> Result<()> {
+    if *left == T::default() {
+        *left = right.clone();
+        return Ok(());
+    }
+    if *right != T::default() && left != right {
+        return Err(unsupported(path, &format!("specified {keyword} constraints differ")));
+    }
+    return Ok(());
+}
+
+fn tighter<T: Copy + PartialOrd>(a: Option<T>, b: Option<T>, minimum: bool) -> Option<T> {
+    return bound(a, false, b, false, minimum).0;
+}
+
+fn bound<T: Copy + PartialOrd>(
+    a: Option<T>,
+    a_exclusive: bool,
+    b: Option<T>,
+    b_exclusive: bool,
+    minimum: bool,
+) -> (Option<T>, bool) {
+    return match (a, b) {
+        (None, _) => (b, b_exclusive),
+        (_, None) => (a, a_exclusive),
+        (Some(a), Some(b)) if a == b => (Some(a), a_exclusive || b_exclusive),
+        (Some(a), Some(b)) if (minimum && b > a) || (!minimum && b < a) => (Some(b), b_exclusive),
+        _ => (a, a_exclusive),
+    };
+}
+
+fn check_range<T: PartialOrd>(path: &str, minimum: Option<T>, maximum: Option<T>) -> Result<()> {
+    if let (Some(minimum), Some(maximum)) = (minimum, maximum)
+        && minimum > maximum
+    {
+        return Err(unsupported(path, "the bounds accept no value"));
+    }
+    return Ok(());
+}
+
+fn narrow_enum<T: Clone + Ord>(path: &str, left: &mut Vec<T>, right: &[T]) -> Result<()> {
+    for values in [left.as_slice(), right] {
+        let mut seen = std::collections::BTreeSet::new();
+        if values.iter().any(|value| return !seen.insert(value)) {
+            return Err(unsupported(path, "an enum contains duplicate values"));
+        }
+    }
+    if left == right {
+        return Ok(());
+    }
+    if left.is_empty() {
+        left.extend_from_slice(right);
+    }
+    if !right.is_empty() {
+        left.retain(|value| return right.contains(value));
+        if left.is_empty() {
+            return Err(unsupported(path, "the enum intersection accepts no value"));
+        }
+    }
+    left.sort();
+    return Ok(());
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn spec(schemas: serde_json::Value) -> Spec {
+        let document = serde_json::from_value(json!({
+            "openapi": "3.0.3", "info": {"title": "test", "version": "1"},
+            "paths": {}, "components": {"schemas": schemas},
+        }))
+        .expect("parse document");
+        return Spec::from_parts(document, "allof.yaml".into());
+    }
+
+    fn lower(schema: serde_json::Value) -> Result<crate::ir::Module> {
+        let spec = spec(json!({"Test": schema}));
+        let names = crate::lower::rename::type_renames(&spec, None)?;
+        return crate::lower::schema::generate_models(&spec, &names);
+    }
+
+    fn object(property: serde_json::Value) -> serde_json::Value {
+        return json!({"type": "object", "properties": {"value": property}});
+    }
+
+    #[test]
+    fn equivalent_composite_aliases_reuse_named_types() {
+        let composed = json!({"allOf":[
+            {"type":"object","required":["count"],"properties":{"count":{"type":"integer","minimum":2_i64}}},
+            {"type":"object","properties":{"count":{"type":"integer","maximum":8_i64}}}
+        ]});
+        let direct = json!({"$ref":"#/components/schemas/A"});
+        let alias = json!({"$ref":"#/components/schemas/B"});
+        let chain = json!({"$ref":"#/components/schemas/C"});
+        for (left, right) in [
+            (&direct, &alias),
+            (&alias, &chain),
+            (&direct, &chain),
+            (&composed, &chain),
+        ] {
+            for (left, right) in [(left, right), (right, left)] {
+                let spec = spec(json!({
+                    "A":composed, "B":direct, "C":alias,
+                    "Test":{"allOf":[object(left.clone()),object(right.clone())]},
+                }));
+                let names = crate::lower::rename::type_renames(&spec, None).expect("names");
+                let module = crate::lower::schema::generate_models(&spec, &names).expect("equivalent composites");
+                let strukt = module
+                    .items
+                    .iter()
+                    .find_map(|item| {
+                        return match item {
+                            crate::ir::Item::Struct(strukt) if strukt.name.logical() == "Test" => Some(strukt),
+                            _ => None,
+                        };
+                    })
+                    .expect("Test struct");
+                assert!(matches!(
+                    &strukt.fields[0].ty,
+                    crate::ir::RustType::Option(inner) if matches!(inner.as_ref(), crate::ir::RustType::Named(_))
+                ));
+                let left = serde_json::from_value(left.clone()).expect("left property");
+                let right = serde_json::from_value(right.clone()).expect("right property");
+                let expected = if matches!(left, ReferenceOr::Reference { .. }) {
+                    &left
+                } else {
+                    &right
+                };
+                assert_eq!(
+                    &intersect(&spec, "Test.value", &left, &right, 0).expect("intersection"),
+                    expected
+                );
+            }
+        }
+        for changed in [
+            json!({"allOf":[{"type":"object"},{"type":"object"}]}),
+            json!({"nullable":true,"allOf":composed["allOf"]}),
+            json!({"description":"different","allOf":composed["allOf"]}),
+            json!({"x-rust-type":"serde_json::Value","allOf":composed["allOf"]}),
+        ] {
+            let spec = spec(json!({"A":composed,"B":changed}));
+            let left = serde_json::from_value(direct.clone()).expect("left");
+            let right = serde_json::from_value(alias.clone()).expect("right");
+            for (left, right) in [(&left, &right), (&right, &left)] {
+                assert!(intersect(&spec, "Test.value", left, right, 0).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn equivalent_singleton_composite_wrappers_reuse_references() {
+        let composite = json!({"allOf":[
+            {"type":"object","properties":{"count":{"type":"integer","minimum":2_i64}}},
+            {"type":"object","properties":{"count":{"type":"integer","maximum":8_i64}}}
+        ]});
+        let wrapper = json!({"allOf":[{"$ref":"#/components/schemas/Composite"}]});
+        let reference_a = json!({"$ref":"#/components/schemas/A"});
+        let reference_b = json!({"$ref":"#/components/schemas/B"});
+        let chain = json!({"$ref":"#/components/schemas/Chain"});
+        let direct = json!({"$ref":"#/components/schemas/Composite"});
+        let nested = json!({"allOf":[wrapper.clone()]});
+        for (left, right) in [
+            (&reference_a, &reference_b),
+            (&reference_a, &chain),
+            (&wrapper, &chain),
+            (&direct, &reference_a),
+            (&direct, &chain),
+            (&direct, &nested),
+            (&reference_a, &nested),
+        ] {
+            for (left, right) in [(left, right), (right, left)] {
+                let spec = spec(json!({
+                    "Composite":composite, "A":wrapper, "B":wrapper, "Chain":reference_b,
+                    "Test":{"allOf":[object(left.clone()),object(right.clone())]},
+                }));
+                let names = crate::lower::rename::type_renames(&spec, None).expect("names");
+                crate::lower::schema::generate_models(&spec, &names).expect("equal wrappers");
+                let left = serde_json::from_value(left.clone()).expect("left");
+                let right = serde_json::from_value(right.clone()).expect("right");
+                let expected = if matches!(left, ReferenceOr::Reference { .. }) {
+                    &left
+                } else {
+                    &right
+                };
+                assert_eq!(
+                    &intersect(&spec, "Test.value", &left, &right, 0).expect("intersection"),
+                    expected
+                );
+            }
+        }
+        for changed in [
+            json!({"description":"different","allOf":wrapper["allOf"]}),
+            json!({"nullable":true,"allOf":wrapper["allOf"]}),
+            json!({"x-rust-type":"serde_json::Value","allOf":wrapper["allOf"]}),
+        ] {
+            let spec = spec(json!({"Composite":composite,"A":wrapper,"B":changed}));
+            let left = serde_json::from_value(reference_a.clone()).expect("left");
+            let right = serde_json::from_value(reference_b.clone()).expect("right");
+            for (left, right) in [(&left, &right), (&right, &left)] {
+                assert!(intersect(&spec, "Test.value", left, right, 0).is_err());
+            }
+        }
+        let spec = spec(json!({"A":{"allOf":[]},"B":{"allOf":[]}}));
+        let left = serde_json::from_value(reference_a).expect("left");
+        let right = serde_json::from_value(reference_b).expect("right");
+        for (left, right) in [(&left, &right), (&right, &left)] {
+            assert!(intersect(&spec, "Test.value", left, right, 0).is_err());
+        }
+        assert!(lower(json!({"allOf":[]})).is_err());
+        assert!(lower(json!({"allOf":[object(json!({"allOf":[]})),object(json!({"allOf":[]}))]})).is_err());
+    }
+
+    #[test]
+    fn map_value_hints_do_not_duplicate_container_names() {
+        for value in [
+            json!({"type":"object","properties":{"label":{"type":"string"}}}),
+            json!({"type":"string","enum":["red","blue"]}),
+            json!({"type":"integer","enum":[1_i64,2_i64]}),
+        ] {
+            let map = json!({"type":"object","additionalProperties":value});
+            for schema in [
+                map.clone(),
+                json!({"allOf":[map]}),
+                json!({"type":"object","properties":{"id":{"type":"string"}},"additionalProperties":value}),
+            ] {
+                let module = lower(schema).expect("map with inline value");
+                let names: Vec<_> = module.items.iter().map(crate::ir::Item::name).collect();
+                assert_eq!(names, ["Test", "TestValue"]);
+            }
+        }
+    }
+
+    #[test]
+    fn singleton_maps_keep_types_and_reject_unenforced_constraints() {
+        for (additional, expected) in [
+            (json!({"type":"string"}), crate::ir::RustType::String),
+            (json!(true), crate::ir::RustType::Value),
+            (serde_json::Value::Null, crate::ir::RustType::Value),
+        ] {
+            let mut map = json!({"type":"object"});
+            if !additional.is_null() {
+                map["additionalProperties"] = additional;
+            }
+            let wrapper = json!({"allOf":[map.clone()]});
+            let module = lower(wrapper.clone()).expect("named map");
+            assert!(matches!(
+                &module.items[0],
+                crate::ir::Item::Alias(alias) if alias.ty == crate::ir::RustType::Map(Box::new(expected.clone()))
+            ));
+            let module = lower(object(wrapper)).expect("inline map");
+            assert!(matches!(
+                &module.items[0],
+                crate::ir::Item::Struct(strukt) if strukt.fields[0].ty
+                    == crate::ir::RustType::Option(Box::new(crate::ir::RustType::Map(Box::new(expected))))
+            ));
+            for (keyword, value) in [
+                ("minProperties", json!(1_i64)),
+                ("maxProperties", json!(2_i64)),
+                ("required", json!(["missing"])),
+            ] {
+                let mut constrained = map.clone();
+                constrained[keyword] = value;
+                let wrapper = json!({"allOf":[constrained]});
+                for schema in [wrapper.clone(), object(wrapper)] {
+                    let error = lower(schema).expect_err("unsupported map restriction").to_string();
+                    assert!(error.contains("allOf intersection"), "{error}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn incompatible_properties_report_context_in_both_orders() {
+        for (left, right, reason) in [
+            (json!({"type":"string"}), json!({"type":"integer"}), "property types"),
+            (
+                json!({"type":"string","minLength":5_i64}),
+                json!({"type":"string","maxLength":2_i64}),
+                "bounds",
+            ),
+            (
+                json!({"type":"integer","minimum":5_i64}),
+                json!({"type":"integer","maximum":2_i64}),
+                "bounds",
+            ),
+            (
+                json!({"type":"string","pattern":"a"}),
+                json!({"type":"string","pattern":"b"}),
+                "patterns",
+            ),
+            (
+                json!({"type":"string","format":"uuid"}),
+                json!({"type":"string","format":"date"}),
+                "formats",
+            ),
+            (
+                json!({"type":"string","enum":["a"]}),
+                json!({"type":"string","enum":["b"]}),
+                "enum intersection",
+            ),
+            (
+                json!({"type":"string","readOnly":true}),
+                json!({"type":"string"}),
+                "metadata",
+            ),
+            (
+                json!({"type":"string","writeOnly":true}),
+                json!({"type":"string"}),
+                "metadata",
+            ),
+            (
+                json!({"type":"string","default":"a"}),
+                json!({"type":"string","default":"b"}),
+                "metadata",
+            ),
+            (
+                json!({"type":"string","x-rust-name":"first"}),
+                json!({"type":"string","x-rust-name":"second"}),
+                "metadata",
+            ),
+            (
+                json!({"type":"integer","multipleOf":2_i64}),
+                json!({"type":"integer","multipleOf":3_i64}),
+                "multipleOf",
+            ),
+        ] {
+            for (left, right) in [(&left, &right), (&right, &left)] {
+                let composition = json!({"allOf":[object(left.clone()), object(right.clone())]});
+                for schema in [composition.clone(), object(composition)] {
+                    let error = lower(schema).expect_err("unsupported overlap").to_string();
+                    assert!(
+                        error.contains("Test") && error.contains("value") && error.contains(reason),
+                        "{error}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_member_restrictions_are_not_discarded() {
+        for (member, reason) in [
+            (json!({"type":"object","minProperties":1_i64}), "property-count"),
+            (json!({"type":"object","nullable":true}), "nullability"),
+            (json!({"type":"object","default":{}}), "defaults"),
+            (json!({"type":"object","x-rust-type":"serde_json::Value"}), "extensions"),
+        ] {
+            let error = lower(json!({"allOf":[member]}))
+                .expect_err("unsupported member")
+                .to_string();
+            assert!(error.contains("Test") && error.contains(reason), "{error}");
+        }
+        let error = lower(json!({"allOf":[
+            {"type":"object","additionalProperties":{"type":"string"}},
+            {"type":"object"}
+        ]}))
+        .expect_err("map composition")
+        .to_string();
+        assert!(error.contains("schema-valued additionalProperties"), "{error}");
+        for required in [json!([]), json!(["value"])] {
+            let other = json!({"type":"object","required":required,"properties":{"value":{"type":"string"}}});
+            let closed = json!({"type":"object","additionalProperties":false});
+            for members in [json!([closed, other]), json!([other, closed])] {
+                let error = lower(json!({"allOf":members}))
+                    .expect_err("forbidden property")
+                    .to_string();
+                assert!(error.contains("Test") && error.contains("closed member"), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn scalar_intersection_is_commutative() {
+        let spec = spec(json!({}));
+        for (left, right) in [
+            (
+                json!({"type":"number","minimum":1.5_f64,"exclusiveMinimum":true}),
+                json!({"type":"number","minimum":1.5_f64,"maximum":3.5_f64}),
+            ),
+            (
+                json!({"type":"integer","nullable":true,"minimum":1_i64}),
+                json!({"type":"integer","nullable":true,"maximum":5_i64}),
+            ),
+            (
+                json!({"type":"string","nullable":true}),
+                json!({"type":"string","minLength":2_i64}),
+            ),
+            (
+                json!({"type":"integer","enum":[1_i64,2_i64,3_i64]}),
+                json!({"type":"integer","enum":[3_i64,2_i64]}),
+            ),
+            (
+                json!({"type":"string","enum":["a_b","a-b","other"]}),
+                json!({"type":"string","enum":["a-b","a_b"]}),
+            ),
+            (
+                json!({"type":"string","enum":["a_b","a-b"]}),
+                json!({"type":"string","enum":["a-b","a_b"]}),
+            ),
+            (
+                json!({"type":"integer","enum":[3_i64,2_i64]}),
+                json!({"type":"integer","enum":[2_i64,3_i64]}),
+            ),
+        ] {
+            let left = serde_json::from_value(left).expect("left schema");
+            let right = serde_json::from_value(right).expect("right schema");
+            assert_eq!(
+                intersect(&spec, "Test.value", &left, &right, 0).expect("forward"),
+                intersect(&spec, "Test.value", &right, &left, 0).expect("reverse"),
+            );
+        }
+    }
+
+    #[test]
+    fn unspecified_keywords_preserve_the_other_members_constraints() {
+        let spec = spec(json!({}));
+        for (left, right, expected) in [
+            (
+                json!({"type":"string","pattern":"^[a-z]+$"}),
+                json!({"type":"string","minLength":3_i64}),
+                json!({"type":"string","pattern":"^[a-z]+$","minLength":3_i64}),
+            ),
+            (
+                json!({"type":"string","format":"uuid"}),
+                json!({"type":"string"}),
+                json!({"type":"string","format":"uuid"}),
+            ),
+            (
+                json!({"type":"integer","format":"int32"}),
+                json!({"type":"integer","minimum":2_i64}),
+                json!({"type":"integer","format":"int32","minimum":2_i64}),
+            ),
+            (
+                json!({"type":"integer","multipleOf":2_i64}),
+                json!({"type":"integer","minimum":0_i64}),
+                json!({"type":"integer","multipleOf":2_i64,"minimum":0_i64}),
+            ),
+            (
+                json!({"type":"number","format":"float"}),
+                json!({"type":"number","maximum":10.0_f64}),
+                json!({"type":"number","format":"float","maximum":10.0_f64}),
+            ),
+            (
+                json!({"type":"number","multipleOf":0.5_f64}),
+                json!({"type":"number","maximum":10.0_f64}),
+                json!({"type":"number","multipleOf":0.5_f64,"maximum":10.0_f64}),
+            ),
+        ] {
+            let left = serde_json::from_value(left).expect("left schema");
+            let right = serde_json::from_value(right).expect("right schema");
+            let expected = serde_json::from_value(expected).expect("intersection schema");
+            for (left, right) in [(&left, &right), (&right, &left)] {
+                assert_eq!(
+                    intersect(&spec, "Test.value", left, right, 0).expect("compatible intersection"),
+                    expected,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nullable_formatted_string_constraints_are_not_discarded() {
+        for format in ["uuid", "date", "date-time", "byte", "binary"] {
+            for constraint in [
+                json!({"pattern":"^a"}),
+                json!({"minLength":3_i64}),
+                json!({"maxLength":10_i64}),
+            ] {
+                let formatted = json!({"type":"string","nullable":true,"format":format});
+                let mut constrained = constraint;
+                constrained["type"] = json!("string");
+                constrained["nullable"] = json!(true);
+                for (left, right) in [(&formatted, &constrained), (&constrained, &formatted)] {
+                    let composition = json!({"allOf":[object(left.clone()),object(right.clone())]});
+                    for schema in [composition.clone(), object(composition)] {
+                        let error = lower(schema).expect_err("unsupported nullable constraints").to_string();
+                        assert!(
+                            error.contains("Test")
+                                && error.contains("value")
+                                && error.contains("nullable formatted-string constraints"),
+                            "{error}",
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn recursive_members_stop_at_the_depth_guard() {
+        let spec = spec(json!({"Cycle":{"allOf":[{"$ref":"#/components/schemas/Cycle"},{"type":"object"}]}}));
+        let members = [ReferenceOr::Reference {
+            reference: "#/components/schemas/Cycle".to_owned(),
+        }];
+        assert!(matches!(
+            merge(&spec, "Cycle", &members, 0),
+            Err(Error::SchemaDepthExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn open_members_preserve_additional_properties_and_required_names() {
+        let spec = spec(json!({}));
+        let members = serde_json::from_value::<Vec<ReferenceOr<Schema>>>(json!([
+            {"type":"object","required":["value"]},
+            {"type":"object","additionalProperties":true,"properties":{"value":{"type":"string"}}}
+        ]))
+        .expect("members");
+        let merged = merge(&spec, "Test", &members, 0).expect("open intersection");
+        assert_eq!(merged.required, ["value"]);
+        assert_eq!(merged.additional_properties, Some(AdditionalProperties::Any(true)));
+    }
+
+    #[test]
+    fn enum_metadata_and_nullable_enum_overlaps_are_explicit_errors() {
+        for members in [
+            json!([
+                object(json!({"type":"string","nullable":true,"enum":["a","b"]})),
+                object(json!({"type":"string","nullable":true,"enum":["b"]}))
+            ]),
+            json!([
+                object(json!({"type":"string","enum":["a","b"],"x-enum-varnames":["First","Second"]})),
+                object(json!({"type":"string","enum":["b","c"],"x-enum-varnames":["First","Second"]}))
+            ]),
+        ] {
+            let error = lower(json!({"allOf":members}))
+                .expect_err("unsupported enum intersection")
+                .to_string();
+            assert!(
+                error.contains("Test.value") && error.contains("enum intersections"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn string_enum_formats_are_not_discarded() {
+        for format in ["uuid", "date", "date-time", "byte", "binary", "password"] {
+            let enumeration = json!({"type":"string","enum":["not-a-uuid"]});
+            let formatted = json!({"type":"string","format":format});
+            let combined = json!({"type":"string","format":format,"enum":["not-a-uuid"]});
+            for (left, right) in [
+                (&enumeration, &formatted),
+                (&formatted, &enumeration),
+                (&combined, &combined),
+            ] {
+                let composition = json!({"allOf":[object(left.clone()),object(right.clone())]});
+                for schema in [composition.clone(), object(composition)] {
+                    let error = lower(schema).expect_err("unsupported enum format").to_string();
+                    assert!(
+                        error.contains("Test") && error.contains("value") && error.contains("formats"),
+                        "{error}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_source_enums_are_rejected_before_intersection() {
+        for (invalid, valid, reason) in [
+            (
+                json!({"type":"string","enum":["a","a","b"]}),
+                json!({"type":"string","enum":["a","b"]}),
+                "duplicate",
+            ),
+            (
+                json!({"type":"string","enum":["removed","removed","b"]}),
+                json!({"type":"string","enum":["b"]}),
+                "duplicate",
+            ),
+            (
+                json!({"type":"integer","enum":[1_i64,1_i64,2_i64]}),
+                json!({"type":"integer","enum":[1_i64,2_i64]}),
+                "duplicate",
+            ),
+            (
+                json!({"type":"integer","enum":[1_i64,1_i64,2_i64]}),
+                json!({"type":"integer","enum":[2_i64]}),
+                "duplicate",
+            ),
+            (
+                json!({"type":"integer","format":"int32","enum":[2_147_483_648_i64,1_i64]}),
+                json!({"type":"integer","format":"int32","enum":[1_i64]}),
+                "representation limits",
+            ),
+            (
+                json!({"type":"integer","format":"int32","enum":[-2_147_483_649_i64,1_i64]}),
+                json!({"type":"integer","format":"int32","enum":[1_i64]}),
+                "representation limits",
+            ),
+        ] {
+            for (left, right) in [(&invalid, &valid), (&valid, &invalid)] {
+                let error = lower(json!({"allOf":[object(left.clone()),object(right.clone())]}))
+                    .expect_err("invalid source enum")
+                    .to_string();
+                assert!(error.contains("Test.value") && error.contains(reason), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn identical_custom_types_keep_control_of_enum_validation() {
+        for values in [json!([2_147_483_648_i64]), json!([1_i64, 1_i64])] {
+            let property = object(json!({
+                "type": "integer",
+                "format": "int32",
+                "enum": values,
+                "x-rust-type": "i64",
+            }));
+            lower(json!({"allOf": [property.clone(), property]}))
+                .expect("custom type replaces the declared integer representation");
+        }
+    }
+}

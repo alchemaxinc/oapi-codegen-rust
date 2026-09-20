@@ -543,20 +543,6 @@ impl Sweep<'_> {
                     path,
                     "Rust deserialization checks do not enforce all schema constraints, which can affect union match counts",
                 ),
-                "allOf"
-                    if value.as_sequence().is_some_and(|members| {
-                        return match members.as_slice() {
-                            [] => false,
-                            [member] => member.get("$ref").is_none(),
-                            _ => true,
-                        };
-                    }) =>
-                {
-                    self.warn(
-                        path,
-                        "allOf merges properties rather than validating every member independently",
-                    );
-                }
                 "default" if value.is_null() => {
                     self.warn(
                         path,
@@ -665,18 +651,6 @@ impl Sweep<'_> {
                     "this format is not implemented and the base type is used",
                 );
             }
-        }
-        if kind == Some("object")
-            && value.get("additionalProperties").and_then(Value::as_bool) == Some(false)
-            && value
-                .get("properties")
-                .and_then(Value::as_mapping)
-                .is_none_or(serde_yaml::Mapping::is_empty)
-        {
-            self.warn(
-                &pointer(path, "additionalProperties"),
-                "an object without declared properties becomes a map and does not reject additional properties",
-            );
         }
     }
 }
@@ -901,11 +875,6 @@ security: [{arbitrary: [custom]}]
             ("{type: string, nullable: true, default: null}", "default"),
             ("{oneOf: [{type: string}, {type: integer}]}", "oneOf"),
             ("{anyOf: [{type: string}, {type: integer}]}", "anyOf"),
-            ("{type: object, additionalProperties: false}", "additionalProperties"),
-            (
-                "{allOf: [{type: object, properties: {name: {type: string}}, additionalProperties: false}]}",
-                "allOf",
-            ),
         ] {
             let yaml = format!("components: {{schemas: {{Widget: {schema}}}}}");
             let sweep = inspect_yaml(&yaml);
@@ -924,6 +893,13 @@ security: [{arbitrary: [custom]}]
                 }));
             }
         }
+    }
+
+    #[test]
+    fn empty_closed_objects_have_no_map_warning() {
+        let sweep = inspect_yaml("components: {schemas: {Empty: {type: object, additionalProperties: false}}}");
+        assert!(sweep.problems.is_empty());
+        assert!(sweep.warnings.is_empty());
     }
 
     #[test]
