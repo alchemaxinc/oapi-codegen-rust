@@ -1289,7 +1289,19 @@ impl Lowerer<'_> {
             let required = object.required.iter().any(|name| {
                 return name == wire_name;
             });
-            let (kind, nullable) = match property {
+            // A one-member `allOf` around a `$ref` names the schema the `$ref`
+            // names. The wrapper adds a keyword such as `description` or
+            // `nullable` and nothing else, so the field reads the target.
+            let wrapped = match property {
+                ReferenceOr::Item(schema) => crate::loader::single_ref_member(schema).map(|reference| {
+                    return ReferenceOr::Reference {
+                        reference: reference.to_owned(),
+                    };
+                }),
+                ReferenceOr::Reference { .. } => None,
+            };
+            let wrapper_nullable = matches!(property, ReferenceOr::Item(schema) if schema.schema_data.nullable);
+            let (kind, nullable) = match wrapped.as_ref().unwrap_or(property) {
                 ReferenceOr::Item(schema) => {
                     if !multipart_part_is_sent(&schema.schema_data, path, method, wire_name)? {
                         continue;
@@ -1310,7 +1322,7 @@ impl Lowerer<'_> {
                     if !multipart_part_is_sent(&resolved.schema_data, path, method, wire_name)? {
                         continue;
                     }
-                    (resolved.schema_kind, resolved.schema_data.nullable)
+                    (resolved.schema_kind, resolved.schema_data.nullable || wrapper_nullable)
                 }
             };
             let ty = scalar_type(&kind).ok_or_else(|| {

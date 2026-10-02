@@ -298,6 +298,12 @@ These include document information, schema titles, external documentation, and
 examples. Compatibility extensions with an `x-go-` prefix are also intentionally
 ignored. Other unhandled extensions produce warnings.
 
+OpenAPI 3.0 ignores each keyword beside a `$ref`, and each one produces a
+warning. A `description` beside the `$ref` of a property is the exception. It
+changes no value and no type, so the generator keeps it as the documentation of
+the field. A cross-file `$ref` is not included, because it does not resolve at a
+property.
+
 Property names, schema names, security scheme names, and media types are data,
 not fixed OpenAPI keys. Payloads in `example`, `default`, and example `value`
 fields are also data. The inspection does not interpret their contents as

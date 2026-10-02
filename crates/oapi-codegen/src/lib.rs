@@ -366,7 +366,8 @@ mod tests {
     /// A one-member `allOf` exists to put a keyword beside a `$ref`. It must
     /// generate what the bare `$ref` generates, with the description added. A
     /// marked target is the case that once differed: the wrapped form lost the
-    /// mark, so the model did not split by direction.
+    /// mark, so the model did not split by direction. A description written
+    /// beside the `$ref` itself must give the same output as the wrapped form.
     #[test]
     fn a_wrapped_reference_generates_what_the_bare_reference_generates() {
         const NOTE: &str = "the note beside the reference";
@@ -424,6 +425,69 @@ components:
         let without_notes: Vec<&str> = wrapped.lines().filter(|line| return !line.contains(NOTE)).collect();
         assert_eq!(without_notes, bare.lines().collect::<Vec<&str>>());
         assert!(wrapped.contains(NOTE), "the description reaches the output");
+
+        // A description beside the bare `$ref` is kept the same way.
+        let beside = generate_from(&format!("{{$ref: '#/components/schemas/NAME', description: {NOTE}}}"));
+        assert_eq!(beside, wrapped);
+    }
+
+    /// The two places that read a property on their own path, and not through
+    /// the field lowering: an `allOf` that merges two members which both declare
+    /// the property, and a multipart form field. A description beside the `$ref`
+    /// must change neither.
+    #[test]
+    fn a_described_reference_merges_and_uploads_like_the_bare_reference() {
+        const NOTE: &str = "the note beside the reference";
+        let spec = |property: &str| {
+            return format!(
+                "openapi: 3.0.3
+info: {{title: Demo, version: 1.0.0}}
+paths:
+  /uploads:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: {property}
+                file: {{type: string, format: binary}}
+      responses:
+        '200':
+          description: ok
+          content: {{application/json: {{schema: {{$ref: '#/components/schemas/Merged'}}}}}}
+components:
+  schemas:
+    Kind: {{type: string, enum: [a, b]}}
+    Base: {{type: object, properties: {{kind: {{$ref: '#/components/schemas/Kind'}}}}}}
+    Extra: {{type: object, properties: {{kind: {property}}}}}
+    Merged: {{allOf: [{{$ref: '#/components/schemas/Base'}}, {{$ref: '#/components/schemas/Extra'}}]}}
+"
+            );
+        };
+        let dir = TestDir::new("described-reference");
+        std::fs::write(
+            dir.join("config.yaml"),
+            "package: demo\ngenerate: {models: true, std-http-server: true}\n",
+        )
+        .expect("write the configuration");
+        let config = Config::load(&dir.join("config.yaml")).expect("valid configuration");
+        let generate_from = |property: &str| {
+            std::fs::write(dir.join("spec.yaml"), spec(property)).expect("write the spec");
+            return generate(&dir.join("spec.yaml"), &config).expect("the spec generates");
+        };
+
+        let bare = generate_from("{$ref: '#/components/schemas/Kind'}");
+        let described = generate_from(&format!("{{$ref: '#/components/schemas/Kind', description: {NOTE}}}"));
+
+        assert!(bare.contains("pub struct Merged"), "the overlap merges");
+        let without_notes: Vec<&str> = described.lines().filter(|line| return !line.contains(NOTE)).collect();
+        assert_eq!(without_notes, bare.lines().collect::<Vec<&str>>());
+        assert!(described.contains(NOTE), "the description reaches the output");
     }
 
     #[test]

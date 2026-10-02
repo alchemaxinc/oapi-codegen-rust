@@ -144,8 +144,11 @@ fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>, depth: 
             ReferenceOr::Item(schema) => schema.clone(),
             ReferenceOr::Reference { reference } => spec.resolve(reference)?.clone(),
         };
+        // A description beside the wrapper documents the field and changes no
+        // value, so two wrappers that differ only in it still name one schema.
         let mut data = schema.schema_data.clone();
         data.nullable = false;
+        data.description = None;
         if data != openapiv3::SchemaData::default() {
             return Err(unsupported(
                 path,
@@ -168,6 +171,24 @@ fn resolve_reference<'a>(spec: &'a Spec, property: &'a ReferenceOr<Box<Schema>>)
     };
 }
 
+/// The bare `$ref` behind a one-member `allOf` that adds a description and
+/// nothing else. Such a wrapper names the same schema as the `$ref`, so two
+/// members that overlap on it agree.
+fn described_reference(property: &ReferenceOr<Box<Schema>>) -> Option<ReferenceOr<Box<Schema>>> {
+    let ReferenceOr::Item(schema) = property else {
+        return None;
+    };
+    let reference = crate::loader::single_ref_member(schema)?;
+    let mut data = schema.schema_data.clone();
+    data.description = None;
+    if data != openapiv3::SchemaData::default() {
+        return None;
+    }
+    return Some(ReferenceOr::Reference {
+        reference: reference.to_owned(),
+    });
+}
+
 fn intersect(
     spec: &Spec,
     path: &str,
@@ -175,6 +196,21 @@ fn intersect(
     right: &ReferenceOr<Box<Schema>>,
     depth: usize,
 ) -> Result<ReferenceOr<Box<Schema>>> {
+    let left_bare = described_reference(left);
+    let right_bare = described_reference(right);
+    if left_bare.is_some() || right_bare.is_some() {
+        let bare_left = left_bare.as_ref().unwrap_or(left);
+        let bare_right = right_bare.as_ref().unwrap_or(right);
+        if bare_left == bare_right {
+            // The side that documents the field wins, so the description survives.
+            return Ok(if left_bare.is_some() {
+                left.clone()
+            } else {
+                right.clone()
+            });
+        }
+        return intersect(spec, path, bare_left, bare_right, depth);
+    }
     if left == right
         && match left {
             ReferenceOr::Reference { .. } => true,
