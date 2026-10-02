@@ -586,15 +586,36 @@ fn schema_marks_a_direction(schema: &Schema, directional: &std::collections::BTr
 
 /// Whether one schema declares a property that only one direction carries.
 fn declares_a_directional_property(schema: &Schema, directional: &std::collections::BTreeSet<String>) -> bool {
+    let names_a_marked_schema = |reference: &str| {
+        return ref_file_part(reference).is_none()
+            && ref_component_name(reference, "schemas").is_some_and(|name| return directional.contains(name));
+    };
     return object_properties(schema).iter().any(|entry| {
         return match entry {
-            ReferenceOr::Item(inner) => inner.schema_data.read_only || inner.schema_data.write_only,
-            ReferenceOr::Reference { reference } => {
-                return ref_file_part(reference).is_none()
-                    && ref_component_name(reference, "schemas").is_some_and(|name| return directional.contains(name));
+            // A one-member `allOf` adds keywords to a `$ref` and changes nothing
+            // else, so the mark of the schema it names still applies.
+            ReferenceOr::Item(inner) => {
+                inner.schema_data.read_only
+                    || inner.schema_data.write_only
+                    || single_ref_member(inner).is_some_and(names_a_marked_schema)
             }
+            ReferenceOr::Reference { reference } => names_a_marked_schema(reference),
         };
     });
+}
+
+/// The reference a one-member `allOf` wraps, when that member is a `$ref`.
+///
+/// OpenAPI 3.0 ignores a keyword beside a `$ref`, so a document wraps the
+/// `$ref` in a one-member `allOf` to give it a `description` or `nullable`.
+pub(crate) fn single_ref_member(schema: &Schema) -> Option<&str> {
+    let openapiv3::SchemaKind::AllOf { all_of } = &schema.schema_kind else {
+        return None;
+    };
+    let [ReferenceOr::Reference { reference }] = all_of.as_slice() else {
+        return None;
+    };
+    return Some(reference);
 }
 
 /// The schemas one schema declares as properties.
@@ -1117,6 +1138,23 @@ mod tests {
         assert!(
             !split.contains("PlainAlias"),
             "an alias to an unmarked model keeps its one name"
+        );
+    }
+
+    /// A one-member `allOf` around a `$ref` names the same schema as the bare
+    /// `$ref`, so it splits the same models.
+    #[test]
+    fn a_wrapped_reference_to_a_marked_schema_splits_the_referrer() {
+        let doc: OpenAPI = serde_yaml::from_str(
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Marked:\n      type: string\n      readOnly: true\n    Plain:\n      type: string\n    Holder:\n      type: object\n      properties:\n        a:\n          allOf:\n            - $ref: '#/components/schemas/Marked'\n          description: wrapped\n    Bystander:\n      type: object\n      properties:\n        b:\n          allOf:\n            - $ref: '#/components/schemas/Plain'\n",
+        )
+        .expect("parse doc");
+
+        let split = direction_split_schemas(&doc);
+        assert!(split.contains("Holder"), "a wrapped name of a marked schema splits");
+        assert!(
+            !split.contains("Bystander"),
+            "a wrapped name of a plain schema does not"
         );
     }
 

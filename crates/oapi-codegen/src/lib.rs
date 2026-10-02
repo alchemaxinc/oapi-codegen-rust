@@ -363,6 +363,69 @@ mod tests {
         }
     }
 
+    /// A one-member `allOf` exists to put a keyword beside a `$ref`. It must
+    /// generate what the bare `$ref` generates, with the description added. A
+    /// marked target is the case that once differed: the wrapped form lost the
+    /// mark, so the model did not split by direction.
+    #[test]
+    fn a_wrapped_reference_generates_what_the_bare_reference_generates() {
+        const NOTE: &str = "the note beside the reference";
+        let spec = |property: &str| {
+            return format!(
+                "openapi: 3.0.3
+info: {{title: Demo, version: 1.0.0}}
+paths:
+  /holders:
+    post:
+      operationId: putHolder
+      requestBody:
+        required: true
+        content: {{application/json: {{schema: {{$ref: '#/components/schemas/Holder'}}}}}}
+      responses:
+        '200':
+          description: ok
+          content: {{application/json: {{schema: {{$ref: '#/components/schemas/Holder'}}}}}}
+components:
+  schemas:
+    Plain: {{type: string, maxLength: 3}}
+    Served: {{type: string, readOnly: true}}
+    Sent: {{type: string, writeOnly: true}}
+    Holder:
+      type: object
+      required: [plain, served]
+      properties:
+        plain: {}
+        served: {}
+        sent: {}
+",
+                property.replace("NAME", "Plain"),
+                property.replace("NAME", "Served"),
+                property.replace("NAME", "Sent"),
+            );
+        };
+        let dir = TestDir::new("wrapped-reference");
+        std::fs::write(
+            dir.join("config.yaml"),
+            "package: demo\ngenerate: {models: true, std-http-server: true, client: true}\n",
+        )
+        .expect("write the configuration");
+        let config = Config::load(&dir.join("config.yaml")).expect("valid configuration");
+        let generate_from = |property: &str| {
+            std::fs::write(dir.join("spec.yaml"), spec(property)).expect("write the spec");
+            return generate(&dir.join("spec.yaml"), &config).expect("the spec generates");
+        };
+
+        let bare = generate_from("{$ref: '#/components/schemas/NAME'}");
+        let wrapped = generate_from(&format!(
+            "{{allOf: [{{$ref: '#/components/schemas/NAME'}}], description: {NOTE}}}"
+        ));
+
+        assert!(bare.contains("HolderRequest"), "the marked targets split the model");
+        let without_notes: Vec<&str> = wrapped.lines().filter(|line| return !line.contains(NOTE)).collect();
+        assert_eq!(without_notes, bare.lines().collect::<Vec<&str>>());
+        assert!(wrapped.contains(NOTE), "the description reaches the output");
+    }
+
     #[test]
     fn check_output_reports_an_absent_file_as_drift() {
         let dir = TestDir::new("absent");

@@ -620,6 +620,11 @@ travels in a response, and a request must not send it. A `writeOnly` property
 travels in a request, and a response must not send it. A property that sets both
 marks is an error, because no direction is left to carry it.
 
+A property can name a marked schema through a `$ref`, and it then takes the mark
+of that schema. A one-member `allOf` around the `$ref` names the same schema, so
+it takes the same mark. A document writes that form to put a `description` or
+`nullable` beside the reference.
+
 A serde attribute cannot state this. The same `Order` type can reach a request
 body and a response body, so an attribute that is right for one is wrong for the
 other. The side does not settle it either. A server reads a request and writes a
