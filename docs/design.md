@@ -306,8 +306,10 @@ such as callback operations.
 
 Warnings also identify several limits of the current translation. These include
 Rust union matching, nullability, and unconstrained fallback
-types. Every `oneOf` and `anyOf` produces a warning: Rust deserialization checks
-do not enforce all schema constraints. Body selection reports discarded media entries.
+types. A `oneOf` or an `anyOf` produces a warning: Rust deserialization checks
+do not enforce all schema constraints. A union that `x-rust-type` replaces
+produces none, because no generated code matches it. Body selection reports
+discarded media entries.
 The warnings expose these limits without changing the generated types.
 The catalogue is not a complete OpenAPI value validator. Lowering still applies
 its own value and combination checks.
@@ -593,6 +595,12 @@ A `$ref` to a constrained scalar makes a type alias, and an alias carries no
 serde attribute. The field that names the alias takes the checks instead. A
 target with an `enum` or an `x-rust-type` is left alone: there the name and the
 type below it are not the same thing.
+
+A constraint on a schema that no field holds has no check, and it produces a
+warning. A type alias and an array item are the two cases. Two uses produce no
+warning. The schema of a query parameter becomes a field of the query struct,
+which checks it. An integer whose only constraint is `minimum: 0` becomes an
+unsigned type, which refuses a negative value at every use.
 
 A rule that cannot reach its type is an error, not a silence. A `format` of
 `date`, `date-time`, `uuid`, or `binary` names a type that is no longer a string,

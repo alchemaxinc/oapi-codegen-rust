@@ -361,6 +361,10 @@ struct Sweep<'a> {
     document: &'a str,
     warnings: Vec<Warning>,
     problems: Diagnostics,
+    /// The paths of the schemas that sit directly in a query parameter. The
+    /// generated query struct checks the constraints of such a schema, so the
+    /// note about unchecked constraints does not apply to it.
+    query_schemas: Vec<String>,
 }
 
 pub(crate) fn check(document: &str, value: &Value) -> Result<()> {
@@ -374,6 +378,7 @@ fn inspect<'a>(document: &'a str, value: &Value) -> Sweep<'a> {
         document,
         warnings: Vec::new(),
         problems: Diagnostics::new(),
+        query_schemas: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
     return sweep;
@@ -402,6 +407,12 @@ impl Sweep<'_> {
             return;
         };
         let reference = context.references() && mapping.contains_key("$ref");
+        if context == Context::Parameter && value.get("in").and_then(Value::as_str) == Some("query") {
+            self.query_schemas.push(pointer(path, "schema"));
+        }
+        // A custom type replaces the schema, so no generated code matches a
+        // union below it.
+        let custom_type = value.get("x-rust-type").is_some();
         for (key, child) in mapping {
             let key = match key {
                 Value::String(key) => key.clone(),
@@ -445,7 +456,7 @@ impl Sweep<'_> {
                 {
                     self.warn(&at, reason);
                 }
-                self.value_notes(context, &key, child, &at);
+                self.value_notes(context, &key, child, &at, custom_type);
             }
             self.walk(child, field.traversal, &at, depth + 1);
         }
@@ -519,7 +530,7 @@ impl Sweep<'_> {
         }
     }
 
-    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str) {
+    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str, custom_type: bool) {
         if matches!(context, Context::Document | Context::Operation)
             && key == "security"
             && let Some(requirements) = value.as_sequence()
@@ -539,7 +550,7 @@ impl Sweep<'_> {
         }
         if matches!(context, Context::Schema | Context::PropertySchema) {
             match key {
-                "oneOf" | "anyOf" => self.warn(
+                "oneOf" | "anyOf" if !custom_type => self.warn(
                     path,
                     "Rust deserialization checks do not enforce all schema constraints, which can affect union match counts",
                 ),
@@ -620,7 +631,11 @@ impl Sweep<'_> {
                 format!("`{kind}` is not an OpenAPI 3.0 schema type"),
             );
         }
-        if context == Context::Schema && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some()) {
+        if context == Context::Schema
+            && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some())
+            && !self.checked_query_schema(value, path)
+            && !unsigned_type_holds_the_bound(value)
+        {
             self.warn(
                 path,
                 "constraints are enforced only at supported field uses, not on type aliases or array items",
@@ -653,6 +668,39 @@ impl Sweep<'_> {
             }
         }
     }
+}
+
+impl Sweep<'_> {
+    /// Whether `value` is the schema of a query parameter that the generated
+    /// query struct checks on the way in.
+    ///
+    /// Only a plain scalar counts. A nullable value has its own note, and a
+    /// custom type takes the place of the type the checks are written for.
+    fn checked_query_schema(&self, value: &Value, path: &str) -> bool {
+        let scalar = matches!(
+            value.get("type").and_then(Value::as_str),
+            Some("string" | "integer" | "number")
+        );
+        return scalar
+            && value.get("nullable").and_then(Value::as_bool) != Some(true)
+            && value.get("x-rust-type").is_none()
+            && self.query_schemas.iter().any(|schema| return schema == path);
+    }
+}
+
+/// Whether the only constraint on an integer is `minimum: 0`.
+///
+/// Such a schema becomes an unsigned Rust type, and that type refuses every
+/// value the bound refuses. So the bound holds at every use, and an alias or
+/// an array item needs no check.
+fn unsigned_type_holds_the_bound(value: &Value) -> bool {
+    let only_minimum = CONSTRAINT_KEYS
+        .iter()
+        .all(|key| return (*key == "minimum") == value.get(*key).is_some());
+    return only_minimum
+        && value.get("type").and_then(Value::as_str) == Some("integer")
+        && value.get("minimum").and_then(Value::as_i64) == Some(0)
+        && value.get("x-rust-type").is_none();
 }
 
 fn response_key(key: &str) -> bool {
@@ -892,6 +940,64 @@ security: [{arbitrary: [custom]}]
                         && warning.message.contains("can affect union match counts");
                 }));
             }
+        }
+    }
+
+    #[test]
+    fn a_union_that_a_custom_type_replaces_has_no_match_count_note() {
+        let sweep = inspect_yaml(
+            "components: {schemas: {Stamp: {x-rust-type: 'crate::Stamp', oneOf: [{type: string}, {type: integer}]}}}",
+        );
+        assert!(sweep.problems.is_empty());
+        assert!(sweep.warnings.is_empty(), "{:?}", sweep.warnings);
+    }
+
+    #[test]
+    fn the_unchecked_constraint_note_is_only_at_uses_that_no_code_checks() {
+        const NOTE: &str = "constraints are enforced only at supported field uses";
+        let parameter = |location: &str, schema: &str| {
+            return format!(
+                "paths: {{/a: {{get: {{parameters: [{{name: n, in: {location}, schema: {schema}}}], responses: {{}}}}}}}}"
+            );
+        };
+        let component = |schema: &str| return format!("components: {{schemas: {{Widget: {schema}}}}}");
+        for (yaml, noted) in [
+            // The query struct checks a scalar on the way in.
+            (parameter("query", "{type: string, maxLength: 3}"), false),
+            (parameter("query", "{type: integer, minimum: 1, maximum: 9}"), false),
+            // No other parameter location has a check.
+            (parameter("header", "{type: string, maxLength: 3}"), true),
+            // The constraint on an item of a query array has no check.
+            (
+                parameter("query", "{type: array, items: {type: string, maxLength: 3}}"),
+                true,
+            ),
+            (
+                parameter("query", "{type: string, maxLength: 3, x-rust-type: 'crate::Code'}"),
+                true,
+            ),
+            // An unsigned type refuses what `minimum: 0` refuses, at every use.
+            (component("{type: integer, minimum: 0}"), false),
+            (
+                component("{type: array, items: {type: integer, format: int32, minimum: 0}}"),
+                false,
+            ),
+            (component("{type: integer, minimum: 1}"), true),
+            (component("{type: integer, minimum: 0, maximum: 9}"), true),
+            (component("{type: number, minimum: 0}"), true),
+            (component("{type: string, pattern: '^a$'}"), true),
+        ] {
+            let sweep = inspect_yaml(&yaml);
+            assert!(sweep.problems.is_empty(), "{yaml}: {:?}", sweep.problems);
+            assert_eq!(
+                sweep
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(NOTE)),
+                noted,
+                "{yaml}: {:?}",
+                sweep.warnings,
+            );
         }
     }
 
