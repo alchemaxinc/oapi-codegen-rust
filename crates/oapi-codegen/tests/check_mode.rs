@@ -1,4 +1,4 @@
-//! Exit codes and file effects of `--check`.
+//! Exit codes and file effects of `--check` and `--deny-warnings`.
 //!
 //! A consumer gates a build on the exit code, so the code itself is the contract
 //! and a unit test of the comparison does not cover it. These cases run the real
@@ -134,16 +134,19 @@ impl TestDir {
 
     /// Run the generator, with `--check` when `check` is set.
     fn run(&self, check: bool) -> Output {
+        return self.run_with(if check { &["--check"] } else { &[] });
+    }
+
+    /// Run the generator with `flags` added to the command line.
+    fn run_with(&self, flags: &[&str]) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_oapi-codegen"));
         command
             .arg("--config-file")
             .arg(self.join("config.yaml"))
             .arg("--output-file")
-            .arg(self.output());
-        if check {
-            command.arg("--check");
-        }
-        command.arg(self.join("spec.yaml"));
+            .arg(self.output())
+            .args(flags)
+            .arg(self.join("spec.yaml"));
         return run_command(&mut command);
     }
 }
@@ -340,6 +343,56 @@ fn unconstrained_schema_fallback_warns_but_an_empty_schema_does_not() {
 }
 
 /// Read `path`, which every case here has already generated.
+/// `--deny-warnings` turns a warning into a failed run. The run stops before
+/// the write and before the comparison, so the output file stays as it was.
+#[test]
+fn deny_warnings_fails_a_run_that_warns_and_writes_nothing() {
+    let dir = TestDir::new("deny-warnings");
+    let clean = dir.run_with(&["--deny-warnings"]);
+    assert_eq!(code(&clean), SUCCESS, "{}", stderr(&clean));
+    let original = read(&dir.output());
+
+    // This spec warns about `xml`, and its output differs from the file on
+    // disk, so a run that reached the write would change the file.
+    let warns_in_spec = SPEC_CHANGED.replace("type: object", "type: object\n      xml: {name: widget}");
+    let warns_in_config = format!("{CONFIG}extra: true\n");
+    for (spec, config, flags, expected) in [
+        (warns_in_spec.as_str(), CONFIG, &["--deny-warnings"][..], FAILURE),
+        (
+            warns_in_spec.as_str(),
+            CONFIG,
+            &["--deny-warnings", "--check"][..],
+            FAILURE,
+        ),
+        (
+            SPEC_CHANGED,
+            warns_in_config.as_str(),
+            &["--deny-warnings"][..],
+            FAILURE,
+        ),
+        (SPEC, CONFIG, &["--deny-warnings", "--check"][..], SUCCESS),
+    ] {
+        dir.write("spec.yaml", spec);
+        dir.write("config.yaml", config);
+        let output = dir.run_with(flags);
+        assert_eq!(code(&output), expected, "{flags:?}: {}", stderr(&output));
+        assert_eq!(
+            stderr(&output).contains("`--deny-warnings` is set"),
+            expected == FAILURE,
+            "{flags:?}: {}",
+            stderr(&output)
+        );
+        assert_eq!(read(&dir.output()), original, "{flags:?}");
+    }
+
+    // Without the flag the same warning does not stop the write.
+    dir.write("spec.yaml", &warns_in_spec);
+    dir.write("config.yaml", CONFIG);
+    let allowed = dir.run(false);
+    assert_eq!(code(&allowed), SUCCESS, "{}", stderr(&allowed));
+    assert_ne!(read(&dir.output()), original);
+}
+
 fn read(path: &Path) -> String {
     return std::fs::read_to_string(path).unwrap_or_else(|err| panic!("reading `{}` failed: {err}", path.display()));
 }
