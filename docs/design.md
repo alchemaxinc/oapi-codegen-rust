@@ -599,8 +599,9 @@ type below it are not the same thing.
 A constraint on a schema that no field holds has no check, and it produces a
 warning. A type alias, an array item, and an inline body schema are examples.
 Two uses produce no warning. When the run generates the server, the schema of a
-query parameter becomes a field of the query struct, which checks it; a client
-only writes a query, so a run with no server keeps the warning. An integer whose
+query parameter in an operation the run keeps becomes a field of the query
+struct, which checks it; a client only writes a query, so a run with no server
+keeps the warning, and so does an operation the filters remove. An integer whose
 only constraint is `minimum: 0` becomes an unsigned type, which refuses a
 negative value at every use.
 

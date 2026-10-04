@@ -10,6 +10,9 @@ use crate::error::Result;
 use crate::lower::validate::Diagnostics;
 
 const MAX_DEPTH: usize = 128;
+/// The keys of a path item that hold an operation.
+const OPERATION_KEYS: &[&str] = &["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+
 const CONSTRAINT_KEYS: &[&str] = &[
     "multipleOf",
     "maximum",
@@ -357,13 +360,25 @@ impl Context {
     }
 }
 
+/// What a run generates and keeps, as far as the inspection needs to know.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Run {
+    /// Whether the run generates the server. Only the server reads a query
+    /// parameter, so only it checks the constraints of one.
+    pub(crate) server: bool,
+    /// The filters the run applies. An operation they remove generates no
+    /// query struct, so nothing checks its parameters.
+    pub(crate) filters: crate::config::OutputOptions,
+}
+
 struct Sweep<'a> {
     document: &'a str,
     warnings: Vec<Warning>,
     problems: Diagnostics,
-    /// Whether the run generates the server. Only the server reads a query
-    /// parameter, so only it checks the constraints of one.
-    server: bool,
+    run: &'a Run,
+    /// The depth of the operation, or path item, that the run's filters remove,
+    /// while the walk is inside it.
+    removed_at: Option<usize>,
     /// The paths of the schemas that sit directly in a query parameter. When
     /// the server is generated, its query struct checks the constraints of such
     /// a schema, so the note about unchecked constraints does not apply to it.
@@ -375,20 +390,21 @@ struct Sweep<'a> {
 
 /// Check `value` against what the generator reads, and report every warning.
 ///
-/// `server` states whether the run generates the server, the one target that
-/// checks a query parameter on the way in.
-pub(crate) fn check(document: &str, value: &Value, server: bool) -> Result<()> {
-    let sweep = inspect(document, value, server);
+/// `run` states what the run generates and keeps, which decides whether a
+/// query parameter's constraints are checked.
+pub(crate) fn check(document: &str, value: &Value, run: &Run) -> Result<()> {
+    let sweep = inspect(document, value, run);
     report_warnings(document, &sweep.warnings);
     return sweep.problems.into_result();
 }
 
-fn inspect<'a>(document: &'a str, value: &Value, server: bool) -> Sweep<'a> {
+fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
     let mut sweep = Sweep {
         document,
         warnings: Vec::new(),
         problems: Diagnostics::new(),
-        server,
+        run,
+        removed_at: None,
         query_schemas: Vec::new(),
         replaced_at: None,
     };
@@ -419,7 +435,25 @@ impl Sweep<'_> {
             return;
         };
         let reference = context.references() && mapping.contains_key("$ref");
-        if context == Context::Parameter && value.get("in").and_then(Value::as_str) == Some("query") {
+        // An operation the filters remove, or a path item with no operation
+        // left, generates no query struct, so nothing checks its parameters.
+        let removed_here = self.removed_at.is_none()
+            && match context {
+                Context::Operation => self.run_removes(value),
+                Context::PathItem => !OPERATION_KEYS.iter().any(|method| {
+                    return value
+                        .get(*method)
+                        .is_some_and(|operation| return !self.run_removes(operation));
+                }),
+                _ => false,
+            };
+        if removed_here {
+            self.removed_at = Some(depth);
+        }
+        if context == Context::Parameter
+            && value.get("in").and_then(Value::as_str) == Some("query")
+            && self.removed_at.is_none()
+        {
             self.query_schemas.push(pointer(path, "schema"));
         }
         // A custom type replaces the schema and everything below it, so no
@@ -484,6 +518,20 @@ impl Sweep<'_> {
         if replaces_here {
             self.replaced_at = None;
         }
+        if removed_here {
+            self.removed_at = None;
+        }
+    }
+
+    /// Whether the run's filters remove this operation.
+    fn run_removes(&self, operation: &Value) -> bool {
+        let tags: Vec<String> = operation
+            .get("tags")
+            .and_then(Value::as_sequence)
+            .map(|tags| return tags.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default();
+        let id = operation.get("operationId").and_then(Value::as_str);
+        return crate::filter::removes_operation(&self.run.filters, &tags, id);
     }
 
     fn walk(&mut self, value: &Value, traversal: Traversal, path: &str, depth: usize) {
@@ -696,20 +744,14 @@ impl Sweep<'_> {
     /// query struct checks on the way in. A client only writes a query, so a
     /// run with no server checks nothing.
     ///
-    /// A scalar counts, and so does an array, whose own keywords such as
-    /// `maxItems` the struct checks; a keyword on its items is a separate schema
-    /// with its own note. A nullable value has its own note, and a custom type
-    /// takes the place of the type the checks are written for.
+    /// The query field takes the constraints that `constraints_of` reads, so the
+    /// same read decides here. A keyword it drops, such as `minLength` on an
+    /// integer, keeps the note.
     fn checked_query_schema(&self, value: &Value, path: &str) -> bool {
-        let checked_type = matches!(
-            value.get("type").and_then(Value::as_str),
-            Some("string" | "integer" | "number" | "array")
-        );
-        return self.server
-            && checked_type
-            && value.get("nullable").and_then(Value::as_bool) != Some(true)
-            && value.get("x-rust-type").is_none()
-            && self.query_schemas.iter().any(|schema| return schema == path);
+        return self.run.server
+            && self.query_schemas.iter().any(|schema| return schema == path)
+            && serde_yaml::from_value::<openapiv3::Schema>(value.clone())
+                .is_ok_and(|schema| return crate::lower::constraints::constraints_of(&schema).is_some());
     }
 }
 
@@ -743,14 +785,16 @@ fn response_key(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::OutputOptions;
 
     fn inspect_yaml(yaml: &str) -> Sweep<'static> {
-        return inspect_yaml_for(yaml, true);
+        return inspect_yaml_for(yaml, true, OutputOptions::default());
     }
 
-    fn inspect_yaml_for(yaml: &str, server: bool) -> Sweep<'static> {
+    fn inspect_yaml_for(yaml: &str, server: bool, filters: OutputOptions) -> Sweep<'static> {
         let value = serde_yaml::from_str(yaml).expect("valid YAML");
-        return inspect("spec.yaml", &value, server);
+        let run = Box::leak(Box::new(Run { server, filters }));
+        return inspect("spec.yaml", &value, run);
     }
 
     #[test]
@@ -1039,10 +1083,6 @@ security: [{arbitrary: [custom]}]
                 parameter("query", "{type: array, items: {type: string, maxLength: 3}}"),
                 true,
             ),
-            (
-                parameter("query", "{type: string, maxLength: 3, x-rust-type: 'crate::Code'}"),
-                true,
-            ),
             // An unsigned type refuses what `minimum: 0` refuses, at every use.
             (component("{type: integer, minimum: 0}"), false),
             (
@@ -1069,13 +1109,59 @@ security: [{arbitrary: [custom]}]
 
         // A client writes a query and reads nothing back from it, so a run with
         // no server checks no query constraint.
-        let client_only = inspect_yaml_for(&parameter("query", "{type: string, maxLength: 3}"), false);
+        let client_only = inspect_yaml_for(
+            &parameter("query", "{type: string, maxLength: 3}"),
+            false,
+            OutputOptions::default(),
+        );
         assert!(
             client_only
                 .warnings
                 .iter()
                 .any(|warning| return warning.message.contains(NOTE))
         );
+
+        // The query field reads the same keywords as the lowering: a keyword the
+        // type cannot hold keeps the note, and a custom type on a query parameter
+        // changes nothing, because the query lowering does not read it.
+        for (schema, noted) in [
+            ("{type: integer, minLength: 3}", true),
+            ("{type: string, maxLength: 3, x-rust-type: 'crate::Code'}", false),
+        ] {
+            let sweep = inspect_yaml(&parameter("query", schema));
+            assert_eq!(
+                sweep
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(NOTE)),
+                noted,
+                "{schema}: {:?}",
+                sweep.warnings
+            );
+        }
+
+        // An operation the filters remove generates no query struct. A path item
+        // keeps its own parameters while one of its operations stays.
+        let filtered = |yaml: &str, filters: OutputOptions| {
+            return inspect_yaml_for(yaml, true, filters)
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE));
+        };
+        let tagged = "paths: {/a: {get: {operationId: getA, tags: [internal], parameters: [{name: n, in: query, schema: {type: string, maxLength: 3}}], responses: {}}}}";
+        let shared = "paths: {/a: {parameters: [{name: n, in: query, schema: {type: string, maxLength: 3}}], get: {operationId: getA, tags: [internal], responses: {}}, post: {operationId: postA, responses: {}}}}";
+        let exclude = OutputOptions {
+            exclude_tags: vec!["internal".to_owned()],
+            ..OutputOptions::default()
+        };
+        let exclude_both = OutputOptions {
+            exclude_operation_ids: vec!["getA".to_owned(), "postA".to_owned()],
+            ..OutputOptions::default()
+        };
+        assert!(!filtered(tagged, OutputOptions::default()));
+        assert!(filtered(tagged, exclude.clone()));
+        assert!(!filtered(shared, exclude));
+        assert!(filtered(shared, exclude_both));
     }
 
     #[test]

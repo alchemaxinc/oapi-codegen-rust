@@ -70,21 +70,27 @@ fn operation_slots(item: &mut PathItem) -> [&mut Option<Operation>; 8] {
 /// operation-id, and is an included operation-id (when `include-operation-ids`
 /// is set) — matching `oapi-codegen`'s sequential exclude-then-include filters.
 fn is_filtered_out(operation: &Operation, opts: &OutputOptions) -> bool {
+    return removes_operation(opts, &operation.tags, operation.operation_id.as_deref());
+}
+
+/// Whether the filters in `opts` remove an operation with these `tags` and this
+/// operation id. The spec inspection reads the same rule on the untyped
+/// document, so the two cannot disagree on which operations a run keeps.
+pub(crate) fn removes_operation(opts: &OutputOptions, tags: &[String], id: Option<&str>) -> bool {
     if !opts.exclude_tags.is_empty()
-        && operation.tags.iter().any(|tag| {
+        && tags.iter().any(|tag| {
             return opts.exclude_tags.contains(tag);
         })
     {
         return true;
     }
     if !opts.include_tags.is_empty()
-        && !operation.tags.iter().any(|tag| {
+        && !tags.iter().any(|tag| {
             return opts.include_tags.contains(tag);
         })
     {
         return true;
     }
-    let id = operation.operation_id.as_deref();
     if !opts.exclude_operation_ids.is_empty()
         && id.is_some_and(|id| return contains_str(&opts.exclude_operation_ids, id))
     {
