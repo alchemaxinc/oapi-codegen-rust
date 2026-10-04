@@ -525,33 +525,19 @@ fn direction_split_schemas(doc: &OpenAPI) -> std::collections::BTreeSet<String> 
         return marked;
     };
 
-    let mut directional = std::collections::BTreeSet::new();
-    for (name, entry) in &components.schemas {
-        if let ReferenceOr::Item(schema) = entry
-            && (schema.schema_data.read_only || schema.schema_data.write_only)
-        {
-            directional.insert(name.clone());
-        }
-    }
-    // A component declared as a `$ref` to a marked schema carries the mark too,
-    // because `resolve` follows the alias when a property names it. One pass per
-    // link in a chain, up to the depth `resolve` follows.
-    for _ in 0..MAX_REF_DEPTH {
-        let mut grew = false;
-        for (name, entry) in &components.schemas {
-            if let ReferenceOr::Reference { reference } = entry
-                && !directional.contains(name)
-                && ref_file_part(reference).is_none()
-                && ref_component_name(reference, "schemas").is_some_and(|target| return directional.contains(target))
-            {
-                directional.insert(name.clone());
-                grew = true;
-            }
-        }
-        if !grew {
-            break;
-        }
-    }
+    // A component that `resolve` follows to a marked schema carries the mark,
+    // whether it is that schema or an alias chain that ends at it. The chain is
+    // followed the way `resolve` follows it, with the same depth, so the two
+    // agree on a chain at the limit.
+    let directional: std::collections::BTreeSet<String> = components
+        .schemas
+        .keys()
+        .filter(|name| {
+            return resolved_component(&components.schemas, name)
+                .is_some_and(|schema| return schema.schema_data.read_only || schema.schema_data.write_only);
+        })
+        .cloned()
+        .collect();
 
     let mut referrers: HashMap<String, Vec<String>> = HashMap::new();
     for (name, entry) in &components.schemas {
@@ -621,6 +607,27 @@ fn declares_a_directional_property(schema: &Schema, directional: &std::collectio
             ReferenceOr::Reference { reference } => names_a_marked_schema(reference),
         };
     });
+}
+
+/// The schema a component name resolves to, through same-document aliases.
+///
+/// This mirrors [`Spec::resolve`]: each name costs one step, the schema itself
+/// included, and a chain that needs more than `MAX_REF_DEPTH` steps resolves to
+/// nothing.
+fn resolved_component<'a>(schemas: &'a IndexMap<String, ReferenceOr<Schema>>, name: &str) -> Option<&'a Schema> {
+    let mut current = name;
+    for _ in 0..MAX_REF_DEPTH {
+        match schemas.get(current)? {
+            ReferenceOr::Item(schema) => return Some(schema),
+            ReferenceOr::Reference { reference } => {
+                if ref_file_part(reference).is_some() {
+                    return None;
+                }
+                current = ref_component_name(reference, "schemas")?;
+            }
+        }
+    }
+    return None;
 }
 
 /// The reference a one-member `allOf` wraps, when that member is a `$ref`.
@@ -1177,6 +1184,40 @@ mod tests {
             !split.contains("Alias") && !split.contains("Twice"),
             "an alias to a primitive keeps its one name"
         );
+    }
+
+    /// `resolve` follows at most `MAX_REF_DEPTH` names, the schema itself
+    /// included. A chain one link longer resolves to nothing in the lowering,
+    /// which then reads no mark, so the split set must read none either.
+    #[test]
+    fn an_alias_chain_at_the_depth_limit_splits_and_one_link_longer_does_not() {
+        let chain = |links: usize, reversed: bool| {
+            let mut schemas: Vec<String> = vec!["    Marked:\n      type: string\n      readOnly: true\n".to_owned()];
+            for index in 1..=links {
+                let target = if index == links {
+                    "Marked".to_owned()
+                } else {
+                    format!("Alias{}", index + 1)
+                };
+                schemas.push(format!(
+                    "    Alias{index}:\n      $ref: '#/components/schemas/{target}'\n"
+                ));
+            }
+            if reversed {
+                schemas.reverse();
+            }
+            return format!(
+                "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {{}}\ncomponents:\n  schemas:\n{}    Holder:\n      type: object\n      properties:\n        a:\n          $ref: '#/components/schemas/Alias1'\n",
+                schemas.concat()
+            );
+        };
+        for (links, splits) in [(MAX_REF_DEPTH - 1, true), (MAX_REF_DEPTH, false)] {
+            for reversed in [false, true] {
+                let doc: OpenAPI = serde_yaml::from_str(&chain(links, reversed)).expect("parse doc");
+                let split = direction_split_schemas(&doc);
+                assert_eq!(split.contains("Holder"), splits, "{links} links, reversed: {reversed}");
+            }
+        }
     }
 
     /// A one-member `allOf` around a `$ref` names the same schema as the bare
