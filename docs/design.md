@@ -597,8 +597,8 @@ target with an `enum` or an `x-rust-type` is left alone: there the name and the
 type below it are not the same thing.
 
 A constraint on a schema that no field holds has no check, and it produces a
-warning. A type alias and an array item are the two cases. Two uses produce no
-warning. The schema of a query parameter becomes a field of the query struct,
+warning. A type alias, an array item, and an inline body schema are examples.
+Two uses produce no warning. The schema of a query parameter becomes a field of the query struct,
 which checks it. An integer whose only constraint is `minimum: 0` becomes an
 unsigned type, which refuses a negative value at every use.
 

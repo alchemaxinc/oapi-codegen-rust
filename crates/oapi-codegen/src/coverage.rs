@@ -365,6 +365,9 @@ struct Sweep<'a> {
     /// generated query struct checks the constraints of such a schema, so the
     /// note about unchecked constraints does not apply to it.
     query_schemas: Vec<String>,
+    /// The depth of the schema that `x-rust-type` replaces, while the walk is
+    /// inside it. No generated code matches a union below such a schema.
+    replaced_at: Option<usize>,
 }
 
 pub(crate) fn check(document: &str, value: &Value) -> Result<()> {
@@ -379,6 +382,7 @@ fn inspect<'a>(document: &'a str, value: &Value) -> Sweep<'a> {
         warnings: Vec::new(),
         problems: Diagnostics::new(),
         query_schemas: Vec::new(),
+        replaced_at: None,
     };
     sweep.object(value, Context::Document, "", 0);
     return sweep;
@@ -410,9 +414,15 @@ impl Sweep<'_> {
         if context == Context::Parameter && value.get("in").and_then(Value::as_str) == Some("query") {
             self.query_schemas.push(pointer(path, "schema"));
         }
-        // A custom type replaces the schema, so no generated code matches a
-        // union below it.
-        let custom_type = value.get("x-rust-type").is_some();
+        // A custom type replaces the schema and everything below it, so no
+        // generated code matches a union in that subtree. The walk still visits
+        // the subtree for its other checks.
+        let replaces_here = matches!(context, Context::Schema | Context::PropertySchema)
+            && value.get("x-rust-type").is_some()
+            && self.replaced_at.is_none();
+        if replaces_here {
+            self.replaced_at = Some(depth);
+        }
         for (key, child) in mapping {
             let key = match key {
                 Value::String(key) => key.clone(),
@@ -456,12 +466,15 @@ impl Sweep<'_> {
                 {
                     self.warn(&at, reason);
                 }
-                self.value_notes(context, &key, child, &at, custom_type);
+                self.value_notes(context, &key, child, &at, self.replaced_at.is_some());
             }
             self.walk(child, field.traversal, &at, depth + 1);
         }
         if !reference {
             self.object_notes(value, context, path);
+        }
+        if replaces_here {
+            self.replaced_at = None;
         }
     }
 
@@ -530,7 +543,7 @@ impl Sweep<'_> {
         }
     }
 
-    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str, custom_type: bool) {
+    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str, replaced: bool) {
         if matches!(context, Context::Document | Context::Operation)
             && key == "security"
             && let Some(requirements) = value.as_sequence()
@@ -550,7 +563,7 @@ impl Sweep<'_> {
         }
         if matches!(context, Context::Schema | Context::PropertySchema) {
             match key {
-                "oneOf" | "anyOf" if !custom_type => self.warn(
+                "oneOf" | "anyOf" if !replaced => self.warn(
                     path,
                     "Rust deserialization checks do not enforce all schema constraints, which can affect union match counts",
                 ),
@@ -674,14 +687,16 @@ impl Sweep<'_> {
     /// Whether `value` is the schema of a query parameter that the generated
     /// query struct checks on the way in.
     ///
-    /// Only a plain scalar counts. A nullable value has its own note, and a
-    /// custom type takes the place of the type the checks are written for.
+    /// A scalar counts, and so does an array, whose own keywords such as
+    /// `maxItems` the struct checks; a keyword on its items is a separate schema
+    /// with its own note. A nullable value has its own note, and a custom type
+    /// takes the place of the type the checks are written for.
     fn checked_query_schema(&self, value: &Value, path: &str) -> bool {
-        let scalar = matches!(
+        let checked_type = matches!(
             value.get("type").and_then(Value::as_str),
-            Some("string" | "integer" | "number")
+            Some("string" | "integer" | "number" | "array")
         );
-        return scalar
+        return checked_type
             && value.get("nullable").and_then(Value::as_bool) != Some(true)
             && value.get("x-rust-type").is_none()
             && self.query_schemas.iter().any(|schema| return schema == path);
@@ -945,11 +960,44 @@ security: [{arbitrary: [custom]}]
 
     #[test]
     fn a_union_that_a_custom_type_replaces_has_no_match_count_note() {
-        let sweep = inspect_yaml(
-            "components: {schemas: {Stamp: {x-rust-type: 'crate::Stamp', oneOf: [{type: string}, {type: integer}]}}}",
+        const NOTE: &str = "union match counts";
+        for (yaml, noted) in [
+            (
+                "{x-rust-type: 'crate::Stamp', oneOf: [{type: string}, {type: integer}]}",
+                false,
+            ),
+            // The replacement covers the whole subtree, and the walk still
+            // reaches the subtree for its other checks.
+            (
+                "{x-rust-type: 'crate::Stamp', oneOf: [{anyOf: [{type: string}, {type: integer}]}, {type: object, properties: {at: {oneOf: [{type: string}, {type: integer}]}}}]}",
+                false,
+            ),
+            ("{oneOf: [{type: string}, {type: integer}]}", true),
+            // A sibling schema outside the replaced one keeps its note.
+            (
+                "{type: object, properties: {a: {x-rust-type: 'crate::A', oneOf: [{type: string}]}, b: {oneOf: [{type: string}, {type: integer}]}}}",
+                true,
+            ),
+        ] {
+            let sweep = inspect_yaml(&format!("components: {{schemas: {{Stamp: {yaml}}}}}"));
+            assert!(sweep.problems.is_empty(), "{yaml}: {:?}", sweep.problems);
+            assert_eq!(
+                sweep
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(NOTE)),
+                noted,
+                "{yaml}: {:?}",
+                sweep.warnings,
+            );
+        }
+        let invalid = inspect_yaml(
+            "components: {schemas: {Stamp: {x-rust-type: 'crate::Stamp', oneOf: [{type: string, requird: true}]}}}",
         );
-        assert!(sweep.problems.is_empty());
-        assert!(sweep.warnings.is_empty(), "{:?}", sweep.warnings);
+        assert!(
+            !invalid.problems.is_empty(),
+            "an invalid key below a replaced schema is still an error"
+        );
     }
 
     #[test]
@@ -965,6 +1013,11 @@ security: [{arbitrary: [custom]}]
             // The query struct checks a scalar on the way in.
             (parameter("query", "{type: string, maxLength: 3}"), false),
             (parameter("query", "{type: integer, minimum: 1, maximum: 9}"), false),
+            // The struct checks the keywords of the array itself.
+            (
+                parameter("query", "{type: array, maxItems: 3, items: {type: string}}"),
+                false,
+            ),
             // No other parameter location has a check.
             (parameter("header", "{type: string, maxLength: 3}"), true),
             // The constraint on an item of a query array has no check.
