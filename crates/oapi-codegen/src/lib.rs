@@ -463,8 +463,9 @@ paths:
 components:
   schemas:
     Kind: {{type: string, enum: [a, b]}}
-    Base: {{type: object, properties: {{kind: {{$ref: '#/components/schemas/Kind'}}}}}}
-    Extra: {{type: object, properties: {{kind: {property}}}}}
+    SameKind: {{$ref: '#/components/schemas/Kind'}}
+    Base: {{type: object, properties: {{kind: {{$ref: '#/components/schemas/Kind'}}, other: {{$ref: '#/components/schemas/SameKind'}}}}}}
+    Extra: {{type: object, properties: {{kind: {property}, other: {property}}}}}
     Merged: {{allOf: [{{$ref: '#/components/schemas/Base'}}, {{$ref: '#/components/schemas/Extra'}}]}}
 "
             );
@@ -487,7 +488,56 @@ components:
         assert!(bare.contains("pub struct Merged"), "the overlap merges");
         let without_notes: Vec<&str> = described.lines().filter(|line| return !line.contains(NOTE)).collect();
         assert_eq!(without_notes, bare.lines().collect::<Vec<&str>>());
-        assert!(described.contains(NOTE), "the description reaches the output");
+        // Twice on `Merged`, for the overlap on one name and for the overlap
+        // through an alias, and once on the enum that the second overlap merges
+        // into. A multipart part carries no doc comment, and `Extra` reaches no
+        // operation, so it is pruned.
+        assert_eq!(described.matches(NOTE).count(), 3, "{described}");
+    }
+
+    /// A wrapper around a multipart field's `$ref` keeps its own marks. A
+    /// required field that a `readOnly` wrapper marks travels in no request, so
+    /// the server reads no part for it.
+    #[test]
+    fn a_read_only_wrapper_keeps_a_multipart_field_out_of_the_request() {
+        let dir = TestDir::new("multipart-wrapper-mark");
+        std::fs::write(
+            dir.join("spec.yaml"),
+            "openapi: 3.0.3
+info: {title: Demo, version: 1.0.0}
+paths:
+  /uploads:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [served, sent]
+              properties:
+                served: {allOf: [{$ref: '#/components/schemas/Plain'}], readOnly: true}
+                sent: {allOf: [{$ref: '#/components/schemas/Plain'}], description: a note}
+      responses:
+        '204': {description: ok}
+components:
+  schemas:
+    Plain: {type: string}
+",
+        )
+        .expect("write the spec");
+        std::fs::write(
+            dir.join("config.yaml"),
+            "package: demo\ngenerate: {models: true, std-http-server: true}\n",
+        )
+        .expect("write the configuration");
+        let config = Config::load(&dir.join("config.yaml")).expect("valid configuration");
+
+        let code = generate(&dir.join("spec.yaml"), &config).expect("the spec generates");
+
+        assert!(code.contains("\"sent\""), "the plain field is a part: {code}");
+        assert!(!code.contains("\"served\""), "the read-only field is no part: {code}");
     }
 
     #[test]

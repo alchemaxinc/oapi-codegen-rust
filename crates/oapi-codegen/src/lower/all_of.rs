@@ -190,6 +190,29 @@ fn described_reference(property: &ReferenceOr<Box<Schema>>) -> Option<ReferenceO
     });
 }
 
+/// Put `description` on `property`. A bare `$ref` cannot hold one, so it becomes
+/// the one-member `allOf` that OpenAPI 3.0 gives for this.
+fn describe(property: ReferenceOr<Box<Schema>>, description: Option<String>) -> ReferenceOr<Box<Schema>> {
+    let Some(description) = description else {
+        return property;
+    };
+    return match property {
+        ReferenceOr::Item(mut schema) => {
+            schema.schema_data.description.get_or_insert(description);
+            ReferenceOr::Item(schema)
+        }
+        ReferenceOr::Reference { reference } => ReferenceOr::Item(Box::new(Schema {
+            schema_data: openapiv3::SchemaData {
+                description: Some(description),
+                ..openapiv3::SchemaData::default()
+            },
+            schema_kind: SchemaKind::AllOf {
+                all_of: vec![ReferenceOr::Reference { reference }],
+            },
+        })),
+    };
+}
+
 fn intersect(
     spec: &Spec,
     path: &str,
@@ -210,7 +233,17 @@ fn intersect(
                 right.clone()
             });
         }
-        return intersect(spec, path, bare_left, bare_right, depth);
+        // The two name different schemas, so the usual rules decide, and the
+        // description of a wrapper is put back on what they decide.
+        let described = if left_bare.is_some() { left } else { right };
+        let description = match described {
+            ReferenceOr::Item(schema) => schema.schema_data.description.clone(),
+            ReferenceOr::Reference { .. } => None,
+        };
+        return Ok(describe(
+            intersect(spec, path, bare_left, bare_right, depth)?,
+            description,
+        ));
     }
     if left == right
         && match left {

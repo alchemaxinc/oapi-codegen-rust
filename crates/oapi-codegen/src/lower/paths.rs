@@ -1300,7 +1300,11 @@ impl Lowerer<'_> {
                 }),
                 ReferenceOr::Reference { .. } => None,
             };
-            let wrapper_nullable = matches!(property, ReferenceOr::Item(schema) if schema.schema_data.nullable);
+            // The wrapper's own keywords still apply on top of the target's.
+            let wrapper = match (&wrapped, property) {
+                (Some(_), ReferenceOr::Item(schema)) => Some(&schema.schema_data),
+                _ => None,
+            };
             let (kind, nullable) = match wrapped.as_ref().unwrap_or(property) {
                 ReferenceOr::Item(schema) => {
                     if !multipart_part_is_sent(&schema.schema_data, path, method, wire_name)? {
@@ -1319,10 +1323,16 @@ impl Lowerer<'_> {
                         });
                     }
                     let resolved = self.spec.resolve_schema(None, reference)?;
-                    if !multipart_part_is_sent(&resolved.schema_data, path, method, wire_name)? {
+                    let mut data = resolved.schema_data;
+                    if let Some(wrapper) = wrapper {
+                        data.nullable |= wrapper.nullable;
+                        data.read_only |= wrapper.read_only;
+                        data.write_only |= wrapper.write_only;
+                    }
+                    if !multipart_part_is_sent(&data, path, method, wire_name)? {
                         continue;
                     }
-                    (resolved.schema_kind, resolved.schema_data.nullable || wrapper_nullable)
+                    (resolved.schema_kind, data.nullable)
                 }
             };
             let ty = scalar_type(&kind).ok_or_else(|| {
