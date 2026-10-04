@@ -361,26 +361,34 @@ struct Sweep<'a> {
     document: &'a str,
     warnings: Vec<Warning>,
     problems: Diagnostics,
-    /// The paths of the schemas that sit directly in a query parameter. The
-    /// generated query struct checks the constraints of such a schema, so the
-    /// note about unchecked constraints does not apply to it.
+    /// Whether the run generates the server. Only the server reads a query
+    /// parameter, so only it checks the constraints of one.
+    server: bool,
+    /// The paths of the schemas that sit directly in a query parameter. When
+    /// the server is generated, its query struct checks the constraints of such
+    /// a schema, so the note about unchecked constraints does not apply to it.
     query_schemas: Vec<String>,
     /// The depth of the schema that `x-rust-type` replaces, while the walk is
     /// inside it. No generated code matches a union below such a schema.
     replaced_at: Option<usize>,
 }
 
-pub(crate) fn check(document: &str, value: &Value) -> Result<()> {
-    let sweep = inspect(document, value);
+/// Check `value` against what the generator reads, and report every warning.
+///
+/// `server` states whether the run generates the server, the one target that
+/// checks a query parameter on the way in.
+pub(crate) fn check(document: &str, value: &Value, server: bool) -> Result<()> {
+    let sweep = inspect(document, value, server);
     report_warnings(document, &sweep.warnings);
     return sweep.problems.into_result();
 }
 
-fn inspect<'a>(document: &'a str, value: &Value) -> Sweep<'a> {
+fn inspect<'a>(document: &'a str, value: &Value, server: bool) -> Sweep<'a> {
     let mut sweep = Sweep {
         document,
         warnings: Vec::new(),
         problems: Diagnostics::new(),
+        server,
         query_schemas: Vec::new(),
         replaced_at: None,
     };
@@ -685,7 +693,8 @@ impl Sweep<'_> {
 
 impl Sweep<'_> {
     /// Whether `value` is the schema of a query parameter that the generated
-    /// query struct checks on the way in.
+    /// query struct checks on the way in. A client only writes a query, so a
+    /// run with no server checks nothing.
     ///
     /// A scalar counts, and so does an array, whose own keywords such as
     /// `maxItems` the struct checks; a keyword on its items is a separate schema
@@ -696,7 +705,8 @@ impl Sweep<'_> {
             value.get("type").and_then(Value::as_str),
             Some("string" | "integer" | "number" | "array")
         );
-        return checked_type
+        return self.server
+            && checked_type
             && value.get("nullable").and_then(Value::as_bool) != Some(true)
             && value.get("x-rust-type").is_none()
             && self.query_schemas.iter().any(|schema| return schema == path);
@@ -735,8 +745,12 @@ mod tests {
     use super::*;
 
     fn inspect_yaml(yaml: &str) -> Sweep<'static> {
+        return inspect_yaml_for(yaml, true);
+    }
+
+    fn inspect_yaml_for(yaml: &str, server: bool) -> Sweep<'static> {
         let value = serde_yaml::from_str(yaml).expect("valid YAML");
-        return inspect("spec.yaml", &value);
+        return inspect("spec.yaml", &value, server);
     }
 
     #[test]
@@ -1052,6 +1066,16 @@ security: [{arbitrary: [custom]}]
                 sweep.warnings,
             );
         }
+
+        // A client writes a query and reads nothing back from it, so a run with
+        // no server checks no query constraint.
+        let client_only = inspect_yaml_for(&parameter("query", "{type: string, maxLength: 3}"), false);
+        assert!(
+            client_only
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE))
+        );
     }
 
     #[test]

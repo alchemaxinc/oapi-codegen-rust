@@ -598,9 +598,11 @@ type below it are not the same thing.
 
 A constraint on a schema that no field holds has no check, and it produces a
 warning. A type alias, an array item, and an inline body schema are examples.
-Two uses produce no warning. The schema of a query parameter becomes a field of the query struct,
-which checks it. An integer whose only constraint is `minimum: 0` becomes an
-unsigned type, which refuses a negative value at every use.
+Two uses produce no warning. When the run generates the server, the schema of a
+query parameter becomes a field of the query struct, which checks it; a client
+only writes a query, so a run with no server keeps the warning. An integer whose
+only constraint is `minimum: 0` becomes an unsigned type, which refuses a
+negative value at every use.
 
 A rule that cannot reach its type is an error, not a silence. A `format` of
 `date`, `date-time`, `uuid`, or `binary` names a type that is no longer a string,

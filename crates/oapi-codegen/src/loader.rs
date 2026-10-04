@@ -63,11 +63,25 @@ pub struct Spec {
     inner: OpenAPI,
     source: PathBuf,
     docs: RefCell<HashMap<PathBuf, Rc<OpenAPI>>>,
+    /// Whether the run generates the server, which is the one target that
+    /// checks a query parameter on the way in. The inspection of each document
+    /// reads this to decide which constraint notes apply.
+    server: bool,
 }
 
 impl Spec {
-    /// Load and parse an OpenAPI document from a YAML or JSON file.
+    /// Load and parse an OpenAPI document from a YAML or JSON file, for a run
+    /// that generates no server.
     pub fn load(path: &Path) -> Result<Self> {
+        return Self::load_for(path, false);
+    }
+
+    /// Load and parse an OpenAPI document from a YAML or JSON file.
+    ///
+    /// `server` states whether the run generates the server. A run that does
+    /// checks a query parameter's constraints in the generated query struct, so
+    /// the inspection reports no unchecked constraint there.
+    pub fn load_for(path: &Path, server: bool) -> Result<Self> {
         let text = std::fs::read_to_string(path).map_err(|source| {
             return Error::ReadSpec {
                 path: path.display().to_string(),
@@ -90,7 +104,7 @@ impl Spec {
         // with a message that names a YAML shape and not a version.
         check_spec_version(&document, &value)?;
         check_top_level_keys(&value)?;
-        crate::coverage::check(&document, &value)?;
+        crate::coverage::check(&document, &value, server)?;
         let inner: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseSpec {
                 path: document.clone(),
@@ -101,6 +115,7 @@ impl Spec {
             inner,
             source: path.to_path_buf(),
             docs: RefCell::new(HashMap::new()),
+            server,
         });
     }
 
@@ -110,6 +125,7 @@ impl Spec {
             inner,
             source,
             docs: RefCell::new(HashMap::new()),
+            server: false,
         };
     }
 
@@ -141,7 +157,7 @@ impl Spec {
         // before the typed parse for the same reason.
         check_spec_version(file, &value)?;
         check_top_level_keys(&value)?;
-        crate::coverage::check(file, &value)?;
+        crate::coverage::check(file, &value, self.server)?;
         let parsed: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseRefFile {
                 file: file.to_owned(),
