@@ -173,14 +173,15 @@ fn resolve_reference<'a>(spec: &'a Spec, property: &'a ReferenceOr<Box<Schema>>)
 
 /// The bare `$ref` behind a one-member `allOf` that adds a description and
 /// nothing else. Such a wrapper names the same schema as the `$ref`, so two
-/// members that overlap on it agree.
+/// members that overlap on it agree. A wrapper with no description is left to
+/// the paths below, which already read it.
 fn described_reference(property: &ReferenceOr<Box<Schema>>) -> Option<ReferenceOr<Box<Schema>>> {
     let ReferenceOr::Item(schema) = property else {
         return None;
     };
     let reference = crate::loader::single_ref_member(schema)?;
     let mut data = schema.schema_data.clone();
-    data.description = None;
+    data.description.take()?;
     if data != openapiv3::SchemaData::default() {
         return None;
     }
@@ -556,8 +557,19 @@ mod tests {
                 );
             }
         }
+        // A description changes no value, so a wrapper that only adds one still
+        // names the same schema.
+        let described = json!({"description":"different","allOf":wrapper["allOf"]});
+        let described_spec = spec(json!({"Composite":composite,"A":wrapper,"B":described}));
+        let left: ReferenceOr<Box<Schema>> = serde_json::from_value(reference_a.clone()).expect("left");
+        let right: ReferenceOr<Box<Schema>> = serde_json::from_value(reference_b.clone()).expect("right");
+        for (left, right) in [(&left, &right), (&right, &left)] {
+            assert_eq!(
+                &intersect(&described_spec, "Test.value", left, right, 0).expect("intersection"),
+                left
+            );
+        }
         for changed in [
-            json!({"description":"different","allOf":wrapper["allOf"]}),
             json!({"nullable":true,"allOf":wrapper["allOf"]}),
             json!({"x-rust-type":"serde_json::Value","allOf":wrapper["allOf"]}),
         ] {
