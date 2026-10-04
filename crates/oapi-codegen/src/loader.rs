@@ -653,7 +653,7 @@ fn inline_members(schema: &Schema) -> Vec<ReferenceOr<Schema>> {
             members.extend(additional(&object.additional_properties));
         }
         openapiv3::SchemaKind::Type(openapiv3::Type::Array(array)) => {
-            members.extend(array.items.as_ref().map(&unbox));
+            members.extend(array.items.as_ref().map(unbox));
         }
         openapiv3::SchemaKind::Type(_) => {}
         openapiv3::SchemaKind::OneOf { one_of } => members.extend(one_of.iter().cloned()),
@@ -663,7 +663,7 @@ fn inline_members(schema: &Schema) -> Vec<ReferenceOr<Schema>> {
         openapiv3::SchemaKind::Any(any) => {
             members.extend(any.properties.values().map(&unbox));
             members.extend(additional(&any.additional_properties));
-            members.extend(any.items.as_ref().map(&unbox));
+            members.extend(any.items.as_ref().map(unbox));
             members.extend(any.one_of.iter().cloned());
             members.extend(any.all_of.iter().cloned());
             members.extend(any.any_of.iter().cloned());
