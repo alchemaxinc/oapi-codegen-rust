@@ -342,7 +342,6 @@ fn unconstrained_schema_fallback_warns_but_an_empty_schema_does_not() {
     assert!(read(&dir.output()).contains("pub type Widget = serde_json::Value;"));
 }
 
-/// Read `path`, which every case here has already generated.
 /// `--deny-warnings` turns a warning into a failed run. The run stops before
 /// the write and before the comparison, so the output file stays as it was.
 #[test]
@@ -393,6 +392,7 @@ fn deny_warnings_fails_a_run_that_warns_and_writes_nothing() {
     assert_ne!(read(&dir.output()), original);
 }
 
+/// Read `path`, which every case here has already generated.
 fn read(path: &Path) -> String {
     return std::fs::read_to_string(path).unwrap_or_else(|err| panic!("reading `{}` failed: {err}", path.display()));
 }
@@ -455,6 +455,18 @@ fn a_run_after_a_failed_check_makes_the_check_pass() {
     );
     assert_eq!(code(&dir.run(false)), SUCCESS, "the write must succeed");
     assert_eq!(code(&dir.run(true)), SUCCESS, "the check must pass after the write");
+}
+
+/// `cargo add` reports a failure as a warning after the write, which the flag
+/// could not turn into a failed run without breaking its promise to write
+/// nothing. So the two flags do not combine.
+#[test]
+fn deny_warnings_rejects_install_deps() {
+    let dir = TestDir::new("deny-warnings-install-deps");
+    let output = dir.run_with(&["--deny-warnings", "--install-deps"]);
+    assert_eq!(code(&output), USAGE_ERROR, "{}", stderr(&output));
+    assert!(stderr(&output).contains("cannot be used with"), "{}", stderr(&output));
+    assert!(!dir.output().exists());
 }
 
 #[test]

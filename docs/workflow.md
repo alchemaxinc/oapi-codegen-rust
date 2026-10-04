@@ -129,7 +129,9 @@ warning passes continuous integration unless someone reads the log.
 
 `--deny-warnings` makes a run that reports a warning exit with code 1. The run
 stops before it writes or compares, so it leaves the files on disk as they are.
-The flag works with `--check` and without it.
+The flag works with `--check` and without it. It does not combine with
+`--install-deps`, because a failed `cargo add` is reported as a warning after the
+write.
 
 ```sh
 oapi-codegen --config-file oapi-codegen.yaml --check --deny-warnings api.yaml
