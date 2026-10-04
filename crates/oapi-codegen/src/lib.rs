@@ -440,6 +440,13 @@ components:
         const NOTE: &str = "the note beside the reference";
         const TARGET_NOTE: &str = "The kinds there are.";
         let spec = |property: &str, kind: &str| {
+            // A nullable wrapper is written in full on both sides, and the note
+            // beside the property is the only difference between the two forms.
+            let wrapper_note = if property.contains(NOTE) {
+                format!(", description: {NOTE}")
+            } else {
+                String::new()
+            };
             return format!(
                 "openapi: 3.0.3
 info: {{title: Demo, version: 1.0.0}}
@@ -465,8 +472,9 @@ components:
   schemas:
     Kind: {kind}
     SameKind: {{$ref: '#/components/schemas/Kind'}}
-    Base: {{type: object, properties: {{kind: {{$ref: '#/components/schemas/Kind'}}, other: {{$ref: '#/components/schemas/SameKind'}}}}}}
-    Extra: {{type: object, properties: {{kind: {property}, other: {property}}}}}
+    Plain: {{type: string}}
+    Base: {{type: object, properties: {{kind: {{$ref: '#/components/schemas/Kind'}}, other: {{$ref: '#/components/schemas/SameKind'}}, maybe: {{allOf: [{{$ref: '#/components/schemas/Plain'}}], nullable: true}}}}}}
+    Extra: {{type: object, properties: {{kind: {property}, other: {property}, maybe: {{allOf: [{{$ref: '#/components/schemas/Plain'}}], nullable: true{wrapper_note}}}}}}}
     Third: {{type: object, properties: {{other: {{$ref: '#/components/schemas/Kind'}}}}}}
     Merged: {{allOf: [{{$ref: '#/components/schemas/Base'}}, {{$ref: '#/components/schemas/Extra'}}, {{$ref: '#/components/schemas/Third'}}]}}
 "
@@ -493,11 +501,12 @@ components:
         assert!(bare.contains("pub struct Merged"), "the overlap merges");
         let without_notes: Vec<&str> = described.lines().filter(|line| return !line.contains(NOTE)).collect();
         assert_eq!(without_notes, bare.lines().collect::<Vec<&str>>());
-        // Twice on `Merged`, for the overlap on one name and for the overlap
-        // through an alias, and once on the enum that the second overlap merges
-        // into, where it survives the third member. A multipart part carries no
-        // doc comment, and `Extra` reaches no operation, so it is pruned.
-        assert_eq!(described.matches(NOTE).count(), 3, "{described}");
+        // Three times on `Merged`: for the overlap on one name, for the overlap
+        // through an alias, and for the overlap of two nullable wrappers; and
+        // once on the enum that the alias overlap merges into, where it survives
+        // the third member. A multipart part carries no doc comment, and `Extra`
+        // reaches no operation, so it is pruned.
+        assert_eq!(described.matches(NOTE).count(), 4, "{described}");
 
         // When `Kind` has a description of its own, the note beside the
         // property wins on the field, as it does on a plain field.

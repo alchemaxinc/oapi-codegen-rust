@@ -156,6 +156,11 @@ fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>, depth: 
             ));
         }
         target.schema_data.nullable |= schema.schema_data.nullable;
+        // The note beside the property wins over the target's own, as on a
+        // plain field.
+        if let Some(description) = schema.schema_data.description.take() {
+            target.schema_data.description = Some(description);
+        }
         schema = target;
     }
     return Err(Error::SchemaDepthExceeded {
@@ -188,6 +193,16 @@ fn described_reference(property: &ReferenceOr<Box<Schema>>) -> Option<ReferenceO
     return Some(ReferenceOr::Reference {
         reference: reference.to_owned(),
     });
+}
+
+/// `property` with no description, for a comparison that a description must
+/// not decide.
+fn without_description(property: &ReferenceOr<Box<Schema>>) -> ReferenceOr<Box<Schema>> {
+    let mut stripped = property.clone();
+    if let ReferenceOr::Item(schema) = &mut stripped {
+        schema.schema_data.description = None;
+    }
+    return stripped;
 }
 
 /// Put `description` on `property`. The note written beside the property wins
@@ -247,18 +262,22 @@ fn intersect(
             description,
         ));
     }
-    if left == right
+    // Two wrappers that differ only in their description name one schema, and
+    // the one that documents the field is kept.
+    if without_description(left) == without_description(right)
         && match left {
             ReferenceOr::Reference { .. } => true,
             ReferenceOr::Item(schema) => matches!(schema.schema_kind, SchemaKind::AllOf { .. }),
         }
     {
-        return Ok(left.clone());
+        let left_described = matches!(left, ReferenceOr::Item(schema) if schema.schema_data.description.is_some());
+        return Ok(if left_described { left.clone() } else { right.clone() });
     }
     let resolved_left = resolve_reference(spec, left)?;
     let resolved_right = resolve_reference(spec, right)?;
     if matches!(&resolved_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
-        && resolved_left == resolved_right
+        && without_description(&ReferenceOr::Item(Box::new(resolved_left.clone())))
+            == without_description(&ReferenceOr::Item(Box::new(resolved_right.clone())))
     {
         return Ok(match (left, right) {
             (ReferenceOr::Reference { .. }, _) => left.clone(),
@@ -271,7 +290,8 @@ fn intersect(
     if matches!(normalized_left.schema_kind, SchemaKind::AllOf { .. })
         || matches!(normalized_right.schema_kind, SchemaKind::AllOf { .. })
     {
-        if normalized_left == normalized_right
+        if without_description(&ReferenceOr::Item(Box::new(normalized_left.clone())))
+            == without_description(&ReferenceOr::Item(Box::new(normalized_right.clone())))
             && matches!(&normalized_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
         {
             return Ok(match (left, right) {
@@ -542,10 +562,21 @@ mod tests {
                 );
             }
         }
+        // A description changes no value, so two composites that differ only in
+        // it still name one schema.
+        let described = json!({"description":"different","allOf":composed["allOf"]});
+        let described_spec = spec(json!({"A":composed,"B":described}));
+        let left: ReferenceOr<Box<Schema>> = serde_json::from_value(direct.clone()).expect("left");
+        let right: ReferenceOr<Box<Schema>> = serde_json::from_value(alias.clone()).expect("right");
+        for (left, right) in [(&left, &right), (&right, &left)] {
+            assert_eq!(
+                &intersect(&described_spec, "Test.value", left, right, 0).expect("intersection"),
+                left
+            );
+        }
         for changed in [
             json!({"allOf":[{"type":"object"},{"type":"object"}]}),
             json!({"nullable":true,"allOf":composed["allOf"]}),
-            json!({"description":"different","allOf":composed["allOf"]}),
             json!({"x-rust-type":"serde_json::Value","allOf":composed["allOf"]}),
         ] {
             let spec = spec(json!({"A":composed,"B":changed}));
