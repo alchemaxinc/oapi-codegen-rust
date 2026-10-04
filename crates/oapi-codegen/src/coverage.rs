@@ -1063,7 +1063,8 @@ security: [{arbitrary: [custom]}]
             (holder("{$ref: '#/components/schemas/Other'}"), false, vec![]),
         ] {
             let mut value: Value = serde_yaml::from_str(&yaml).expect("yaml");
-            let sweep = inspect("openapi.yaml", &value, &Run::default());
+            let run = Run::default();
+            let sweep = inspect("openapi.yaml", &value, &run);
             assert!(sweep.problems.is_empty(), "{yaml}");
             let reported: Vec<String> = sweep
                 .warnings

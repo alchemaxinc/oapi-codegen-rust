@@ -438,7 +438,8 @@ components:
     #[test]
     fn a_described_reference_merges_and_uploads_like_the_bare_reference() {
         const NOTE: &str = "the note beside the reference";
-        let spec = |property: &str| {
+        const TARGET_NOTE: &str = "The kinds there are.";
+        let spec = |property: &str, kind: &str| {
             return format!(
                 "openapi: 3.0.3
 info: {{title: Demo, version: 1.0.0}}
@@ -462,11 +463,12 @@ paths:
           content: {{application/json: {{schema: {{$ref: '#/components/schemas/Merged'}}}}}}
 components:
   schemas:
-    Kind: {{type: string, enum: [a, b]}}
+    Kind: {kind}
     SameKind: {{$ref: '#/components/schemas/Kind'}}
     Base: {{type: object, properties: {{kind: {{$ref: '#/components/schemas/Kind'}}, other: {{$ref: '#/components/schemas/SameKind'}}}}}}
     Extra: {{type: object, properties: {{kind: {property}, other: {property}}}}}
-    Merged: {{allOf: [{{$ref: '#/components/schemas/Base'}}, {{$ref: '#/components/schemas/Extra'}}]}}
+    Third: {{type: object, properties: {{other: {{$ref: '#/components/schemas/Kind'}}}}}}
+    Merged: {{allOf: [{{$ref: '#/components/schemas/Base'}}, {{$ref: '#/components/schemas/Extra'}}, {{$ref: '#/components/schemas/Third'}}]}}
 "
             );
         };
@@ -477,22 +479,42 @@ components:
         )
         .expect("write the configuration");
         let config = Config::load(&dir.join("config.yaml")).expect("valid configuration");
-        let generate_from = |property: &str| {
-            std::fs::write(dir.join("spec.yaml"), spec(property)).expect("write the spec");
+        let generate_from = |property: &str, kind: &str| {
+            std::fs::write(dir.join("spec.yaml"), spec(property, kind)).expect("write the spec");
             return generate(&dir.join("spec.yaml"), &config).expect("the spec generates");
         };
+        let bare_ref = "{$ref: '#/components/schemas/Kind'}";
+        let described_ref = format!("{{$ref: '#/components/schemas/Kind', description: {NOTE}}}");
 
-        let bare = generate_from("{$ref: '#/components/schemas/Kind'}");
-        let described = generate_from(&format!("{{$ref: '#/components/schemas/Kind', description: {NOTE}}}"));
+        let plain_kind = "{type: string, enum: [a, b]}";
+        let bare = generate_from(bare_ref, plain_kind);
+        let described = generate_from(&described_ref, plain_kind);
 
         assert!(bare.contains("pub struct Merged"), "the overlap merges");
         let without_notes: Vec<&str> = described.lines().filter(|line| return !line.contains(NOTE)).collect();
         assert_eq!(without_notes, bare.lines().collect::<Vec<&str>>());
         // Twice on `Merged`, for the overlap on one name and for the overlap
         // through an alias, and once on the enum that the second overlap merges
-        // into. A multipart part carries no doc comment, and `Extra` reaches no
-        // operation, so it is pruned.
+        // into, where it survives the third member. A multipart part carries no
+        // doc comment, and `Extra` reaches no operation, so it is pruned.
         assert_eq!(described.matches(NOTE).count(), 3, "{described}");
+
+        // When `Kind` has a description of its own, the note beside the
+        // property wins on the field, as it does on a plain field.
+        let described_kind = format!("{{type: string, enum: [a, b], description: {TARGET_NOTE}}}");
+        let documented = generate_from(&described_ref, &described_kind);
+        assert!(
+            documented.contains(&format!(
+                "    /// {NOTE}\n    #[serde(skip_serializing_if = \"Option::is_none\")]\n    pub other"
+            )),
+            "{documented}"
+        );
+        assert!(
+            !documented.contains(&format!(
+                "    /// {TARGET_NOTE}\n    #[serde(skip_serializing_if = \"Option::is_none\")]\n    pub other"
+            )),
+            "{documented}"
+        );
     }
 
     /// A wrapper around a multipart field's `$ref` keeps its own marks. A

@@ -190,15 +190,17 @@ fn described_reference(property: &ReferenceOr<Box<Schema>>) -> Option<ReferenceO
     });
 }
 
-/// Put `description` on `property`. A bare `$ref` cannot hold one, so it becomes
-/// the one-member `allOf` that OpenAPI 3.0 gives for this.
+/// Put `description` on `property`. The note written beside the property wins
+/// over the description of the schema it names, as it does on a plain field. A
+/// bare `$ref` cannot hold one, so it becomes the one-member `allOf` that
+/// OpenAPI 3.0 gives for this.
 fn describe(property: ReferenceOr<Box<Schema>>, description: Option<String>) -> ReferenceOr<Box<Schema>> {
     let Some(description) = description else {
         return property;
     };
     return match property {
         ReferenceOr::Item(mut schema) => {
-            schema.schema_data.description.get_or_insert(description);
+            schema.schema_data.description = Some(description);
             ReferenceOr::Item(schema)
         }
         ReferenceOr::Reference { reference } => ReferenceOr::Item(Box::new(Schema {
@@ -285,12 +287,18 @@ fn intersect(
     let nullable = left.schema_data.nullable && right.schema_data.nullable;
     left.schema_data.nullable = nullable;
     right.schema_data.nullable = nullable;
+    // A description changes no value, so two members that differ only in it
+    // still agree. The first one stays on the result.
+    let left_description = left.schema_data.description.take();
+    let right_description = right.schema_data.description.take();
+    let description = left_description.or(right_description);
     if left.schema_data != right.schema_data {
         return Err(unsupported(
             path,
             "overlapping properties have different metadata or extensions",
         ));
     }
+    left.schema_data.description = description;
     if left.schema_data.extensions.contains_key("x-rust-type") {
         if left.schema_kind != right.schema_kind {
             return Err(unsupported(path, "custom-type property constraints differ"));
