@@ -533,6 +533,25 @@ fn direction_split_schemas(doc: &OpenAPI) -> std::collections::BTreeSet<String> 
             directional.insert(name.clone());
         }
     }
+    // A component declared as a `$ref` to a marked schema carries the mark too,
+    // because `resolve` follows the alias when a property names it. One pass per
+    // link in a chain, up to the depth `resolve` follows.
+    for _ in 0..MAX_REF_DEPTH {
+        let mut grew = false;
+        for (name, entry) in &components.schemas {
+            if let ReferenceOr::Reference { reference } = entry
+                && !directional.contains(name)
+                && ref_file_part(reference).is_none()
+                && ref_component_name(reference, "schemas").is_some_and(|target| return directional.contains(target))
+            {
+                directional.insert(name.clone());
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
 
     let mut referrers: HashMap<String, Vec<String>> = HashMap::new();
     for (name, entry) in &components.schemas {
@@ -1138,6 +1157,25 @@ mod tests {
         assert!(
             !split.contains("PlainAlias"),
             "an alias to an unmarked model keeps its one name"
+        );
+    }
+
+    /// `resolve` follows an alias to the schema behind it, so a property that
+    /// names the alias takes the mark of that schema. The split set must agree,
+    /// or an `import-mapping` run would emit a name the models run never writes.
+    #[test]
+    fn an_alias_chain_to_a_marked_schema_splits_the_referrer() {
+        let doc: OpenAPI = serde_yaml::from_str(
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Marked:\n      type: string\n      readOnly: true\n    Alias:\n      $ref: '#/components/schemas/Marked'\n    Twice:\n      $ref: '#/components/schemas/Alias'\n    Holder:\n      type: object\n      properties:\n        a:\n          $ref: '#/components/schemas/Alias'\n    Wrapped:\n      type: object\n      properties:\n        a:\n          allOf:\n            - $ref: '#/components/schemas/Twice'\n",
+        )
+        .expect("parse doc");
+
+        let split = direction_split_schemas(&doc);
+        assert!(split.contains("Holder"), "a name of an alias to a marked schema splits");
+        assert!(split.contains("Wrapped"), "a wrapped name of a two-step alias splits");
+        assert!(
+            !split.contains("Alias") && !split.contains("Twice"),
+            "an alias to a primitive keeps its one name"
         );
     }
 
