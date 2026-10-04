@@ -383,9 +383,6 @@ struct Sweep<'a> {
     /// the server is generated, its query struct checks the constraints of such
     /// a schema, so the note about unchecked constraints does not apply to it.
     query_schemas: Vec<String>,
-    /// The depth of the schema that `x-rust-type` replaces, while the walk is
-    /// inside it. No generated code matches a union below such a schema.
-    replaced_at: Option<usize>,
     /// The paths of the property schemas that hold a same-document `$ref` and
     /// a `description` beside it. See [`wrap_described_refs`].
     described_refs: Vec<String>,
@@ -464,7 +461,6 @@ fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
         run,
         removed_at: None,
         query_schemas: Vec::new(),
-        replaced_at: None,
         described_refs: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
@@ -514,15 +510,6 @@ impl Sweep<'_> {
             && self.removed_at.is_none()
         {
             self.query_schemas.push(pointer(path, "schema"));
-        }
-        // A custom type replaces the schema and everything below it, so no
-        // generated code matches a union in that subtree. The walk still visits
-        // the subtree for its other checks.
-        let replaces_here = matches!(context, Context::Schema | Context::PropertySchema)
-            && value.get("x-rust-type").is_some()
-            && self.replaced_at.is_none();
-        if replaces_here {
-            self.replaced_at = Some(depth);
         }
         // The loader keeps this description, so it is not an ignored sibling.
         // A cross-file `$ref` does not resolve at a property, so nothing is kept
@@ -580,15 +567,12 @@ impl Sweep<'_> {
                 {
                     self.warn(&at, reason);
                 }
-                self.value_notes(context, &key, child, &at, self.replaced_at.is_some());
+                self.value_notes(context, &key, child, &at);
             }
             self.walk(child, field.traversal, &at, depth + 1);
         }
         if !reference {
             self.object_notes(value, context, path);
-        }
-        if replaces_here {
-            self.replaced_at = None;
         }
         if removed_here {
             self.removed_at = None;
@@ -671,7 +655,7 @@ impl Sweep<'_> {
         }
     }
 
-    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str, replaced: bool) {
+    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str) {
         if matches!(context, Context::Document | Context::Operation)
             && key == "security"
             && let Some(requirements) = value.as_sequence()
@@ -691,10 +675,15 @@ impl Sweep<'_> {
         }
         if matches!(context, Context::Schema | Context::PropertySchema) {
             match key {
-                "oneOf" | "anyOf" if !replaced => self.warn(
-                    path,
-                    "Rust deserialization checks do not enforce all schema constraints, which can affect union match counts",
-                ),
+                // A `oneOf` asks for exactly one match. Two members that read the
+                // same, apart from their descriptions, match the same values, so
+                // such a value matches two and the union refuses it.
+                "oneOf" if value.as_sequence().is_some_and(repeats_a_member) => {
+                    self.warn(
+                        path,
+                        "two members of this oneOf are the same schema, so a value of that shape matches both and is refused",
+                    );
+                }
                 "default" if value.is_null() => {
                     self.warn(
                         path,
@@ -840,6 +829,25 @@ fn unsigned_type_holds_the_bound(value: &Value) -> bool {
         && value.get("type").and_then(Value::as_str) == Some("integer")
         && value.get("minimum").and_then(Value::as_i64) == Some(0)
         && value.get("x-rust-type").is_none();
+}
+
+/// Whether two of `members` are the same schema once their descriptions are
+/// set aside.
+fn repeats_a_member(members: &serde_yaml::Sequence) -> bool {
+    let shapes: Vec<Value> = members
+        .iter()
+        .map(|member| {
+            let mut shape = member.clone();
+            if let Some(mapping) = shape.as_mapping_mut() {
+                mapping.remove("description");
+            }
+            return shape;
+        })
+        .collect();
+    return shapes
+        .iter()
+        .enumerate()
+        .any(|(index, shape)| return shapes.iter().take(index).any(|earlier| return earlier == shape));
 }
 
 fn response_key(key: &str) -> bool {
@@ -1135,8 +1143,6 @@ security: [{arbitrary: [custom]}]
             ("{type: number, enum: [1.5]}", "enum"),
             ("{type: string, format: custom}", "format"),
             ("{type: string, nullable: true, default: null}", "default"),
-            ("{oneOf: [{type: string}, {type: integer}]}", "oneOf"),
-            ("{anyOf: [{type: string}, {type: integer}]}", "anyOf"),
         ] {
             let yaml = format!("components: {{schemas: {{Widget: {schema}}}}}");
             let sweep = inspect_yaml(&yaml);
@@ -1148,55 +1154,67 @@ security: [{arbitrary: [custom]}]
                     .any(|warning| return warning.path.ends_with(keyword)),
                 "{schema}",
             );
-            if matches!(keyword, "oneOf" | "anyOf") {
-                assert!(sweep.warnings.iter().any(|warning| {
-                    return warning.message.contains("Rust deserialization checks")
-                        && warning.message.contains("can affect union match counts");
-                }));
-            }
         }
     }
 
+    /// A union matches by the Rust types of its members, and the notes on an
+    /// unchecked constraint already name every place where that read differs
+    /// from the document. So a union carries no note of its own.
     #[test]
-    fn a_union_that_a_custom_type_replaces_has_no_match_count_note() {
-        const NOTE: &str = "union match counts";
-        for (yaml, noted) in [
+    fn a_union_carries_no_note_of_its_own() {
+        for schema in [
+            "{oneOf: [{type: string}, {type: integer}]}",
+            "{anyOf: [{type: string}, {type: integer}]}",
+            "{x-rust-type: 'crate::Stamp', oneOf: [{type: string}, {type: integer}]}",
+        ] {
+            let sweep = inspect_yaml(&format!("components: {{schemas: {{Widget: {schema}}}}}"));
+            assert!(sweep.problems.is_empty(), "{schema}");
+            assert!(sweep.warnings.is_empty(), "{schema}: {:?}", sweep.warnings);
+        }
+        // A constraint a member holds that no code checks still has its note.
+        let sweep =
+            inspect_yaml("components: {schemas: {Widget: {oneOf: [{type: string, maxLength: 3}, {type: integer}]}}}");
+        assert_eq!(sweep.warnings.len(), 1, "{:?}", sweep.warnings);
+        assert!(sweep.warnings[0].path.ends_with("/oneOf/0"), "{:?}", sweep.warnings);
+    }
+
+    #[test]
+    fn a_one_of_with_two_identical_members_is_reported() {
+        const NOTE: &str = "two members of this oneOf are the same schema";
+        for (schema, noted) in [
+            // Both members are `date-time` strings, so no value matches exactly one.
             (
-                "{x-rust-type: 'crate::Stamp', oneOf: [{type: string}, {type: integer}]}",
-                false,
-            ),
-            // The replacement covers the whole subtree, and the walk still
-            // reaches the subtree for its other checks.
-            (
-                "{x-rust-type: 'crate::Stamp', oneOf: [{anyOf: [{type: string}, {type: integer}]}, {type: object, properties: {at: {oneOf: [{type: string}, {type: integer}]}}}]}",
-                false,
-            ),
-            ("{oneOf: [{type: string}, {type: integer}]}", true),
-            // A sibling schema outside the replaced one keeps its note.
-            (
-                "{type: object, properties: {a: {x-rust-type: 'crate::A', oneOf: [{type: string}]}, b: {oneOf: [{type: string}, {type: integer}]}}}",
+                "{oneOf: [{type: string, format: date}, {type: string, format: date-time}, {type: string, format: date-time}]}",
                 true,
             ),
+            // A description does not tell two members apart.
+            (
+                "{oneOf: [{type: string, description: a}, {type: string, description: b}]}",
+                true,
+            ),
+            (
+                "{oneOf: [{$ref: '#/components/schemas/A'}, {$ref: '#/components/schemas/A'}]}",
+                true,
+            ),
+            (
+                "{oneOf: [{type: string, format: date}, {type: string, format: date-time}]}",
+                false,
+            ),
+            // `anyOf` accepts more than one match, so a repeat changes nothing.
+            ("{anyOf: [{type: string}, {type: string}]}", false),
         ] {
-            let sweep = inspect_yaml(&format!("components: {{schemas: {{Stamp: {yaml}}}}}"));
-            assert!(sweep.problems.is_empty(), "{yaml}: {:?}", sweep.problems);
+            let sweep = inspect_yaml(&format!("components: {{schemas: {{Widget: {schema}}}}}"));
+            assert!(sweep.problems.is_empty(), "{schema}");
             assert_eq!(
                 sweep
                     .warnings
                     .iter()
                     .any(|warning| return warning.message.contains(NOTE)),
                 noted,
-                "{yaml}: {:?}",
-                sweep.warnings,
+                "{schema}: {:?}",
+                sweep.warnings
             );
         }
-        let invalid = inspect_yaml(
-            "components: {schemas: {Stamp: {x-rust-type: 'crate::Stamp', oneOf: [{type: string, requird: true}]}}}",
-        );
-        assert!(
-            !invalid.problems.is_empty(),
-            "an invalid key below a replaced schema is still an error"
-        );
     }
 
     #[test]
