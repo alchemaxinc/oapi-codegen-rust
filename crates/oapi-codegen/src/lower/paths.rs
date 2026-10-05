@@ -1301,13 +1301,16 @@ impl Lowerer<'_> {
                 ReferenceOr::Reference { .. } => None,
             };
             // The wrapper's own keywords still apply on top of the target's. A
-            // wrapper that marks the part as not sent settles it alone, before
-            // the target is read.
+            // target in another file cannot be read here, so for one the wrapper's
+            // mark settles the part alone; a same-document target is read and
+            // its marks combine with the wrapper's below, so a conflict between
+            // the two is reported as it is on any field.
             let wrapper = match (&wrapped, property) {
                 (Some(_), ReferenceOr::Item(schema)) => Some(&schema.schema_data),
                 _ => None,
             };
-            if let Some(wrapper) = wrapper
+            if let (Some(wrapper), Some(ReferenceOr::Reference { reference })) = (wrapper, &wrapped)
+                && ref_file_part(reference).is_some()
                 && !multipart_part_is_sent(wrapper, path, method, wire_name)?
             {
                 continue;

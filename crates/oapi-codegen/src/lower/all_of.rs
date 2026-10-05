@@ -200,9 +200,95 @@ fn described_reference(property: &ReferenceOr<Box<Schema>>) -> Option<ReferenceO
 fn without_description(property: &ReferenceOr<Box<Schema>>) -> ReferenceOr<Box<Schema>> {
     let mut stripped = property.clone();
     if let ReferenceOr::Item(schema) = &mut stripped {
-        schema.schema_data.description = None;
+        strip_descriptions(schema);
     }
     return stripped;
+}
+
+/// Remove every description from `schema` and from each schema written inside
+/// it. A description beside a nested property's `$ref` becomes a wrapper around
+/// that `$ref` when the document loads, so the wrapper that then holds nothing
+/// else becomes the bare `$ref` again. Two schemas that differ only in such a
+/// note then compare equal.
+fn strip_descriptions(schema: &mut Schema) {
+    schema.schema_data.description = None;
+    let mut strip_boxed = |entry: &mut ReferenceOr<Box<Schema>>| {
+        if let ReferenceOr::Item(inner) = entry {
+            strip_descriptions(inner);
+            if let Some(reference) = bare_wrapper_target(inner) {
+                *entry = ReferenceOr::Reference { reference };
+            }
+        }
+    };
+    match &mut schema.schema_kind {
+        SchemaKind::Type(Type::Object(object)) => {
+            object.properties.values_mut().for_each(&mut strip_boxed);
+            if let Some(AdditionalProperties::Schema(inner)) = &mut object.additional_properties
+                && let ReferenceOr::Item(inner) = inner.as_mut()
+            {
+                strip_descriptions(inner);
+            }
+        }
+        SchemaKind::Type(Type::Array(array)) => {
+            if let Some(items) = &mut array.items {
+                strip_boxed(items);
+            }
+        }
+        SchemaKind::Type(_) => {}
+        SchemaKind::OneOf { one_of: members }
+        | SchemaKind::AllOf { all_of: members }
+        | SchemaKind::AnyOf { any_of: members } => {
+            for member in members {
+                if let ReferenceOr::Item(inner) = member {
+                    strip_descriptions(inner);
+                    if let Some(reference) = bare_wrapper_target(inner) {
+                        *member = ReferenceOr::Reference { reference };
+                    }
+                }
+            }
+        }
+        SchemaKind::Not { not } => {
+            if let ReferenceOr::Item(inner) = not.as_mut() {
+                strip_descriptions(inner);
+            }
+        }
+        SchemaKind::Any(any) => {
+            any.properties.values_mut().for_each(&mut strip_boxed);
+            if let Some(AdditionalProperties::Schema(inner)) = &mut any.additional_properties
+                && let ReferenceOr::Item(inner) = inner.as_mut()
+            {
+                strip_descriptions(inner);
+            }
+            if let Some(items) = &mut any.items {
+                strip_boxed(items);
+            }
+            for member in any
+                .one_of
+                .iter_mut()
+                .chain(any.all_of.iter_mut())
+                .chain(any.any_of.iter_mut())
+            {
+                if let ReferenceOr::Item(inner) = member {
+                    strip_descriptions(inner);
+                }
+            }
+            if let Some(not) = &mut any.not
+                && let ReferenceOr::Item(inner) = not.as_mut()
+            {
+                strip_descriptions(inner);
+            }
+        }
+    }
+}
+
+/// The `$ref` a one-member `allOf` wraps when, with its description gone, the
+/// wrapper adds nothing else to it.
+fn bare_wrapper_target(schema: &Schema) -> Option<String> {
+    let reference = crate::loader::single_ref_member(schema)?;
+    if schema.schema_data != openapiv3::SchemaData::default() {
+        return None;
+    }
+    return Some(reference.to_owned());
 }
 
 /// Put `description` on `property`. The note written beside the property wins

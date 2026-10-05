@@ -471,6 +471,9 @@ paths:
         '201':
           description: made
           content: {{application/json: {{schema: {{$ref: '#/components/schemas/Both'}}}}}}
+        '202':
+          description: queued
+          content: {{application/json: {{schema: {{$ref: '#/components/schemas/Across'}}}}}}
 components:
   schemas:
     Kind: {kind}
@@ -484,6 +487,11 @@ components:
     Left: {{type: object, properties: {{pair: {{$ref: '#/components/schemas/Pair'}}}}}}
     Right: {{type: object, properties: {{pair: {{allOf: [{{$ref: '#/components/schemas/Half'}}, {{$ref: '#/components/schemas/Half'}}]{wrapper_note}}}}}}}
     Both: {{allOf: [{{$ref: '#/components/schemas/Left'}}, {{$ref: '#/components/schemas/Right'}}]}}
+    CompA: {{allOf: [{{type: object, properties: {{p: {{$ref: '#/components/schemas/Kind'}}}}}}, {{$ref: '#/components/schemas/Half'}}]}}
+    CompB: {{allOf: [{{type: object, properties: {{p: {property}}}}}, {{$ref: '#/components/schemas/Half'}}]}}
+    Up: {{type: object, properties: {{comp: {{$ref: '#/components/schemas/CompA'}}}}}}
+    Down: {{type: object, properties: {{comp: {{$ref: '#/components/schemas/CompB'}}}}}}
+    Across: {{allOf: [{{$ref: '#/components/schemas/Up'}}, {{$ref: '#/components/schemas/Down'}}]}}
     Merged: {{allOf: [{{$ref: '#/components/schemas/Base'}}, {{$ref: '#/components/schemas/Extra'}}, {{$ref: '#/components/schemas/Third'}}]}}
 "
             );
@@ -517,6 +525,9 @@ components:
         // doc comment, and `Extra` and `Right` reach no operation, so they are
         // pruned.
         assert_eq!(described.matches(NOTE).count(), 5, "{described}");
+        // `Across` overlaps two composites that differ only in a note beside a
+        // nested `$ref`, and it keeps the first composite's name.
+        assert!(described.contains("pub comp: Option<CompA>"), "{described}");
 
         // When `Kind` has a description of its own, the note beside the
         // property wins on the field, as it does on a plain field.
@@ -591,6 +602,39 @@ components:
             !code.contains("\"elsewhere\""),
             "the read-only cross-file field is no part: {code}"
         );
+
+        // A wrapper mark and a target mark that leave no direction are an error
+        // here, as they are on any field, whichever side carries which.
+        for (wrapper, target) in [("readOnly", "writeOnly"), ("writeOnly", "readOnly")] {
+            std::fs::write(
+                dir.join("spec.yaml"),
+                format!(
+                    "openapi: 3.0.3
+info: {{title: Demo, version: 1.0.0}}
+paths:
+  /uploads:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                torn: {{allOf: [{{$ref: '#/components/schemas/Marked'}}], {wrapper}: true}}
+      responses:
+        '204': {{description: ok}}
+components:
+  schemas:
+    Marked: {{type: string, {target}: true}}
+"
+                ),
+            )
+            .expect("write the spec");
+            let error = generate(&dir.join("spec.yaml"), &config).expect_err("both marks leave no direction");
+            assert!(error.to_string().contains("readOnly"), "{wrapper} on {target}: {error}");
+        }
     }
 
     #[test]
