@@ -525,14 +525,19 @@ fn direction_split_schemas(doc: &OpenAPI) -> std::collections::BTreeSet<String> 
         return marked;
     };
 
-    let mut directional = std::collections::BTreeSet::new();
-    for (name, entry) in &components.schemas {
-        if let ReferenceOr::Item(schema) = entry
-            && (schema.schema_data.read_only || schema.schema_data.write_only)
-        {
-            directional.insert(name.clone());
-        }
-    }
+    // A component that `resolve` follows to a marked schema carries the mark,
+    // whether it is that schema or an alias chain that ends at it. The chain is
+    // followed the way `resolve` follows it, with the same depth, so the two
+    // agree on a chain at the limit.
+    let directional: std::collections::BTreeSet<String> = components
+        .schemas
+        .keys()
+        .filter(|name| {
+            return resolved_component(&components.schemas, name)
+                .is_some_and(|schema| return schema.schema_data.read_only || schema.schema_data.write_only);
+        })
+        .cloned()
+        .collect();
 
     let mut referrers: HashMap<String, Vec<String>> = HashMap::new();
     for (name, entry) in &components.schemas {
@@ -586,15 +591,57 @@ fn schema_marks_a_direction(schema: &Schema, directional: &std::collections::BTr
 
 /// Whether one schema declares a property that only one direction carries.
 fn declares_a_directional_property(schema: &Schema, directional: &std::collections::BTreeSet<String>) -> bool {
+    let names_a_marked_schema = |reference: &str| {
+        return ref_file_part(reference).is_none()
+            && ref_component_name(reference, "schemas").is_some_and(|name| return directional.contains(name));
+    };
     return object_properties(schema).iter().any(|entry| {
         return match entry {
-            ReferenceOr::Item(inner) => inner.schema_data.read_only || inner.schema_data.write_only,
-            ReferenceOr::Reference { reference } => {
-                return ref_file_part(reference).is_none()
-                    && ref_component_name(reference, "schemas").is_some_and(|name| return directional.contains(name));
+            // A one-member `allOf` adds keywords to a `$ref` and changes nothing
+            // else, so the mark of the schema it names still applies.
+            ReferenceOr::Item(inner) => {
+                inner.schema_data.read_only
+                    || inner.schema_data.write_only
+                    || single_ref_member(inner).is_some_and(names_a_marked_schema)
             }
+            ReferenceOr::Reference { reference } => names_a_marked_schema(reference),
         };
     });
+}
+
+/// The schema a component name resolves to, through same-document aliases.
+///
+/// This mirrors [`Spec::resolve`]: each name costs one step, the schema itself
+/// included, and a chain that needs more than `MAX_REF_DEPTH` steps resolves to
+/// nothing.
+fn resolved_component<'a>(schemas: &'a IndexMap<String, ReferenceOr<Schema>>, name: &str) -> Option<&'a Schema> {
+    let mut current = name;
+    for _ in 0..MAX_REF_DEPTH {
+        match schemas.get(current)? {
+            ReferenceOr::Item(schema) => return Some(schema),
+            ReferenceOr::Reference { reference } => {
+                if ref_file_part(reference).is_some() {
+                    return None;
+                }
+                current = ref_component_name(reference, "schemas")?;
+            }
+        }
+    }
+    return None;
+}
+
+/// The reference a one-member `allOf` wraps, when that member is a `$ref`.
+///
+/// OpenAPI 3.0 ignores a keyword beside a `$ref`, so a document wraps the
+/// `$ref` in a one-member `allOf` to give it a `description` or `nullable`.
+pub(crate) fn single_ref_member(schema: &Schema) -> Option<&str> {
+    let openapiv3::SchemaKind::AllOf { all_of } = &schema.schema_kind else {
+        return None;
+    };
+    let [ReferenceOr::Reference { reference }] = all_of.as_slice() else {
+        return None;
+    };
+    return Some(reference);
 }
 
 /// The schemas one schema declares as properties.
@@ -1117,6 +1164,76 @@ mod tests {
         assert!(
             !split.contains("PlainAlias"),
             "an alias to an unmarked model keeps its one name"
+        );
+    }
+
+    /// `resolve` follows an alias to the schema behind it, so a property that
+    /// names the alias takes the mark of that schema. The split set must agree,
+    /// or an `import-mapping` run would emit a name the models run never writes.
+    #[test]
+    fn an_alias_chain_to_a_marked_schema_splits_the_referrer() {
+        let doc: OpenAPI = serde_yaml::from_str(
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Marked:\n      type: string\n      readOnly: true\n    Alias:\n      $ref: '#/components/schemas/Marked'\n    Twice:\n      $ref: '#/components/schemas/Alias'\n    Holder:\n      type: object\n      properties:\n        a:\n          $ref: '#/components/schemas/Alias'\n    Wrapped:\n      type: object\n      properties:\n        a:\n          allOf:\n            - $ref: '#/components/schemas/Twice'\n",
+        )
+        .expect("parse doc");
+
+        let split = direction_split_schemas(&doc);
+        assert!(split.contains("Holder"), "a name of an alias to a marked schema splits");
+        assert!(split.contains("Wrapped"), "a wrapped name of a two-step alias splits");
+        assert!(
+            !split.contains("Alias") && !split.contains("Twice"),
+            "an alias to a primitive keeps its one name"
+        );
+    }
+
+    /// `resolve` follows at most `MAX_REF_DEPTH` names, the schema itself
+    /// included. A chain one link longer resolves to nothing in the lowering,
+    /// which then reads no mark, so the split set must read none either.
+    #[test]
+    fn an_alias_chain_at_the_depth_limit_splits_and_one_link_longer_does_not() {
+        let chain = |links: usize, reversed: bool| {
+            let mut schemas: Vec<String> = vec!["    Marked:\n      type: string\n      readOnly: true\n".to_owned()];
+            for index in 1..=links {
+                let target = if index == links {
+                    "Marked".to_owned()
+                } else {
+                    format!("Alias{}", index + 1)
+                };
+                schemas.push(format!(
+                    "    Alias{index}:\n      $ref: '#/components/schemas/{target}'\n"
+                ));
+            }
+            if reversed {
+                schemas.reverse();
+            }
+            return format!(
+                "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {{}}\ncomponents:\n  schemas:\n{}    Holder:\n      type: object\n      properties:\n        a:\n          $ref: '#/components/schemas/Alias1'\n",
+                schemas.concat()
+            );
+        };
+        for (links, splits) in [(MAX_REF_DEPTH - 1, true), (MAX_REF_DEPTH, false)] {
+            for reversed in [false, true] {
+                let doc: OpenAPI = serde_yaml::from_str(&chain(links, reversed)).expect("parse doc");
+                let split = direction_split_schemas(&doc);
+                assert_eq!(split.contains("Holder"), splits, "{links} links, reversed: {reversed}");
+            }
+        }
+    }
+
+    /// A one-member `allOf` around a `$ref` names the same schema as the bare
+    /// `$ref`, so it splits the same models.
+    #[test]
+    fn a_wrapped_reference_to_a_marked_schema_splits_the_referrer() {
+        let doc: OpenAPI = serde_yaml::from_str(
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Marked:\n      type: string\n      readOnly: true\n    Plain:\n      type: string\n    Holder:\n      type: object\n      properties:\n        a:\n          allOf:\n            - $ref: '#/components/schemas/Marked'\n          description: wrapped\n    Bystander:\n      type: object\n      properties:\n        b:\n          allOf:\n            - $ref: '#/components/schemas/Plain'\n",
+        )
+        .expect("parse doc");
+
+        let split = direction_split_schemas(&doc);
+        assert!(split.contains("Holder"), "a wrapped name of a marked schema splits");
+        assert!(
+            !split.contains("Bystander"),
+            "a wrapped name of a plain schema does not"
         );
     }
 
