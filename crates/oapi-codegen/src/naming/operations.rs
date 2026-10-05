@@ -44,12 +44,12 @@ pub fn request_body_enum_name(op: &RustIdent) -> RustIdent {
 }
 
 /// The generated body-enum name for a response variant that offers several
-/// content types (`<Response><Variant>Body`).
-pub fn response_body_enum_name(response_enum: &RustIdent, variant: &RustIdent) -> RustIdent {
-    return to_ident(
-        &format!("{}_{}_body", response_enum.logical(), variant.logical()),
-        Case::Pascal,
-    );
+/// content types (`<Op><Variant>Body`). The name is built from the operation,
+/// not from the response enum, so the response suffix (`Response` by default)
+/// is left out: the enum names a body, not a response, and a document that
+/// sets the suffix to `Body` would otherwise read it twice.
+pub fn response_body_enum_name(op: &RustIdent, variant: &RustIdent) -> RustIdent {
+    return to_ident(&format!("{}_{}_body", op.logical(), variant.logical()), Case::Pascal);
 }
 
 pub fn axum_handler_name(op: &RustIdent) -> RustIdent {
@@ -75,12 +75,8 @@ mod tests {
         assert_eq!(multipart_struct_name(&list_pets).logical(), "ListPetsMultipart");
         assert_eq!(request_body_enum_name(&list_pets).logical(), "ListPetsRequestBody");
         assert_eq!(response_enum_name(&list_pets, "Resp").logical(), "ListPetsResp");
-        let response = response_enum_name(&list_pets, "response");
         let ok = to_ident("ok", Case::Pascal);
-        assert_eq!(
-            response_body_enum_name(&response, &ok).logical(),
-            "ListPetsResponseOkBody"
-        );
+        assert_eq!(response_body_enum_name(&list_pets, &ok).logical(), "ListPetsOkBody");
         assert_eq!(axum_handler_name(&list_pets).logical(), "list_pets_handler");
     }
 }

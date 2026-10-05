@@ -267,7 +267,7 @@ impl Lowerer<'_> {
         let headers = self.lower_header_params(path, method, &params, &name)?;
         let cookies = self.lower_cookie_params(path, method, &params, &name)?;
         let request = self.lower_request_body(path, method, &name, operation)?;
-        let responses = self.lower_responses(path, method, &response_enum, operation)?;
+        let responses = self.lower_responses(path, method, &name, operation)?;
 
         return Ok(Operation {
             name,
@@ -1451,7 +1451,7 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
-        response_enum: &RustIdent,
+        operation_name: &RustIdent,
         operation: &OasOperation,
     ) -> Result<Vec<ResponseCase>> {
         let mut cases = Vec::new();
@@ -1490,7 +1490,7 @@ impl Lowerer<'_> {
             // one operation are otherwise indistinguishable to a reader.
             let location = format!("`{status_code}` response");
             let body = self.response_body(path, method, &location, response.origin.as_deref(), &response.value)?;
-            let body = self.name_response_body(response_enum, &variant, body);
+            let body = self.name_response_body(operation_name, &variant, body);
             let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
                 variant,
@@ -1511,7 +1511,7 @@ impl Lowerer<'_> {
                 response.origin.as_deref(),
                 &response.value,
             )?;
-            let body = self.name_response_body(response_enum, &variant, body);
+            let body = self.name_response_body(operation_name, &variant, body);
             let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
                 variant,
@@ -1604,10 +1604,10 @@ impl Lowerer<'_> {
 
     /// Name a lowered response body against its response variant: a single
     /// content type stays [`ResponseBody::Single`]. several become a
-    /// [`ResponseBody::Negotiated`] enum named `<Response><Variant>Body`.
+    /// [`ResponseBody::Negotiated`] enum named `<Op><Variant>Body`.
     fn name_response_body(
         &self,
-        response_enum: &RustIdent,
+        operation_name: &RustIdent,
         variant: &RustIdent,
         lowered: Option<LoweredResponseBody>,
     ) -> Option<ResponseBody> {
@@ -1615,7 +1615,7 @@ impl Lowerer<'_> {
             return match body {
                 LoweredResponseBody::Single(body) => ResponseBody::Single(body),
                 LoweredResponseBody::Negotiated(variants) => ResponseBody::Negotiated(NegotiatedBody {
-                    name: operations::response_body_enum_name(response_enum, variant),
+                    name: operations::response_body_enum_name(operation_name, variant),
                     variants,
                 }),
             };

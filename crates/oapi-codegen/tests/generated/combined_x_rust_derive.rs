@@ -161,7 +161,7 @@ pub enum CreateThingResponse {
 }
 
 #[derive(Debug)]
-pub enum GetReportResponseOkBody {
+pub enum GetReportOkBody {
     Json(Thing),
     Text(String),
 }
@@ -170,7 +170,7 @@ pub enum GetReportResponseOkBody {
 #[derive(Debug)]
 pub enum GetReportResponse {
     /// The report, as JSON or plain text.
-    Ok(GetReportResponseOkBody),
+    Ok(GetReportOkBody),
 }
 
 #[derive(Debug, Clone)]
@@ -318,10 +318,10 @@ impl axum::response::IntoResponse for GetReportResponse {
                     Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
                 };
                 match body {
-                    GetReportResponseOkBody::Json(body) => {
+                    GetReportOkBody::Json(body) => {
                         (STATUS, axum::Json(body)).into_response()
                     }
-                    GetReportResponseOkBody::Text(body) => (STATUS, body).into_response(),
+                    GetReportOkBody::Text(body) => (STATUS, body).into_response(),
                 }
             }
         }
@@ -507,9 +507,9 @@ impl Client {
             let body = if content_type == "application/json"
                 || content_type.ends_with("+json")
             {
-                GetReportResponseOkBody::Json(response.json()?)
+                GetReportOkBody::Json(response.json()?)
             } else if content_type == "text/plain" {
-                GetReportResponseOkBody::Text(response.text()?)
+                GetReportOkBody::Text(response.text()?)
             } else {
                 return Err(ClientError::UnexpectedContentType(content_type));
             };

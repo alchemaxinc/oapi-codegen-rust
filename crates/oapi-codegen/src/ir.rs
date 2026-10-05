@@ -614,7 +614,7 @@ pub enum RequestPayload {
 /// matching `Content-Type`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NegotiatedBody {
-    /// Enum name — `<Op>RequestBody` for a request, `<Response><Variant>Body`
+    /// Enum name — `<Op>RequestBody` for a request, `<Op><Variant>Body`
     /// for a response — doubling as the argument/field type on the generated
     /// interface.
     pub name: RustIdent,

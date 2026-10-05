@@ -12,7 +12,7 @@
 use super::super::models::*;
 
 #[derive(Debug)]
-pub enum GetReportResponseOkBody {
+pub enum GetReportOkBody {
     Json(Thing),
     Text(String),
 }
@@ -21,5 +21,5 @@ pub enum GetReportResponseOkBody {
 #[derive(Debug)]
 pub enum GetReportResponse {
     /// The report, as JSON or plain text.
-    Ok(GetReportResponseOkBody),
+    Ok(GetReportOkBody),
 }
