@@ -311,11 +311,10 @@ OpenAPI objects. However, it still inspects objects inside unsupported features,
 such as callback operations.
 
 Warnings also identify several limits of the current translation. These include
-Rust union matching, nullability, and unconstrained fallback
-types. A `oneOf` or an `anyOf` produces a warning: Rust deserialization checks
-do not enforce all schema constraints. A union that `x-rust-type` replaces
-produces none, because no generated code matches it. Body selection reports
-discarded media entries.
+nullability and unconstrained fallback types. A union produces no note of its
+own: it matches by the Rust types of its members, and the note on an unchecked
+constraint already names every place where that read differs from the
+document. Body selection reports discarded media entries.
 The warnings expose these limits without changing the generated types.
 The catalogue is not a complete OpenAPI value validator. Lowering still applies
 its own value and combination checks.
@@ -492,8 +491,8 @@ An accessor name that conflicts with another method produces a generation error.
 
 ### Deliberate limits
 
-Every union produces a generation warning: Rust deserialization checks do not enforce all schema constraints, which can affect match counts.
 Constraints affect matching only where the Rust representation enforces them. There is no separate schema validation engine.
+A constraint that no generated code checks produces a warning at its own position, and that warning is the one signal of a match count the document would not give. A union produces no warning of its own, with one exception: a `oneOf` whose two members are the same schema, apart from their descriptions at any depth, admits no value of that shape, and that is reported whichever type reads the value.
 
 Two schemas with disjoint numeric bounds can lower to aliases of the same Rust type.
 Both aliases accept the same values, so their `oneOf` rejects those values as ambiguous.

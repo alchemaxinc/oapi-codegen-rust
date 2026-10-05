@@ -254,5 +254,5 @@ Discriminator mappings affect variant names only. They do not add or change payl
 
 An `anyOf` preserves the full JSON value. Deserialize-capable wrappers require at least one successful Rust alternative decode.
 Serialize-only wrappers instead accept unvalidated JSON without a payload `Deserialize` requirement.
-Rust deserialization checks do not enforce all schema constraints. Every union produces a generation warning about this limit.
+Rust deserialization checks do not enforce all schema constraints. A constraint that no generated code checks produces a warning at its own position.
 See [Union matching](design.md#union-matching-follows-rust-deserialization) for the API and its limits.
