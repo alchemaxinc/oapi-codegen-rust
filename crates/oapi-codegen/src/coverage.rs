@@ -79,9 +79,17 @@ fn parameter_targets(document: &Value, parameters: Option<&Value>) -> Vec<ReadBy
 /// reuses the named model, which reads `x-rust-type`.
 fn multipart_body_targets(document: &Value, body: Option<&Value>) -> Vec<ReadByType> {
     let body = body.and_then(|body| return follow_component_references(document, "requestBodies", body));
+    // The body lowering reads the first entry whose media type is multipart,
+    // whatever its case and parameters.
     let media = body
         .and_then(|body| return body.get("content"))
-        .and_then(|content| return content.get(MULTIPART_MEDIA_TYPE));
+        .and_then(Value::as_mapping)
+        .and_then(|content| {
+            return content
+                .iter()
+                .find(|(name, _)| return name.as_str().is_some_and(is_multipart))
+                .map(|(_, media)| return media);
+        });
     return schema_reference(media)
         .map(|reference| {
             return alias_chain(document, reference)
@@ -101,7 +109,9 @@ fn follow_component_references<'a>(document: &'a Value, kind: &str, value: &'a V
         };
         current = component(document, kind, reference)?;
     }
-    return None;
+    // The last lookup may have reached the value itself, as the resolver's
+    // last step does; one more reference is one too many.
+    return current.get("$ref").is_none().then_some(current);
 }
 
 /// The component of `kind` that a same-document `reference` names.
@@ -133,9 +143,13 @@ fn alias_chain<'a>(document: &'a Value, reference: &str) -> impl Iterator<Item =
     });
 }
 
-/// The media type whose body the multipart lowering reads field by field, by
-/// type. A form-encoded body reuses the named model instead.
-const MULTIPART_MEDIA_TYPE: &str = "multipart/form-data";
+/// Whether `name` is the media type whose body the multipart lowering reads
+/// field by field, by type, read the way that lowering reads it: without case
+/// and without parameters. A form-encoded body reuses the named model instead.
+fn is_multipart(name: &str) -> bool {
+    let base = name.split(';').next().unwrap_or(name).trim().to_ascii_lowercase();
+    return base == "multipart/form-data";
+}
 
 /// A schema the lowering reads by type, and how far below it that read goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -699,7 +713,13 @@ impl Sweep<'_> {
                 .push(ReadByType::through_collections(pointer(path, "schema")));
         }
         if context == Context::MediaType {
-            let form = path.ends_with(&pointer("", MULTIPART_MEDIA_TYPE));
+            let name = path
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                .replace("~1", "/")
+                .replace("~0", "~");
+            let form = is_multipart(&name);
             self.read_by_type.push(if form {
                 ReadByType::through_properties(pointer(path, "schema"))
             } else {
@@ -1451,6 +1471,19 @@ security: [{arbitrary: [custom]}]
                 "{item}: {:?}",
                 multipart.warnings
             );
+            // The media type is read without case and parameters, as the body
+            // lowering reads it.
+            let spelled = inspect_yaml(&format!(
+                "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{'Multipart/Form-Data; boundary=x': {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{{schemas}}}"
+            ));
+            assert!(
+                spelled
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                spelled.warnings
+            );
             let encoded = inspect_yaml(&format!(
                 "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{application/x-www-form-urlencoded: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{{schemas}}}"
             ));
@@ -1473,6 +1506,46 @@ security: [{arbitrary: [custom]}]
                     .any(|warning| return warning.message.contains(message)),
                 "{item}: {:?}",
                 lowered.warnings
+            );
+        }
+    }
+
+    /// The resolver looks up to `MAX_REF_DEPTH` components, the final one
+    /// included. A chain that needs exactly that many lookups resolves, and one
+    /// more does not, so the inspection must read the same chains. `links` is
+    /// the number of component request bodies that are themselves references;
+    /// the final body is one more lookup.
+    #[test]
+    fn a_request_body_chain_at_the_depth_limit_is_still_read_by_type() {
+        const NOTE: &str = "constraints are enforced only at supported field uses";
+        for (links, read) in [
+            (crate::loader::MAX_REF_DEPTH - 1, true),
+            (crate::loader::MAX_REF_DEPTH, false),
+        ] {
+            let mut bodies: Vec<String> = (1..=links)
+                .map(|index| {
+                    let target = if index == links {
+                        "Final".to_owned()
+                    } else {
+                        format!("Body{}", index + 1)
+                    };
+                    return format!("Body{index}: {{$ref: '#/components/requestBodies/{target}'}}");
+                })
+                .collect();
+            bodies.push("Final: {required: true, content: {multipart/form-data: {schema: {$ref: '#/components/schemas/Form'}}}}".to_owned());
+            let yaml = format!(
+                "paths: {{/a: {{post: {{requestBody: {{$ref: '#/components/requestBodies/Body1'}}, responses: {{}}}}}}}}\ncomponents: {{requestBodies: {{{}}}, schemas: {{Form: {{x-rust-type: 'crate::Form', type: object, properties: {{field: {{type: array, items: {{type: string, maxLength: 3}}}}}}}}}}}}",
+                bodies.join(", ")
+            );
+            let sweep = inspect_yaml(&yaml);
+            assert_eq!(
+                sweep
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(NOTE)),
+                read,
+                "{links} links: {:?}",
+                sweep.warnings
             );
         }
     }
