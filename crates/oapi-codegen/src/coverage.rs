@@ -387,6 +387,10 @@ struct Sweep<'a> {
     /// the server is generated, its query struct checks the constraints of such
     /// a schema, so the note about unchecked constraints does not apply to it.
     query_schemas: Vec<String>,
+    /// The paths of the schemas that sit directly in a parameter, of any kind.
+    /// The parameter lowering reads the type and not `x-rust-type`, so such a
+    /// schema replaces nothing even when it carries the extension.
+    parameter_schemas: Vec<String>,
     /// The paths of the property schemas that hold a same-document `$ref` and
     /// a `description` beside it. See [`wrap_described_refs`].
     described_refs: Vec<String>,
@@ -466,6 +470,7 @@ fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
         removed_at: None,
         replaced_at: None,
         query_schemas: Vec::new(),
+        parameter_schemas: Vec::new(),
         described_refs: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
@@ -510,9 +515,13 @@ impl Sweep<'_> {
         if removed_here {
             self.removed_at = Some(depth);
         }
+        if context == Context::Parameter {
+            self.parameter_schemas.push(pointer(path, "schema"));
+        }
         let replaces_here = matches!(context, Context::Schema | Context::PropertySchema)
             && value.get("x-rust-type").is_some()
-            && self.replaced_at.is_none();
+            && self.replaced_at.is_none()
+            && !self.parameter_schemas.iter().any(|schema| return schema == path);
         if replaces_here {
             self.replaced_at = Some(depth);
         }
@@ -736,7 +745,11 @@ impl Sweep<'_> {
     }
 
     fn schema_notes(&mut self, value: &Value, context: Context, path: &str) {
-        if value.get("x-rust-type").is_some() && value.get("allOf").is_some() {
+        // Below a replaced schema nothing is lowered, so a note about what the
+        // lowering would not enforce there would mislead. The replacing schema's
+        // own notes stay.
+        let lowered = self.replaced_at.is_none();
+        if lowered && value.get("x-rust-type").is_some() && value.get("allOf").is_some() {
             self.warn(
                 path,
                 "constraints inherited through allOf are not enforced for x-rust-type",
@@ -764,7 +777,8 @@ impl Sweep<'_> {
                     "this nullable default has no supported Rust literal and is ignored",
                 );
             }
-            if crate::lower::constraints::unsupported_nullable_constraints(&schema)
+            if lowered
+                && crate::lower::constraints::unsupported_nullable_constraints(&schema)
                 && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some())
             {
                 self.warn(path, "constraints on this nullable value type are not enforced");
@@ -1207,6 +1221,45 @@ security: [{arbitrary: [custom]}]
     /// unchecked constraint already name every place where that read differs
     /// from the document. So a union carries no note of its own.
     #[test]
+    fn notes_about_the_lowering_are_quiet_below_a_replaced_schema() {
+        for (item, message) in [
+            (
+                "{type: string, format: date, nullable: true, maxLength: 3}",
+                "constraints on this nullable value type are not enforced",
+            ),
+            (
+                "{x-rust-type: 'crate::Inner', allOf: [{type: string, maxLength: 3}]}",
+                "constraints inherited through allOf are not enforced for x-rust-type",
+            ),
+        ] {
+            let below = inspect_yaml(&format!(
+                "components: {{schemas: {{Stamp: {{x-rust-type: 'crate::Stamp', type: array, items: {item}}}}}}}"
+            ));
+            assert!(below.problems.is_empty(), "{item}");
+            assert!(
+                !below
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                below.warnings
+            );
+            // The same item under a plain array is lowered, so it keeps the note.
+            let lowered = inspect_yaml(&format!(
+                "components: {{schemas: {{Stamps: {{type: array, items: {item}}}}}}}"
+            ));
+            assert!(
+                lowered
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                lowered.warnings
+            );
+        }
+    }
+
+    #[test]
     fn a_union_carries_no_note_of_its_own() {
         for schema in [
             "{oneOf: [{type: string}, {type: integer}]}",
@@ -1332,6 +1385,16 @@ security: [{arbitrary: [custom]}]
             ),
             (
                 component("{x-rust-type: 'crate::Stamp', type: string, pattern: '^a$'}"),
+                true,
+            ),
+            // The parameter lowering reads the type and not the extension, so a
+            // query schema with `x-rust-type` replaces nothing, and its items
+            // keep their note.
+            (
+                parameter(
+                    "query",
+                    "{x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}",
+                ),
                 true,
             ),
         ] {
