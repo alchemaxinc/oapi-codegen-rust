@@ -10,17 +10,20 @@ use crate::error::Result;
 use crate::lower::validate::Diagnostics;
 
 const MAX_DEPTH: usize = 128;
-/// The component schemas that a parameter or a form body names through `$ref`,
-/// as the paths of those schemas, each with the segments the lowering follows
-/// below it by type.
+/// The component schemas that a parameter or a multipart body names through
+/// `$ref`, as the paths of those schemas, each with the segments the lowering
+/// follows below it by type.
 ///
-/// A parameter may itself be a `$ref` to a component parameter, and a request
-/// body a `$ref` to a component request body; each is followed one step. A
-/// component schema that is itself a `$ref` is an alias, and the lowering
-/// resolves an alias chain, so every name on the chain is collected. The
-/// lowering of a parameter and of a form body reads the component by type even
-/// when a model names it too, so the model use does not lift the mark.
-fn referenced_by_type(document: &Value) -> Vec<ReadByType> {
+/// Only an operation the run keeps is read: the filters remove the others
+/// before anything is lowered, and a path item's own parameters are read only
+/// while one of its operations stays. A parameter that is a `$ref` to a
+/// component parameter, and a request body that is a `$ref` to a component
+/// request body, are followed the way the resolver follows them. A component
+/// schema that is itself a `$ref` is an alias, and the lowering resolves an
+/// alias chain, so every name on the chain is collected. The lowering of a
+/// parameter and of a multipart body reads the component by type even when a
+/// model names it too, so the model use does not lift the mark.
+fn referenced_by_type(document: &Value, run: &Run) -> Vec<ReadByType> {
     let mut targets = Vec::new();
     let paths = document
         .get("paths")
@@ -28,40 +31,41 @@ fn referenced_by_type(document: &Value) -> Vec<ReadByType> {
         .into_iter()
         .flat_map(|paths| return paths.values());
     for item in paths {
-        targets.extend(parameter_targets(document, item.get("parameters")));
-        for method in OPERATION_KEYS {
-            let operation = item.get(*method);
-            targets.extend(parameter_targets(
-                document,
-                operation.and_then(|operation| return operation.get("parameters")),
-            ));
-            targets.extend(form_body_targets(
-                document,
-                operation.and_then(|operation| return operation.get("requestBody")),
-            ));
+        let kept: Vec<&Value> = OPERATION_KEYS
+            .iter()
+            .filter_map(|method| return item.get(*method))
+            .filter(|operation| return !run_removes(run, operation))
+            .collect();
+        if kept.is_empty() {
+            continue;
         }
-    }
-    let component_parameters = component_map(document, "parameters")
-        .into_iter()
-        .flat_map(|parameters| return parameters.values());
-    for parameter in component_parameters {
-        if let Some(reference) = schema_reference(Some(parameter)) {
-            targets.extend(alias_chain(document, reference).map(ReadByType::through_collections));
+        targets.extend(parameter_targets(document, item.get("parameters")));
+        for operation in kept {
+            targets.extend(parameter_targets(document, operation.get("parameters")));
+            targets.extend(multipart_body_targets(document, operation.get("requestBody")));
         }
     }
     return targets;
 }
 
+/// Whether the filters of `run` remove `operation`.
+fn run_removes(run: &Run, operation: &Value) -> bool {
+    let tags: Vec<String> = operation
+        .get("tags")
+        .and_then(Value::as_sequence)
+        .map(|tags| return tags.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .unwrap_or_default();
+    let id = operation.get("operationId").and_then(Value::as_str);
+    return crate::filter::removes_operation(&run.filters, &tags, id);
+}
+
 /// The schemas the parameters in `parameters` name, each read through its
 /// collections. A parameter that is a `$ref` to a component parameter is
-/// followed one step.
+/// followed the way the resolver follows it.
 fn parameter_targets(document: &Value, parameters: Option<&Value>) -> Vec<ReadByType> {
     let mut targets = Vec::new();
     for parameter in parameters.and_then(Value::as_sequence).into_iter().flatten() {
-        let parameter = match parameter.get("$ref").and_then(Value::as_str) {
-            Some(reference) => component(document, "parameters", reference),
-            None => Some(parameter),
-        };
+        let parameter = follow_component_references(document, "parameters", parameter);
         if let Some(reference) = schema_reference(parameter) {
             targets.extend(alias_chain(document, reference).map(ReadByType::through_collections));
         }
@@ -69,28 +73,35 @@ fn parameter_targets(document: &Value, parameters: Option<&Value>) -> Vec<ReadBy
     return targets;
 }
 
-/// The schemas a form body names, each read through its properties. A body
-/// that is a `$ref` to a component request body is followed one step.
-fn form_body_targets(document: &Value, body: Option<&Value>) -> Vec<ReadByType> {
-    let body = match body.and_then(|body| return body.get("$ref")).and_then(Value::as_str) {
-        Some(reference) => component(document, "requestBodies", reference),
-        None => body,
-    };
-    let mut targets = Vec::new();
-    for media in FORM_MEDIA_TYPES {
-        let media = body
-            .and_then(|body| return body.get("content"))
-            .and_then(|content| return content.get(*media));
-        if let Some(reference) = schema_reference(media) {
-            targets.extend(alias_chain(document, reference).map(ReadByType::through_properties));
-        }
-    }
-    return targets;
+/// The schema a multipart body names, read through its properties. A body
+/// that is a `$ref` to a component request body is followed the way the
+/// resolver follows it. A form-encoded body is not included: that lowering
+/// reuses the named model, which reads `x-rust-type`.
+fn multipart_body_targets(document: &Value, body: Option<&Value>) -> Vec<ReadByType> {
+    let body = body.and_then(|body| return follow_component_references(document, "requestBodies", body));
+    let media = body
+        .and_then(|body| return body.get("content"))
+        .and_then(|content| return content.get(MULTIPART_MEDIA_TYPE));
+    return schema_reference(media)
+        .map(|reference| {
+            return alias_chain(document, reference)
+                .map(ReadByType::through_properties)
+                .collect();
+        })
+        .unwrap_or_default();
 }
 
-/// The `components.<kind>` map of the document.
-fn component_map<'a>(document: &'a Value, kind: &str) -> Option<&'a serde_yaml::Mapping> {
-    return document.get("components")?.get(kind)?.as_mapping();
+/// `value`, or the component of `kind` it names when it is a `$ref`, following
+/// a chain of such references the way the resolver does, up to its depth.
+fn follow_component_references<'a>(document: &'a Value, kind: &str, value: &'a Value) -> Option<&'a Value> {
+    let mut current = value;
+    for _ in 0..crate::loader::MAX_REF_DEPTH {
+        let Some(reference) = current.get("$ref").and_then(Value::as_str) else {
+            return Some(current);
+        };
+        current = component(document, kind, reference)?;
+    }
+    return None;
 }
 
 /// The component of `kind` that a same-document `reference` names.
@@ -122,15 +133,16 @@ fn alias_chain<'a>(document: &'a Value, reference: &str) -> impl Iterator<Item =
     });
 }
 
-/// The media types whose body the form lowering reads field by field, by type.
-const FORM_MEDIA_TYPES: &[&str] = &["multipart/form-data", "application/x-www-form-urlencoded"];
+/// The media type whose body the multipart lowering reads field by field, by
+/// type. A form-encoded body reuses the named model instead.
+const MULTIPART_MEDIA_TYPE: &str = "multipart/form-data";
 
 /// A schema the lowering reads by type, and how far below it that read goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReadByType {
     /// The path of the schema.
     root: String,
-    /// Whether the read also enters each property, as the form lowering does.
+    /// Whether the read also enters each property, as the multipart lowering does.
     /// The other reads enter only `items`, `additionalProperties`, and a
     /// one-member `allOf`.
     through_properties: bool,
@@ -637,7 +649,7 @@ fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
         removed_at: None,
         replaced_at: None,
         query_schemas: Vec::new(),
-        read_by_type: referenced_by_type(value),
+        read_by_type: referenced_by_type(value, run),
         described_refs: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
@@ -687,9 +699,7 @@ impl Sweep<'_> {
                 .push(ReadByType::through_collections(pointer(path, "schema")));
         }
         if context == Context::MediaType {
-            let form = FORM_MEDIA_TYPES
-                .iter()
-                .any(|media| return path.ends_with(&pointer("", media)));
+            let form = path.ends_with(&pointer("", MULTIPART_MEDIA_TYPE));
             self.read_by_type.push(if form {
                 ReadByType::through_properties(pointer(path, "schema"))
             } else {
@@ -791,13 +801,7 @@ impl Sweep<'_> {
 
     /// Whether the run's filters remove this operation.
     fn run_removes(&self, operation: &Value) -> bool {
-        let tags: Vec<String> = operation
-            .get("tags")
-            .and_then(Value::as_sequence)
-            .map(|tags| return tags.iter().filter_map(Value::as_str).map(str::to_owned).collect())
-            .unwrap_or_default();
-        let id = operation.get("operationId").and_then(Value::as_str);
-        return crate::filter::removes_operation(&self.run.filters, &tags, id);
+        return run_removes(self.run, operation);
     }
 
     fn walk(&mut self, value: &Value, traversal: Traversal, path: &str, depth: usize) {
@@ -1429,17 +1433,34 @@ security: [{arbitrary: [custom]}]
                 "{item}: {:?}",
                 below.warnings
             );
-            // A form body reads the component and its properties by type, so
-            // the note stays there even under the extension.
-            let form = inspect_yaml(&format!(
-                "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{multipart/form-data: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{schemas: {{Form: {{x-rust-type: 'crate::Form', type: object, properties: {{field: {item}}}}}}}}}"
+            // A multipart body reads the component and its properties by type,
+            // so the note stays there even under the extension, also when the
+            // body is reached through a chain of component request bodies. A
+            // form-encoded body reuses the model, which reads the extension.
+            let schemas = format!(
+                "schemas: {{Form: {{x-rust-type: 'crate::Form', type: object, properties: {{field: {item}}}}}}}"
+            );
+            let multipart = inspect_yaml(&format!(
+                "paths: {{/a: {{post: {{requestBody: {{$ref: '#/components/requestBodies/Outer'}}, responses: {{}}}}}}}}\ncomponents: {{requestBodies: {{Outer: {{$ref: '#/components/requestBodies/Inner'}}, Inner: {{required: true, content: {{multipart/form-data: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}}}, {schemas}}}"
             ));
             assert!(
-                form.warnings
+                multipart
+                    .warnings
                     .iter()
                     .any(|warning| return warning.message.contains(message)),
                 "{item}: {:?}",
-                form.warnings
+                multipart.warnings
+            );
+            let encoded = inspect_yaml(&format!(
+                "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{application/x-www-form-urlencoded: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{{schemas}}}"
+            ));
+            assert!(
+                !encoded
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                encoded.warnings
             );
             // The same item under a plain array is lowered, so it keeps the note.
             let lowered = inspect_yaml(&format!(
@@ -1700,8 +1721,14 @@ security: [{arbitrary: [custom]}]
         };
         assert!(!filtered(tagged, OutputOptions::default()));
         assert!(filtered(tagged, exclude.clone()));
-        assert!(!filtered(shared, exclude));
+        assert!(!filtered(shared, exclude.clone()));
         assert!(filtered(shared, exclude_both));
+
+        // A parameter in a removed operation reads nothing, so the custom type
+        // model it names keeps its replacement and loses the note.
+        let referenced = "paths: {/a: {get: {operationId: getA, tags: [internal], parameters: [{name: n, in: query, schema: {$ref: '#/components/schemas/Stamp'}}], responses: {}}}}\ncomponents: {schemas: {Stamp: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}}}";
+        assert!(filtered(referenced, OutputOptions::default()));
+        assert!(!filtered(referenced, exclude));
     }
 
     #[test]
