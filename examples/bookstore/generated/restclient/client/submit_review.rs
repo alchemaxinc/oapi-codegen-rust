@@ -52,9 +52,9 @@ impl Client {
             let body = if content_type == "application/json"
                 || content_type.ends_with("+json")
             {
-                SubmitReviewResponseCreatedBody::Json(response.json()?)
+                SubmitReviewCreatedBody::Json(response.json()?)
             } else if content_type == "text/plain" {
-                SubmitReviewResponseCreatedBody::Text(response.text()?)
+                SubmitReviewCreatedBody::Text(response.text()?)
             } else {
                 return Err(ClientError::UnexpectedContentType(content_type));
             };

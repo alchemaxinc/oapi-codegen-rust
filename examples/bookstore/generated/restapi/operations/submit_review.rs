@@ -16,7 +16,7 @@ pub enum SubmitReviewRequestBody {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SubmitReviewResponseCreatedBody {
+pub enum SubmitReviewCreatedBody {
     Json(crate::apimodel::catalog::Review),
     Text(String),
 }
@@ -25,7 +25,7 @@ pub enum SubmitReviewResponseCreatedBody {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubmitReviewResponse {
     /// The review was stored; returned as JSON or plain text.
-    Created(SubmitReviewResponseCreatedBody),
+    Created(SubmitReviewCreatedBody),
     /// No resource matched the request.
     NotFound,
 }

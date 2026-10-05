@@ -78,12 +78,10 @@ impl axum::response::IntoResponse for SubmitReviewResponse {
                     Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
                 };
                 match body {
-                    SubmitReviewResponseCreatedBody::Json(body) => {
+                    SubmitReviewCreatedBody::Json(body) => {
                         (STATUS, axum::Json(body)).into_response()
                     }
-                    SubmitReviewResponseCreatedBody::Text(body) => {
-                        (STATUS, body).into_response()
-                    }
+                    SubmitReviewCreatedBody::Text(body) => (STATUS, body).into_response(),
                 }
             }
             SubmitReviewResponse::NotFound => {
