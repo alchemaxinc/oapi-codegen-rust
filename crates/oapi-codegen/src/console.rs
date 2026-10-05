@@ -187,6 +187,20 @@ pub fn report_drift(path: &Path, kind: DriftKind) {
     );
 }
 
+/// Report that `--deny-warnings` stopped the run. The warnings themselves are
+/// already on stderr, above this line.
+pub fn report_denied_warnings(count: usize) {
+    let noun = if count == 1 { "warning" } else { "warnings" };
+    eprintln!(
+        "{} the run reported {count} {noun}, and `--deny-warnings` is set.",
+        "error:".red().bold()
+    );
+    eprintln!(
+        "  {} change the spec or the configuration until no warning is left. Nothing was written.",
+        "hint:".cyan().bold()
+    );
+}
+
 /// After a successful write, list the external crates the generated code
 /// references so the consumer can add them to `Cargo.toml` — Cargo does not
 /// infer them from `use` paths the way `go mod tidy` does. Prints nothing when

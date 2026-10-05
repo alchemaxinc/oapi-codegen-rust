@@ -144,8 +144,11 @@ fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>, depth: 
             ReferenceOr::Item(schema) => schema.clone(),
             ReferenceOr::Reference { reference } => spec.resolve(reference)?.clone(),
         };
+        // A description beside the wrapper documents the field and changes no
+        // value, so two wrappers that differ only in it still name one schema.
         let mut data = schema.schema_data.clone();
         data.nullable = false;
+        data.description = None;
         if data != openapiv3::SchemaData::default() {
             return Err(unsupported(
                 path,
@@ -153,6 +156,11 @@ fn resolve(spec: &Spec, path: &str, property: &ReferenceOr<Box<Schema>>, depth: 
             ));
         }
         target.schema_data.nullable |= schema.schema_data.nullable;
+        // The note beside the property wins over the target's own, as on a
+        // plain field.
+        if let Some(description) = schema.schema_data.description.take() {
+            target.schema_data.description = Some(description);
+        }
         schema = target;
     }
     return Err(Error::SchemaDepthExceeded {
@@ -168,6 +176,146 @@ fn resolve_reference<'a>(spec: &'a Spec, property: &'a ReferenceOr<Box<Schema>>)
     };
 }
 
+/// The bare `$ref` behind a one-member `allOf` that adds a description and
+/// nothing else. Such a wrapper names the same schema as the `$ref`, so two
+/// members that overlap on it agree. A wrapper with no description is left to
+/// the paths below, which already read it.
+fn described_reference(property: &ReferenceOr<Box<Schema>>) -> Option<ReferenceOr<Box<Schema>>> {
+    let ReferenceOr::Item(schema) = property else {
+        return None;
+    };
+    let reference = crate::loader::single_ref_member(schema)?;
+    let mut data = schema.schema_data.clone();
+    data.description.take()?;
+    if data != openapiv3::SchemaData::default() {
+        return None;
+    }
+    return Some(ReferenceOr::Reference {
+        reference: reference.to_owned(),
+    });
+}
+
+/// `property` with no description, for a comparison that a description must
+/// not decide.
+fn without_description(property: &ReferenceOr<Box<Schema>>) -> ReferenceOr<Box<Schema>> {
+    let mut stripped = property.clone();
+    if let ReferenceOr::Item(schema) = &mut stripped {
+        strip_descriptions(schema);
+    }
+    return stripped;
+}
+
+/// Remove every description from `schema` and from each schema written inside
+/// it. A description beside a nested property's `$ref` becomes a wrapper around
+/// that `$ref` when the document loads, so the wrapper that then holds nothing
+/// else becomes the bare `$ref` again. Two schemas that differ only in such a
+/// note then compare equal.
+fn strip_descriptions(schema: &mut Schema) {
+    schema.schema_data.description = None;
+    let mut strip_boxed = |entry: &mut ReferenceOr<Box<Schema>>| {
+        if let ReferenceOr::Item(inner) = entry {
+            strip_descriptions(inner);
+            if let Some(reference) = bare_wrapper_target(inner) {
+                *entry = ReferenceOr::Reference { reference };
+            }
+        }
+    };
+    match &mut schema.schema_kind {
+        SchemaKind::Type(Type::Object(object)) => {
+            object.properties.values_mut().for_each(&mut strip_boxed);
+            if let Some(AdditionalProperties::Schema(inner)) = &mut object.additional_properties
+                && let ReferenceOr::Item(inner) = inner.as_mut()
+            {
+                strip_descriptions(inner);
+            }
+        }
+        SchemaKind::Type(Type::Array(array)) => {
+            if let Some(items) = &mut array.items {
+                strip_boxed(items);
+            }
+        }
+        SchemaKind::Type(_) => {}
+        SchemaKind::OneOf { one_of: members }
+        | SchemaKind::AllOf { all_of: members }
+        | SchemaKind::AnyOf { any_of: members } => {
+            for member in members {
+                if let ReferenceOr::Item(inner) = member {
+                    strip_descriptions(inner);
+                    if let Some(reference) = bare_wrapper_target(inner) {
+                        *member = ReferenceOr::Reference { reference };
+                    }
+                }
+            }
+        }
+        SchemaKind::Not { not } => {
+            if let ReferenceOr::Item(inner) = not.as_mut() {
+                strip_descriptions(inner);
+            }
+        }
+        SchemaKind::Any(any) => {
+            any.properties.values_mut().for_each(&mut strip_boxed);
+            if let Some(AdditionalProperties::Schema(inner)) = &mut any.additional_properties
+                && let ReferenceOr::Item(inner) = inner.as_mut()
+            {
+                strip_descriptions(inner);
+            }
+            if let Some(items) = &mut any.items {
+                strip_boxed(items);
+            }
+            for member in any
+                .one_of
+                .iter_mut()
+                .chain(any.all_of.iter_mut())
+                .chain(any.any_of.iter_mut())
+            {
+                if let ReferenceOr::Item(inner) = member {
+                    strip_descriptions(inner);
+                }
+            }
+            if let Some(not) = &mut any.not
+                && let ReferenceOr::Item(inner) = not.as_mut()
+            {
+                strip_descriptions(inner);
+            }
+        }
+    }
+}
+
+/// The `$ref` a one-member `allOf` wraps when, with its description gone, the
+/// wrapper adds nothing else to it.
+fn bare_wrapper_target(schema: &Schema) -> Option<String> {
+    let reference = crate::loader::single_ref_member(schema)?;
+    if schema.schema_data != openapiv3::SchemaData::default() {
+        return None;
+    }
+    return Some(reference.to_owned());
+}
+
+/// Put `description` on `property`. The note written beside the property wins
+/// over the description of the schema it names, as it does on a plain field. A
+/// bare `$ref` cannot hold one, so it becomes the one-member `allOf` that
+/// OpenAPI 3.0 gives for this.
+fn describe(property: ReferenceOr<Box<Schema>>, description: Option<String>) -> ReferenceOr<Box<Schema>> {
+    let Some(description) = description else {
+        return property;
+    };
+    return match property {
+        ReferenceOr::Item(mut schema) => {
+            schema.schema_data.description = Some(description);
+            ReferenceOr::Item(schema)
+        }
+        ReferenceOr::Reference { reference } => ReferenceOr::Item(Box::new(Schema {
+            schema_data: openapiv3::SchemaData {
+                description: Some(description),
+                ..openapiv3::SchemaData::default()
+            },
+            schema_kind: SchemaKind::AllOf {
+                all_of: vec![ReferenceOr::Reference { reference }],
+            },
+        })),
+    };
+}
+
 fn intersect(
     spec: &Spec,
     path: &str,
@@ -175,38 +323,78 @@ fn intersect(
     right: &ReferenceOr<Box<Schema>>,
     depth: usize,
 ) -> Result<ReferenceOr<Box<Schema>>> {
-    if left == right
+    let left_bare = described_reference(left);
+    let right_bare = described_reference(right);
+    if left_bare.is_some() || right_bare.is_some() {
+        let bare_left = left_bare.as_ref().unwrap_or(left);
+        let bare_right = right_bare.as_ref().unwrap_or(right);
+        if bare_left == bare_right {
+            // The side that documents the field wins, so the description survives.
+            return Ok(if left_bare.is_some() {
+                left.clone()
+            } else {
+                right.clone()
+            });
+        }
+        // The two name different schemas, so the usual rules decide, and the
+        // description of a wrapper is put back on what they decide.
+        let described = if left_bare.is_some() { left } else { right };
+        let description = match described {
+            ReferenceOr::Item(schema) => schema.schema_data.description.clone(),
+            ReferenceOr::Reference { .. } => None,
+        };
+        return Ok(describe(
+            intersect(spec, path, bare_left, bare_right, depth)?,
+            description,
+        ));
+    }
+    // Two wrappers that differ only in their description name one schema, and
+    // the one that documents the field is kept.
+    if without_description(left) == without_description(right)
         && match left {
             ReferenceOr::Reference { .. } => true,
             ReferenceOr::Item(schema) => matches!(schema.schema_kind, SchemaKind::AllOf { .. }),
         }
     {
-        return Ok(left.clone());
+        let left_described = matches!(left, ReferenceOr::Item(schema) if schema.schema_data.description.is_some());
+        return Ok(if left_described { left.clone() } else { right.clone() });
     }
+    // The description of an inline operand documents the field, and a `$ref`
+    // carries none, so it goes back on whichever side the branches below pick.
+    let inline_description = [left, right].into_iter().find_map(|property| {
+        return match property {
+            ReferenceOr::Item(schema) => schema.schema_data.description.clone(),
+            ReferenceOr::Reference { .. } => None,
+        };
+    });
     let resolved_left = resolve_reference(spec, left)?;
     let resolved_right = resolve_reference(spec, right)?;
     if matches!(&resolved_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
-        && resolved_left == resolved_right
+        && without_description(&ReferenceOr::Item(Box::new(resolved_left.clone())))
+            == without_description(&ReferenceOr::Item(Box::new(resolved_right.clone())))
     {
-        return Ok(match (left, right) {
+        let chosen = match (left, right) {
             (ReferenceOr::Reference { .. }, _) => left.clone(),
             (_, ReferenceOr::Reference { .. }) => right.clone(),
             _ => left.clone(),
-        });
+        };
+        return Ok(describe(chosen, inline_description));
     }
     let normalized_left = resolve(spec, path, left, depth)?;
     let normalized_right = resolve(spec, path, right, depth)?;
     if matches!(normalized_left.schema_kind, SchemaKind::AllOf { .. })
         || matches!(normalized_right.schema_kind, SchemaKind::AllOf { .. })
     {
-        if normalized_left == normalized_right
+        if without_description(&ReferenceOr::Item(Box::new(normalized_left.clone())))
+            == without_description(&ReferenceOr::Item(Box::new(normalized_right.clone())))
             && matches!(&normalized_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
         {
-            return Ok(match (left, right) {
+            let chosen = match (left, right) {
                 (ReferenceOr::Reference { .. }, _) => left.clone(),
                 (_, ReferenceOr::Reference { .. }) => right.clone(),
                 _ => ReferenceOr::Item(Box::new(normalized_left)),
-            });
+            };
+            return Ok(describe(chosen, inline_description));
         }
         return Err(unsupported(path, "overlapping composed properties are not supported"));
     }
@@ -215,12 +403,18 @@ fn intersect(
     let nullable = left.schema_data.nullable && right.schema_data.nullable;
     left.schema_data.nullable = nullable;
     right.schema_data.nullable = nullable;
+    // A description changes no value, so two members that differ only in it
+    // still agree. The first one stays on the result.
+    let left_description = left.schema_data.description.take();
+    let right_description = right.schema_data.description.take();
+    let description = left_description.or(right_description);
     if left.schema_data != right.schema_data {
         return Err(unsupported(
             path,
             "overlapping properties have different metadata or extensions",
         ));
     }
+    left.schema_data.description = description;
     if left.schema_data.extensions.contains_key("x-rust-type") {
         if left.schema_kind != right.schema_kind {
             return Err(unsupported(path, "custom-type property constraints differ"));
@@ -464,10 +658,21 @@ mod tests {
                 );
             }
         }
+        // A description changes no value, so two composites that differ only in
+        // it still name one schema.
+        let described = json!({"description":"different","allOf":composed["allOf"]});
+        let described_spec = spec(json!({"A":composed,"B":described}));
+        let left: ReferenceOr<Box<Schema>> = serde_json::from_value(direct.clone()).expect("left");
+        let right: ReferenceOr<Box<Schema>> = serde_json::from_value(alias.clone()).expect("right");
+        for (left, right) in [(&left, &right), (&right, &left)] {
+            assert_eq!(
+                &intersect(&described_spec, "Test.value", left, right, 0).expect("intersection"),
+                left
+            );
+        }
         for changed in [
             json!({"allOf":[{"type":"object"},{"type":"object"}]}),
             json!({"nullable":true,"allOf":composed["allOf"]}),
-            json!({"description":"different","allOf":composed["allOf"]}),
             json!({"x-rust-type":"serde_json::Value","allOf":composed["allOf"]}),
         ] {
             let spec = spec(json!({"A":composed,"B":changed}));
@@ -520,8 +725,19 @@ mod tests {
                 );
             }
         }
+        // A description changes no value, so a wrapper that only adds one still
+        // names the same schema.
+        let described = json!({"description":"different","allOf":wrapper["allOf"]});
+        let described_spec = spec(json!({"Composite":composite,"A":wrapper,"B":described}));
+        let left: ReferenceOr<Box<Schema>> = serde_json::from_value(reference_a.clone()).expect("left");
+        let right: ReferenceOr<Box<Schema>> = serde_json::from_value(reference_b.clone()).expect("right");
+        for (left, right) in [(&left, &right), (&right, &left)] {
+            assert_eq!(
+                &intersect(&described_spec, "Test.value", left, right, 0).expect("intersection"),
+                left
+            );
+        }
         for changed in [
-            json!({"description":"different","allOf":wrapper["allOf"]}),
             json!({"nullable":true,"allOf":wrapper["allOf"]}),
             json!({"x-rust-type":"serde_json::Value","allOf":wrapper["allOf"]}),
         ] {

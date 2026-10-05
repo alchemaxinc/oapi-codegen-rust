@@ -10,6 +10,9 @@ use crate::error::Result;
 use crate::lower::validate::Diagnostics;
 
 const MAX_DEPTH: usize = 128;
+/// The keys of a path item that hold an operation.
+const OPERATION_KEYS: &[&str] = &["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+
 const CONSTRAINT_KEYS: &[&str] = &[
     "multipleOf",
     "maximum",
@@ -357,23 +360,108 @@ impl Context {
     }
 }
 
+/// What a run generates and keeps, as far as the inspection needs to know.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Run {
+    /// Whether the run generates the server. Only the server reads a query
+    /// parameter, so only it checks the constraints of one.
+    pub(crate) server: bool,
+    /// The filters the run applies. An operation they remove generates no
+    /// query struct, so nothing checks its parameters.
+    pub(crate) filters: crate::config::OutputOptions,
+}
+
 struct Sweep<'a> {
     document: &'a str,
     warnings: Vec<Warning>,
     problems: Diagnostics,
+    run: &'a Run,
+    /// The depth of the operation, or path item, that the run's filters remove,
+    /// while the walk is inside it.
+    removed_at: Option<usize>,
+    /// The paths of the schemas that sit directly in a query parameter. When
+    /// the server is generated, its query struct checks the constraints of such
+    /// a schema, so the note about unchecked constraints does not apply to it.
+    query_schemas: Vec<String>,
+    /// The paths of the property schemas that hold a same-document `$ref` and
+    /// a `description` beside it. See [`wrap_described_refs`].
+    described_refs: Vec<String>,
 }
 
-pub(crate) fn check(document: &str, value: &Value) -> Result<()> {
-    let sweep = inspect(document, value);
+/// Check `value` against what the generator reads, and report every warning.
+///
+/// `run` states what the run generates and keeps, which decides whether a
+/// query parameter's constraints are checked.
+///
+/// The paths this returns are for [`wrap_described_refs`].
+pub(crate) fn check(document: &str, value: &Value, run: &Run) -> Result<Vec<String>> {
+    let sweep = inspect(document, value, run);
     report_warnings(document, &sweep.warnings);
-    return sweep.problems.into_result();
+    sweep.problems.into_result()?;
+    return Ok(sweep.described_refs);
 }
 
-fn inspect<'a>(document: &'a str, value: &Value) -> Sweep<'a> {
+/// Keep the `description` that sits beside a property's `$ref`.
+///
+/// OpenAPI 3.0 ignores every keyword beside a `$ref`, and the typed parse drops
+/// them. A description changes no value and no type, and its loss leaves a
+/// generated field with no documentation. So each such property becomes the
+/// form OpenAPI 3.0 gives for this, a one-member `allOf` with the description
+/// beside it. Any other keyword beside the `$ref` stays ignored.
+///
+/// `paths` comes from [`check`] on the same `value`.
+pub(crate) fn wrap_described_refs(value: &mut Value, paths: &[String]) {
+    for path in paths {
+        let Some(node) = node_at(value, path) else {
+            continue;
+        };
+        let (Some(reference), Some(description)) = (node.get("$ref").cloned(), node.get("description").cloned()) else {
+            continue;
+        };
+        let mut member = serde_yaml::Mapping::new();
+        member.insert(Value::from("$ref"), reference);
+        let mut wrapper = serde_yaml::Mapping::new();
+        wrapper.insert(Value::from("allOf"), Value::Sequence(vec![Value::Mapping(member)]));
+        wrapper.insert(Value::from("description"), description);
+        *node = Value::Mapping(wrapper);
+    }
+}
+
+/// The node a path from this sweep names.
+///
+/// A key is looked up by its text. The sweep writes a numeric response code as
+/// text too, and YAML reads `200:` as a number, so a token that no text key
+/// holds is tried as the text of a number key.
+fn node_at<'a>(value: &'a mut Value, path: &str) -> Option<&'a mut Value> {
+    let mut node = value;
+    for token in path.split('/').skip(1) {
+        let token = token.replace("~1", "/").replace("~0", "~");
+        node = match node {
+            Value::Mapping(mapping) => {
+                if mapping.contains_key(token.as_str()) {
+                    mapping.get_mut(token.as_str())?
+                } else {
+                    mapping.iter_mut().find_map(|(key, child)| {
+                        return matches!(key, Value::Number(key) if key.to_string() == token).then_some(child);
+                    })?
+                }
+            }
+            Value::Sequence(sequence) => sequence.get_mut(token.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
+    }
+    return Some(node);
+}
+
+fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
     let mut sweep = Sweep {
         document,
         warnings: Vec::new(),
         problems: Diagnostics::new(),
+        run,
+        removed_at: None,
+        query_schemas: Vec::new(),
+        described_refs: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
     return sweep;
@@ -402,6 +490,40 @@ impl Sweep<'_> {
             return;
         };
         let reference = context.references() && mapping.contains_key("$ref");
+        // An operation the filters remove, or a path item with no operation
+        // left, generates no query struct, so nothing checks its parameters.
+        let removed_here = self.removed_at.is_none()
+            && match context {
+                Context::Operation => self.run_removes(value),
+                Context::PathItem => !OPERATION_KEYS.iter().any(|method| {
+                    return value
+                        .get(*method)
+                        .is_some_and(|operation| return !self.run_removes(operation));
+                }),
+                _ => false,
+            };
+        if removed_here {
+            self.removed_at = Some(depth);
+        }
+        if context == Context::Parameter
+            && value.get("in").and_then(Value::as_str) == Some("query")
+            && self.removed_at.is_none()
+        {
+            self.query_schemas.push(pointer(path, "schema"));
+        }
+        // The loader keeps this description, so it is not an ignored sibling.
+        // A cross-file `$ref` does not resolve at a property, so nothing is kept
+        // for one.
+        let described = reference
+            && context == Context::PropertySchema
+            && value.get("description").is_some_and(Value::is_string)
+            && value
+                .get("$ref")
+                .and_then(Value::as_str)
+                .is_some_and(|target| return target.starts_with("#/"));
+        if described {
+            self.described_refs.push(path.to_owned());
+        }
         for (key, child) in mapping {
             let key = match key {
                 Value::String(key) => key.clone(),
@@ -418,7 +540,7 @@ impl Sweep<'_> {
                 }
                 continue;
             }
-            if reference && context != Context::PathItem {
+            if reference && context != Context::PathItem && !(described && key == "description") {
                 self.warn(&at, "siblings of $ref are ignored in OpenAPI 3.0");
             }
             if key.starts_with("x-") {
@@ -452,6 +574,20 @@ impl Sweep<'_> {
         if !reference {
             self.object_notes(value, context, path);
         }
+        if removed_here {
+            self.removed_at = None;
+        }
+    }
+
+    /// Whether the run's filters remove this operation.
+    fn run_removes(&self, operation: &Value) -> bool {
+        let tags: Vec<String> = operation
+            .get("tags")
+            .and_then(Value::as_sequence)
+            .map(|tags| return tags.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default();
+        let id = operation.get("operationId").and_then(Value::as_str);
+        return crate::filter::removes_operation(&self.run.filters, &tags, id);
     }
 
     fn walk(&mut self, value: &Value, traversal: Traversal, path: &str, depth: usize) {
@@ -539,10 +675,17 @@ impl Sweep<'_> {
         }
         if matches!(context, Context::Schema | Context::PropertySchema) {
             match key {
-                "oneOf" | "anyOf" => self.warn(
-                    path,
-                    "Rust deserialization checks do not enforce all schema constraints, which can affect union match counts",
-                ),
+                // A `oneOf` asks for exactly one match. Two members that read the
+                // same, apart from their descriptions, match the same values, so
+                // the document admits no value of that shape. This is a fact
+                // about the document, so it holds under `x-rust-type` too, where
+                // the custom type and not generated code reads the value.
+                "oneOf" if value.as_sequence().is_some_and(repeats_a_member) => {
+                    self.warn(
+                        path,
+                        "two members of this oneOf are the same schema, so no value of that shape matches exactly one of them as the document requires",
+                    );
+                }
                 "default" if value.is_null() => {
                     self.warn(
                         path,
@@ -620,7 +763,11 @@ impl Sweep<'_> {
                 format!("`{kind}` is not an OpenAPI 3.0 schema type"),
             );
         }
-        if context == Context::Schema && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some()) {
+        if context == Context::Schema
+            && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some())
+            && !self.checked_query_schema(value, path)
+            && !unsigned_type_holds_the_bound(value)
+        {
             self.warn(
                 path,
                 "constraints are enforced only at supported field uses, not on type aliases or array items",
@@ -655,6 +802,83 @@ impl Sweep<'_> {
     }
 }
 
+impl Sweep<'_> {
+    /// Whether `value` is the schema of a query parameter that the generated
+    /// query struct checks on the way in. A client only writes a query, so a
+    /// run with no server checks nothing.
+    ///
+    /// The query field takes the constraints that `constraints_of` reads, so the
+    /// same read decides here. A keyword it drops, such as `minLength` on an
+    /// integer, keeps the note.
+    fn checked_query_schema(&self, value: &Value, path: &str) -> bool {
+        return self.run.server
+            && self.query_schemas.iter().any(|schema| return schema == path)
+            && serde_yaml::from_value::<openapiv3::Schema>(value.clone())
+                .is_ok_and(|schema| return crate::lower::constraints::constraints_of(&schema).is_some());
+    }
+}
+
+/// Whether the only constraint on an integer is `minimum: 0`.
+///
+/// Such a schema becomes an unsigned Rust type, and that type refuses every
+/// value the bound refuses. So the bound holds at every use, and an alias or
+/// an array item needs no check.
+fn unsigned_type_holds_the_bound(value: &Value) -> bool {
+    let only_minimum = CONSTRAINT_KEYS
+        .iter()
+        .all(|key| return (*key == "minimum") == value.get(*key).is_some());
+    return only_minimum
+        && value.get("type").and_then(Value::as_str) == Some("integer")
+        && value.get("minimum").and_then(Value::as_i64) == Some(0)
+        && value.get("x-rust-type").is_none();
+}
+
+/// Whether two of `members` are the same schema once their descriptions are
+/// set aside.
+fn repeats_a_member(members: &serde_yaml::Sequence) -> bool {
+    let shapes: Vec<Value> = members
+        .iter()
+        .map(|member| {
+            let mut shape = member.clone();
+            strip_descriptions(&mut shape);
+            return shape;
+        })
+        .collect();
+    return shapes
+        .iter()
+        .enumerate()
+        .any(|(index, shape)| return shapes.iter().take(index).any(|earlier| return earlier == shape));
+}
+
+/// The keys of a schema whose value is one schema.
+const SCHEMA_KEYS: &[&str] = &["items", "additionalProperties", "not"];
+/// The keys of a schema whose value is a list of schemas.
+const SCHEMA_LIST_KEYS: &[&str] = &["allOf", "oneOf", "anyOf"];
+
+/// Remove the description of `schema` and of each schema written inside it.
+/// A property name is data and may read `description`, and so may a key inside
+/// `example`, `default`, or an `enum` value, so only the places that hold a
+/// schema are entered.
+fn strip_descriptions(schema: &mut Value) {
+    let Some(mapping) = schema.as_mapping_mut() else {
+        return;
+    };
+    mapping.remove("description");
+    for key in SCHEMA_KEYS {
+        if let Some(inner) = mapping.get_mut(*key) {
+            strip_descriptions(inner);
+        }
+    }
+    for key in SCHEMA_LIST_KEYS {
+        if let Some(Value::Sequence(members)) = mapping.get_mut(*key) {
+            members.iter_mut().for_each(strip_descriptions);
+        }
+    }
+    if let Some(Value::Mapping(properties)) = mapping.get_mut("properties") {
+        properties.values_mut().for_each(strip_descriptions);
+    }
+}
+
 fn response_key(key: &str) -> bool {
     if key == "default" {
         return true;
@@ -670,10 +894,16 @@ fn response_key(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::OutputOptions;
 
     fn inspect_yaml(yaml: &str) -> Sweep<'static> {
+        return inspect_yaml_for(yaml, true, OutputOptions::default());
+    }
+
+    fn inspect_yaml_for(yaml: &str, server: bool, filters: OutputOptions) -> Sweep<'static> {
         let value = serde_yaml::from_str(yaml).expect("valid YAML");
-        return inspect("spec.yaml", &value);
+        let run = Box::leak(Box::new(Run { server, filters }));
+        return inspect("spec.yaml", &value, run);
     }
 
     #[test]
@@ -839,6 +1069,75 @@ security: [{arbitrary: [custom]}]
     }
 
     #[test]
+    fn a_description_beside_a_property_reference_is_kept_and_not_reported() {
+        const HOLDER: &str = "/components/schemas/Holder/properties/a";
+        let holder = |property: &str| {
+            return format!("components: {{schemas: {{Holder: {{type: object, properties: {{a: {property}}}}}}}}}");
+        };
+        for (yaml, kept, ignored) in [
+            (
+                holder("{$ref: '#/components/schemas/Other', description: note}"),
+                true,
+                vec![],
+            ),
+            // Any other keyword beside the `$ref` stays ignored.
+            (
+                holder("{$ref: '#/components/schemas/Other', description: note, nullable: true}"),
+                true,
+                vec!["nullable"],
+            ),
+            (
+                holder("{$ref: '#/components/schemas/Other', nullable: true}"),
+                false,
+                vec!["nullable"],
+            ),
+            // A cross-file `$ref` does not resolve at a property.
+            (
+                holder("{$ref: 'other.yaml#/components/schemas/Other', description: note}"),
+                false,
+                vec!["description"],
+            ),
+            (holder("{$ref: '#/components/schemas/Other'}"), false, vec![]),
+        ] {
+            let mut value: Value = serde_yaml::from_str(&yaml).expect("yaml");
+            let run = Run::default();
+            let sweep = inspect("openapi.yaml", &value, &run);
+            assert!(sweep.problems.is_empty(), "{yaml}");
+            let reported: Vec<String> = sweep
+                .warnings
+                .iter()
+                .map(|warning| return warning.path.clone())
+                .collect();
+            let expected: Vec<String> = ignored.iter().map(|key| return pointer(HOLDER, key)).collect();
+            assert_eq!(reported, expected, "{yaml}");
+
+            wrap_described_refs(&mut value, &sweep.described_refs);
+            let property = node_at(&mut value, HOLDER).expect("the property");
+            assert_eq!(property.get("allOf").is_some(), kept, "{yaml}");
+            if kept {
+                let wrapped: Value =
+                    serde_yaml::from_str("{allOf: [{$ref: '#/components/schemas/Other'}], description: note}")
+                        .expect("yaml");
+                assert_eq!(*property, wrapped, "{yaml}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_path_through_a_numeric_response_code_and_an_array_finds_its_node() {
+        let mut value: Value = serde_yaml::from_str(
+            "paths: {/a~b: {get: {responses: {200: {content: {application/json: {schema: {allOf: [{type: string}]}}}}}}}}",
+        )
+        .expect("yaml");
+        let path = "/paths/~1a~0b/get/responses/200/content/application~1json/schema/allOf/0/type";
+        assert_eq!(
+            node_at(&mut value, path).and_then(|node| return node.as_str()),
+            Some("string")
+        );
+        assert!(node_at(&mut value, "/paths/missing").is_none());
+    }
+
+    #[test]
     fn extensions_are_opaque_but_unhandled_extensions_warn() {
         let sweep = inspect_yaml(
             "x-vendor: {arbitrary: true}\nx-go-custom: true\ncomponents: {schemas: {Widget: {type: string, x-rust-type: 'String'}}}",
@@ -873,8 +1172,6 @@ security: [{arbitrary: [custom]}]
             ("{type: number, enum: [1.5]}", "enum"),
             ("{type: string, format: custom}", "format"),
             ("{type: string, nullable: true, default: null}", "default"),
-            ("{oneOf: [{type: string}, {type: integer}]}", "oneOf"),
-            ("{anyOf: [{type: string}, {type: integer}]}", "anyOf"),
         ] {
             let yaml = format!("components: {{schemas: {{Widget: {schema}}}}}");
             let sweep = inspect_yaml(&yaml);
@@ -886,13 +1183,195 @@ security: [{arbitrary: [custom]}]
                     .any(|warning| return warning.path.ends_with(keyword)),
                 "{schema}",
             );
-            if matches!(keyword, "oneOf" | "anyOf") {
-                assert!(sweep.warnings.iter().any(|warning| {
-                    return warning.message.contains("Rust deserialization checks")
-                        && warning.message.contains("can affect union match counts");
-                }));
-            }
         }
+    }
+
+    /// A union matches by the Rust types of its members, and the notes on an
+    /// unchecked constraint already name every place where that read differs
+    /// from the document. So a union carries no note of its own.
+    #[test]
+    fn a_union_carries_no_note_of_its_own() {
+        for schema in [
+            "{oneOf: [{type: string}, {type: integer}]}",
+            "{anyOf: [{type: string}, {type: integer}]}",
+            "{x-rust-type: 'crate::Stamp', oneOf: [{type: string}, {type: integer}]}",
+        ] {
+            let sweep = inspect_yaml(&format!("components: {{schemas: {{Widget: {schema}}}}}"));
+            assert!(sweep.problems.is_empty(), "{schema}");
+            assert!(sweep.warnings.is_empty(), "{schema}: {:?}", sweep.warnings);
+        }
+        // A constraint a member holds that no code checks still has its note.
+        let sweep =
+            inspect_yaml("components: {schemas: {Widget: {oneOf: [{type: string, maxLength: 3}, {type: integer}]}}}");
+        assert_eq!(sweep.warnings.len(), 1, "{:?}", sweep.warnings);
+        assert!(sweep.warnings[0].path.ends_with("/oneOf/0"), "{:?}", sweep.warnings);
+    }
+
+    #[test]
+    fn a_one_of_with_two_identical_members_is_reported() {
+        const NOTE: &str = "two members of this oneOf are the same schema";
+        for (schema, noted) in [
+            // Both members are `date-time` strings, so no value matches exactly one.
+            (
+                "{oneOf: [{type: string, format: date}, {type: string, format: date-time}, {type: string, format: date-time}]}",
+                true,
+            ),
+            // A description does not tell two members apart, at any depth.
+            (
+                "{oneOf: [{type: array, items: {type: string, description: a}}, {type: array, items: {type: string, description: b}}]}",
+                true,
+            ),
+            (
+                "{oneOf: [{type: object, properties: {p: {type: string, description: a}}}, {type: object, properties: {p: {type: string}}}]}",
+                true,
+            ),
+            // A property named `description` is data, and so is an example.
+            (
+                "{oneOf: [{type: object, properties: {description: {type: string}}}, {type: object, properties: {description: {type: integer}}}]}",
+                false,
+            ),
+            (
+                "{oneOf: [{type: string, example: a}, {type: string, example: b}]}",
+                false,
+            ),
+            // The fact holds whichever type reads the value.
+            (
+                "{x-rust-type: 'crate::Stamp', oneOf: [{type: string}, {type: string}]}",
+                true,
+            ),
+            (
+                "{oneOf: [{type: string, description: a}, {type: string, description: b}]}",
+                true,
+            ),
+            (
+                "{oneOf: [{$ref: '#/components/schemas/A'}, {$ref: '#/components/schemas/A'}]}",
+                true,
+            ),
+            (
+                "{oneOf: [{type: string, format: date}, {type: string, format: date-time}]}",
+                false,
+            ),
+            // `anyOf` accepts more than one match, so a repeat changes nothing.
+            ("{anyOf: [{type: string}, {type: string}]}", false),
+        ] {
+            let sweep = inspect_yaml(&format!("components: {{schemas: {{Widget: {schema}}}}}"));
+            assert!(sweep.problems.is_empty(), "{schema}");
+            assert_eq!(
+                sweep
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(NOTE)),
+                noted,
+                "{schema}: {:?}",
+                sweep.warnings
+            );
+        }
+    }
+
+    #[test]
+    fn the_unchecked_constraint_note_is_only_at_uses_that_no_code_checks() {
+        const NOTE: &str = "constraints are enforced only at supported field uses";
+        let parameter = |location: &str, schema: &str| {
+            return format!(
+                "paths: {{/a: {{get: {{parameters: [{{name: n, in: {location}, schema: {schema}}}], responses: {{}}}}}}}}"
+            );
+        };
+        let component = |schema: &str| return format!("components: {{schemas: {{Widget: {schema}}}}}");
+        for (yaml, noted) in [
+            // The query struct checks a scalar on the way in.
+            (parameter("query", "{type: string, maxLength: 3}"), false),
+            (parameter("query", "{type: integer, minimum: 1, maximum: 9}"), false),
+            // The struct checks the keywords of the array itself.
+            (
+                parameter("query", "{type: array, maxItems: 3, items: {type: string}}"),
+                false,
+            ),
+            // No other parameter location has a check.
+            (parameter("header", "{type: string, maxLength: 3}"), true),
+            // The constraint on an item of a query array has no check.
+            (
+                parameter("query", "{type: array, items: {type: string, maxLength: 3}}"),
+                true,
+            ),
+            // An unsigned type refuses what `minimum: 0` refuses, at every use.
+            (component("{type: integer, minimum: 0}"), false),
+            (
+                component("{type: array, items: {type: integer, format: int32, minimum: 0}}"),
+                false,
+            ),
+            (component("{type: integer, minimum: 1}"), true),
+            (component("{type: integer, minimum: 0, maximum: 9}"), true),
+            (component("{type: number, minimum: 0}"), true),
+            (component("{type: string, pattern: '^a$'}"), true),
+        ] {
+            let sweep = inspect_yaml(&yaml);
+            assert!(sweep.problems.is_empty(), "{yaml}: {:?}", sweep.problems);
+            assert_eq!(
+                sweep
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(NOTE)),
+                noted,
+                "{yaml}: {:?}",
+                sweep.warnings,
+            );
+        }
+
+        // A client writes a query and reads nothing back from it, so a run with
+        // no server checks no query constraint.
+        let client_only = inspect_yaml_for(
+            &parameter("query", "{type: string, maxLength: 3}"),
+            false,
+            OutputOptions::default(),
+        );
+        assert!(
+            client_only
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE))
+        );
+
+        // The query field reads the same keywords as the lowering: a keyword the
+        // type cannot hold keeps the note, and a custom type on a query parameter
+        // changes nothing, because the query lowering does not read it.
+        for (schema, noted) in [
+            ("{type: integer, minLength: 3}", true),
+            ("{type: string, maxLength: 3, x-rust-type: 'crate::Code'}", false),
+        ] {
+            let sweep = inspect_yaml(&parameter("query", schema));
+            assert_eq!(
+                sweep
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(NOTE)),
+                noted,
+                "{schema}: {:?}",
+                sweep.warnings
+            );
+        }
+
+        // An operation the filters remove generates no query struct. A path item
+        // keeps its own parameters while one of its operations stays.
+        let filtered = |yaml: &str, filters: OutputOptions| {
+            return inspect_yaml_for(yaml, true, filters)
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE));
+        };
+        let tagged = "paths: {/a: {get: {operationId: getA, tags: [internal], parameters: [{name: n, in: query, schema: {type: string, maxLength: 3}}], responses: {}}}}";
+        let shared = "paths: {/a: {parameters: [{name: n, in: query, schema: {type: string, maxLength: 3}}], get: {operationId: getA, tags: [internal], responses: {}}, post: {operationId: postA, responses: {}}}}";
+        let exclude = OutputOptions {
+            exclude_tags: vec!["internal".to_owned()],
+            ..OutputOptions::default()
+        };
+        let exclude_both = OutputOptions {
+            exclude_operation_ids: vec!["getA".to_owned(), "postA".to_owned()],
+            ..OutputOptions::default()
+        };
+        assert!(!filtered(tagged, OutputOptions::default()));
+        assert!(filtered(tagged, exclude.clone()));
+        assert!(!filtered(shared, exclude));
+        assert!(filtered(shared, exclude_both));
     }
 
     #[test]

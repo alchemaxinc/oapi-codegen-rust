@@ -24,10 +24,10 @@ impl axum::response::IntoResponse for GetReportResponse {
                     Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
                 };
                 match body {
-                    GetReportResponseOkBody::Json(body) => {
+                    GetReportOkBody::Json(body) => {
                         (STATUS, axum::Json(body)).into_response()
                     }
-                    GetReportResponseOkBody::Text(body) => (STATUS, body).into_response(),
+                    GetReportOkBody::Text(body) => (STATUS, body).into_response(),
                 }
             }
         }

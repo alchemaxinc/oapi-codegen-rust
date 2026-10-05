@@ -358,7 +358,19 @@ impl Mapper<'_> {
         };
         let rename = crate::naming::rename_for(wire, &ident);
         let access = match prop {
-            ReferenceOr::Item(schema) => access_of(&schema.schema_data, &at)?,
+            // A one-member `allOf` adds keywords to a `$ref` and changes nothing
+            // else, so the mark of the schema it names still applies.
+            ReferenceOr::Item(schema) => {
+                let target = crate::loader::single_ref_member(schema)
+                    .and_then(|reference| return self.spec.resolve(reference).ok())
+                    .map(|target| return &target.schema_data);
+                let data = &schema.schema_data;
+                access_from_marks(
+                    data.read_only || target.is_some_and(|target| return target.read_only),
+                    data.write_only || target.is_some_and(|target| return target.write_only),
+                    &at,
+                )?
+            }
             // A `$ref` property carries no sibling keyword in OpenAPI 3.0, so
             // the mark can only sit on the target.
             ReferenceOr::Reference { reference } => match self.spec.resolve(reference) {
@@ -1156,7 +1168,12 @@ fn verbatim_type(data: &SchemaData, verbatim: &str, path: &str) -> Result<RustTy
 /// A property that sets both marks states that no direction can carry it. The
 /// generator rejects that rather than pick one of the two marks.
 pub(crate) fn access_of(data: &SchemaData, at: &str) -> Result<Access> {
-    return match (data.read_only, data.write_only) {
+    return access_from_marks(data.read_only, data.write_only, at);
+}
+
+/// The direction two marks name together, for [`access_of`].
+fn access_from_marks(read_only: bool, write_only: bool, at: &str) -> Result<Access> {
+    return match (read_only, write_only) {
         (true, true) => Err(Error::UnsupportedSchema {
             path: at.to_owned(),
             reason: "`readOnly` and `writeOnly` are both set, so no request and no response could \

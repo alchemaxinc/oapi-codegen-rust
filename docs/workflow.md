@@ -121,6 +121,22 @@ The flag reads the same configuration and the same spec as a normal run, so the
 comparison covers every option that changes the output. `--check` adds no
 dependency to your manifest, so it reports none and it rejects `--install-deps`.
 
+## Fail the build on a warning with `--deny-warnings`
+
+A warning tells you that the generator ignored or weakened a part of the spec
+or of the configuration. A run that warns still exits with code 0, so a new
+warning passes continuous integration unless someone reads the log.
+
+`--deny-warnings` makes a run that reports a warning exit with code 1. The run
+stops before it writes or compares, so it leaves the files on disk as they are.
+The flag works with `--check` and without it. It does not combine with
+`--install-deps`, because a failed `cargo add` is reported as a warning after the
+write.
+
+```sh
+oapi-codegen --config-file oapi-codegen.yaml --check --deny-warnings api.yaml
+```
+
 ## A Makefile target to copy
 
 ```make

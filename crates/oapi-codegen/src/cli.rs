@@ -53,6 +53,15 @@ pub struct Cli {
     #[arg(long, conflicts_with = "install_deps")]
     pub check: bool,
 
+    /// Fail the run when it reports a warning, and write nothing.
+    ///
+    /// The exit code is 1 when the configuration or the spec produces a warning.
+    /// Use this in continuous integration to make a new warning a failed build.
+    /// This flag rejects `--install-deps`, because a failed `cargo add` is reported
+    /// as a warning after the write, and nothing could be unwritten then.
+    #[arg(long, conflicts_with = "install_deps")]
+    pub deny_warnings: bool,
+
     /// After the write, run `cargo add` for each required crate.
     ///
     /// If set, this runs with no prompt.

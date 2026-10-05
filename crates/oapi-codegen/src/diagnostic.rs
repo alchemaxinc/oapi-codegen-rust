@@ -1,5 +1,18 @@
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+
 use anstream::eprintln;
 use owo_colors::OwoColorize;
+
+/// The number of warnings this process reported. Every warning goes through
+/// [`report_warnings`], so one counter there serves `--deny-warnings` and the
+/// passes that find a warning do not each return a count.
+static REPORTED: AtomicUsize = AtomicUsize::new(0);
+
+/// The number of warnings reported so far in this process.
+pub(crate) fn reported_count() -> usize {
+    return REPORTED.load(Ordering::Relaxed);
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Warning {
@@ -17,6 +30,7 @@ impl Warning {
 }
 
 pub(crate) fn report_warnings(document: &str, warnings: &[Warning]) {
+    REPORTED.fetch_add(warnings.len(), Ordering::Relaxed);
     for warning in warnings {
         eprintln!(
             "{} {document}: {}: {}",

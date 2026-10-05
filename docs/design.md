@@ -298,6 +298,12 @@ These include document information, schema titles, external documentation, and
 examples. Compatibility extensions with an `x-go-` prefix are also intentionally
 ignored. Other unhandled extensions produce warnings.
 
+OpenAPI 3.0 ignores each keyword beside a `$ref`, and each one produces a
+warning. A `description` beside the `$ref` of a property is the exception. It
+changes no value and no type, so the generator keeps it as the documentation of
+the field. A cross-file `$ref` is not included, because it does not resolve at a
+property.
+
 Property names, schema names, security scheme names, and media types are data,
 not fixed OpenAPI keys. Payloads in `example`, `default`, and example `value`
 fields are also data. The inspection does not interpret their contents as
@@ -305,16 +311,18 @@ OpenAPI objects. However, it still inspects objects inside unsupported features,
 such as callback operations.
 
 Warnings also identify several limits of the current translation. These include
-Rust union matching, nullability, and unconstrained fallback
-types. Every `oneOf` and `anyOf` produces a warning: Rust deserialization checks
-do not enforce all schema constraints. Body selection reports discarded media entries.
+nullability and unconstrained fallback types. A union produces no note of its
+own: it matches by the Rust types of its members, and the note on an unchecked
+constraint already names every place where that read differs from the
+document. Body selection reports discarded media entries.
 The warnings expose these limits without changing the generated types.
 The catalogue is not a complete OpenAPI value validator. Lowering still applies
 its own value and combination checks.
 
 Warnings go to stderr for library calls and CLI commands, including `--check`.
-A warning alone does not change the exit code. Drift and generation errors still
-make `--check` fail.
+A warning alone does not change the exit code, unless the command line sets
+`--deny-warnings`. With that flag, a run that reports a warning exits with code 1
+and writes nothing. Drift and generation errors still make `--check` fail.
 
 Configuration diagnostics use the serialized shape of `Config::default()`.
 This keeps recognized configuration keys in the Rust types rather than in a
@@ -483,8 +491,8 @@ An accessor name that conflicts with another method produces a generation error.
 
 ### Deliberate limits
 
-Every union produces a generation warning: Rust deserialization checks do not enforce all schema constraints, which can affect match counts.
 Constraints affect matching only where the Rust representation enforces them. There is no separate schema validation engine.
+A constraint that no generated code checks produces a warning at its own position, and that warning is the one signal of a match count the document would not give. A union produces no warning of its own, with one exception: a `oneOf` whose two members are the same schema, apart from their descriptions at any depth, admits no value of that shape, and that is reported whichever type reads the value.
 
 Two schemas with disjoint numeric bounds can lower to aliases of the same Rust type.
 Both aliases accept the same values, so their `oneOf` rejects those values as ambiguous.
@@ -593,6 +601,15 @@ serde attribute. The field that names the alias takes the checks instead. A
 target with an `enum` or an `x-rust-type` is left alone: there the name and the
 type below it are not the same thing.
 
+A constraint on a schema that no field holds has no check, and it produces a
+warning. A type alias, an array item, and an inline body schema are examples.
+Two uses produce no warning. When the run generates the server, the schema of a
+query parameter in an operation the run keeps becomes a field of the query
+struct, which checks it; a client only writes a query, so a run with no server
+keeps the warning, and so does an operation the filters remove. An integer whose
+only constraint is `minimum: 0` becomes an unsigned type, which refuses a
+negative value at every use.
+
 A rule that cannot reach its type is an error, not a silence. A `format` of
 `date`, `date-time`, `uuid`, or `binary` names a type that is no longer a string,
 so a `pattern` there reads nothing once the value is parsed. An `x-rust-type`
@@ -607,6 +624,11 @@ than no rule at all.
 travels in a response, and a request must not send it. A `writeOnly` property
 travels in a request, and a response must not send it. A property that sets both
 marks is an error, because no direction is left to carry it.
+
+A property can name a marked schema through a `$ref`, and it then takes the mark
+of that schema. A one-member `allOf` around the `$ref` names the same schema, so
+it takes the same mark. A document writes that form to put a `description` or
+`nullable` beside the reference.
 
 A serde attribute cannot state this. The same `Order` type can reach a request
 body and a response body, so an attribute that is right for one is wrong for the

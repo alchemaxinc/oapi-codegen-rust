@@ -2015,18 +2015,18 @@ fn generated_client_encodes_and_decodes_body_shapes() {
 
     {
         use generated::client_negotiated_response::Client;
+        use generated::client_negotiated_response::GetReportOkBody;
         use generated::client_negotiated_response::GetReportResponse;
-        use generated::client_negotiated_response::GetReportResponseOkBody;
 
         let client = Client::new(&base_url).expect("build negotiated-response client");
         match client.get_report().expect("json report succeeds") {
-            GetReportResponse::Ok(GetReportResponseOkBody::Json(report)) => {
+            GetReportResponse::Ok(GetReportOkBody::Json(report)) => {
                 assert_eq!(report.id, "r1");
             }
             _ => panic!("expected a JSON-decoded report for an application/json response"),
         }
         match client.get_report().expect("text report succeeds") {
-            GetReportResponse::Ok(GetReportResponseOkBody::Text(text)) => {
+            GetReportResponse::Ok(GetReportOkBody::Text(text)) => {
                 assert_eq!(text, "plain report");
             }
             _ => panic!("expected a text-decoded report for a text/plain response"),

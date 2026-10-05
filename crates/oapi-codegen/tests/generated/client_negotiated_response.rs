@@ -15,7 +15,7 @@ pub struct Report {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum GetReportResponseOkBody {
+pub enum GetReportOkBody {
     Json(Report),
     Text(String),
 }
@@ -23,7 +23,7 @@ pub enum GetReportResponseOkBody {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetReportResponse {
     /// A report as JSON or text.
-    Ok(GetReportResponseOkBody),
+    Ok(GetReportOkBody),
 }
 
 /// Errors returned by the generated client.
@@ -126,9 +126,9 @@ impl Client {
             let body = if content_type == "application/json"
                 || content_type.ends_with("+json")
             {
-                GetReportResponseOkBody::Json(response.json()?)
+                GetReportOkBody::Json(response.json()?)
             } else if content_type == "text/plain" {
-                GetReportResponseOkBody::Text(response.text()?)
+                GetReportOkBody::Text(response.text()?)
             } else {
                 return Err(ClientError::UnexpectedContentType(content_type));
             };

@@ -267,7 +267,7 @@ impl Lowerer<'_> {
         let headers = self.lower_header_params(path, method, &params, &name)?;
         let cookies = self.lower_cookie_params(path, method, &params, &name)?;
         let request = self.lower_request_body(path, method, &name, operation)?;
-        let responses = self.lower_responses(path, method, &response_enum, operation)?;
+        let responses = self.lower_responses(path, method, &name, operation)?;
 
         return Ok(Operation {
             name,
@@ -1289,7 +1289,33 @@ impl Lowerer<'_> {
             let required = object.required.iter().any(|name| {
                 return name == wire_name;
             });
-            let (kind, nullable) = match property {
+            // A one-member `allOf` around a `$ref` names the schema the `$ref`
+            // names. The wrapper adds a keyword such as `description` or
+            // `nullable` and nothing else, so the field reads the target.
+            let wrapped = match property {
+                ReferenceOr::Item(schema) => crate::loader::single_ref_member(schema).map(|reference| {
+                    return ReferenceOr::Reference {
+                        reference: reference.to_owned(),
+                    };
+                }),
+                ReferenceOr::Reference { .. } => None,
+            };
+            // The wrapper's own keywords still apply on top of the target's. A
+            // target in another file cannot be read here, so for one the wrapper's
+            // mark settles the part alone; a same-document target is read and
+            // its marks combine with the wrapper's below, so a conflict between
+            // the two is reported as it is on any field.
+            let wrapper = match (&wrapped, property) {
+                (Some(_), ReferenceOr::Item(schema)) => Some(&schema.schema_data),
+                _ => None,
+            };
+            if let (Some(wrapper), Some(ReferenceOr::Reference { reference })) = (wrapper, &wrapped)
+                && ref_file_part(reference).is_some()
+                && !multipart_part_is_sent(wrapper, path, method, wire_name)?
+            {
+                continue;
+            }
+            let (kind, nullable) = match wrapped.as_ref().unwrap_or(property) {
                 ReferenceOr::Item(schema) => {
                     if !multipart_part_is_sent(&schema.schema_data, path, method, wire_name)? {
                         continue;
@@ -1307,10 +1333,16 @@ impl Lowerer<'_> {
                         });
                     }
                     let resolved = self.spec.resolve_schema(None, reference)?;
-                    if !multipart_part_is_sent(&resolved.schema_data, path, method, wire_name)? {
+                    let mut data = resolved.schema_data;
+                    if let Some(wrapper) = wrapper {
+                        data.nullable |= wrapper.nullable;
+                        data.read_only |= wrapper.read_only;
+                        data.write_only |= wrapper.write_only;
+                    }
+                    if !multipart_part_is_sent(&data, path, method, wire_name)? {
                         continue;
                     }
-                    (resolved.schema_kind, resolved.schema_data.nullable)
+                    (resolved.schema_kind, data.nullable)
                 }
             };
             let ty = scalar_type(&kind).ok_or_else(|| {
@@ -1419,7 +1451,7 @@ impl Lowerer<'_> {
         &self,
         path: &str,
         method: &str,
-        response_enum: &RustIdent,
+        operation_name: &RustIdent,
         operation: &OasOperation,
     ) -> Result<Vec<ResponseCase>> {
         let mut cases = Vec::new();
@@ -1458,7 +1490,7 @@ impl Lowerer<'_> {
             // one operation are otherwise indistinguishable to a reader.
             let location = format!("`{status_code}` response");
             let body = self.response_body(path, method, &location, response.origin.as_deref(), &response.value)?;
-            let body = self.name_response_body(response_enum, &variant, body);
+            let body = self.name_response_body(operation_name, &variant, body);
             let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
                 variant,
@@ -1479,7 +1511,7 @@ impl Lowerer<'_> {
                 response.origin.as_deref(),
                 &response.value,
             )?;
-            let body = self.name_response_body(response_enum, &variant, body);
+            let body = self.name_response_body(operation_name, &variant, body);
             let headers = self.lower_response_headers(path, method, response.origin.as_deref(), &response.value)?;
             cases.push(ResponseCase {
                 variant,
@@ -1572,10 +1604,10 @@ impl Lowerer<'_> {
 
     /// Name a lowered response body against its response variant: a single
     /// content type stays [`ResponseBody::Single`]. several become a
-    /// [`ResponseBody::Negotiated`] enum named `<Response><Variant>Body`.
+    /// [`ResponseBody::Negotiated`] enum named `<Op><Variant>Body`.
     fn name_response_body(
         &self,
-        response_enum: &RustIdent,
+        operation_name: &RustIdent,
         variant: &RustIdent,
         lowered: Option<LoweredResponseBody>,
     ) -> Option<ResponseBody> {
@@ -1583,7 +1615,7 @@ impl Lowerer<'_> {
             return match body {
                 LoweredResponseBody::Single(body) => ResponseBody::Single(body),
                 LoweredResponseBody::Negotiated(variants) => ResponseBody::Negotiated(NegotiatedBody {
-                    name: operations::response_body_enum_name(response_enum, variant),
+                    name: operations::response_body_enum_name(operation_name, variant),
                     variants,
                 }),
             };

@@ -36,9 +36,9 @@ impl Client {
             let body = if content_type == "application/json"
                 || content_type.ends_with("+json")
             {
-                GetReportResponseOkBody::Json(response.json()?)
+                GetReportOkBody::Json(response.json()?)
             } else if content_type == "text/plain" {
-                GetReportResponseOkBody::Text(response.text()?)
+                GetReportOkBody::Text(response.text()?)
             } else {
                 return Err(ClientError::UnexpectedContentType(content_type));
             };

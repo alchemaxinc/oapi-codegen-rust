@@ -20,9 +20,9 @@ use bookstore_example::restclient::GetBookResponse;
 use bookstore_example::restclient::GetHealthResponse;
 use bookstore_example::restclient::ListBooksQuery;
 use bookstore_example::restclient::ListBooksResponse;
+use bookstore_example::restclient::SubmitReviewCreatedBody;
 use bookstore_example::restclient::SubmitReviewRequestBody;
 use bookstore_example::restclient::SubmitReviewResponse;
-use bookstore_example::restclient::SubmitReviewResponseCreatedBody;
 use bookstore_example::restclient::UploadBookCoverMultipart;
 use bookstore_example::restclient::UploadBookCoverResponse;
 
@@ -286,7 +286,7 @@ fn submit_review_negotiates_json_and_text() {
         )
         .expect("submit_review request succeeds");
     match json_response {
-        SubmitReviewResponse::Created(SubmitReviewResponseCreatedBody::Json(review)) => {
+        SubmitReviewResponse::Created(SubmitReviewCreatedBody::Json(review)) => {
             assert_eq!(review.rating, 5);
             assert_eq!(review.comment.as_deref(), Some("superb"));
         }
@@ -306,7 +306,7 @@ fn submit_review_negotiates_json_and_text() {
         )
         .expect("submit_review request succeeds");
     match text_response {
-        SubmitReviewResponse::Created(SubmitReviewResponseCreatedBody::Text(text)) => {
+        SubmitReviewResponse::Created(SubmitReviewCreatedBody::Text(text)) => {
             assert!(text.contains("rating 3"), "unexpected text body: {text}");
         }
         other => {

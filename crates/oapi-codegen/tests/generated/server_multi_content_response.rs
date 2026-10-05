@@ -17,7 +17,7 @@ pub struct Report {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum GetReportResponseOkBody {
+pub enum GetReportOkBody {
     Json(Report),
     Text(String),
 }
@@ -26,11 +26,11 @@ pub enum GetReportResponseOkBody {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetReportResponse {
     /// The report, as JSON or plain text.
-    Ok(GetReportResponseOkBody),
+    Ok(GetReportOkBody),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ExportReportResponseDefaultBody {
+pub enum ExportReportDefaultBody {
     Json(Report),
     Text(String),
 }
@@ -39,11 +39,11 @@ pub enum ExportReportResponseDefaultBody {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExportReportResponse {
     /// The report, as JSON or plain text.
-    Default(http::StatusCode, ExportReportResponseDefaultBody),
+    Default(http::StatusCode, ExportReportDefaultBody),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum GetSummaryResponseOkBody {
+pub enum GetSummaryOkBody {
     Json(Report),
     Text(String),
 }
@@ -52,7 +52,7 @@ pub enum GetSummaryResponseOkBody {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GetSummaryResponse {
     /// The summary, as JSON or plain text.
-    Ok { body: GetSummaryResponseOkBody, x_report_id: Option<String> },
+    Ok { body: GetSummaryOkBody, x_report_id: Option<String> },
 }
 
 /// Server behaviour: implement one method per operation.
@@ -80,10 +80,10 @@ impl axum::response::IntoResponse for GetReportResponse {
                     Err(_) => panic!("oapi-codegen emitted an invalid HTTP status code"),
                 };
                 match body {
-                    GetReportResponseOkBody::Json(body) => {
+                    GetReportOkBody::Json(body) => {
                         (STATUS, axum::Json(body)).into_response()
                     }
-                    GetReportResponseOkBody::Text(body) => (STATUS, body).into_response(),
+                    GetReportOkBody::Text(body) => (STATUS, body).into_response(),
                 }
             }
         }
@@ -95,12 +95,10 @@ impl axum::response::IntoResponse for ExportReportResponse {
         match self {
             ExportReportResponse::Default(status, body) => {
                 match body {
-                    ExportReportResponseDefaultBody::Json(body) => {
+                    ExportReportDefaultBody::Json(body) => {
                         (status, axum::Json(body)).into_response()
                     }
-                    ExportReportResponseDefaultBody::Text(body) => {
-                        (status, body).into_response()
-                    }
+                    ExportReportDefaultBody::Text(body) => (status, body).into_response(),
                 }
             }
         }
@@ -135,10 +133,10 @@ impl axum::response::IntoResponse for GetSummaryResponse {
                     STATUS
                 };
                 match body {
-                    GetSummaryResponseOkBody::Json(body) => {
+                    GetSummaryOkBody::Json(body) => {
                         (response_status, header_map, axum::Json(body)).into_response()
                     }
-                    GetSummaryResponseOkBody::Text(body) => {
+                    GetSummaryOkBody::Text(body) => {
                         (response_status, header_map, body).into_response()
                     }
                 }

@@ -21,9 +21,9 @@ use crate::restapi::GetBookResponse;
 use crate::restapi::GetHealthResponse;
 use crate::restapi::ListBooksQuery;
 use crate::restapi::ListBooksResponse;
+use crate::restapi::SubmitReviewCreatedBody;
 use crate::restapi::SubmitReviewRequestBody;
 use crate::restapi::SubmitReviewResponse;
-use crate::restapi::SubmitReviewResponseCreatedBody;
 use crate::restapi::UploadBookCoverMultipart;
 use crate::restapi::UploadBookCoverResponse;
 
@@ -156,12 +156,12 @@ impl Api for Service {
         };
 
         if review.comment.is_none() {
-            return SubmitReviewResponse::Created(SubmitReviewResponseCreatedBody::Text(format!(
+            return SubmitReviewResponse::Created(SubmitReviewCreatedBody::Text(format!(
                 "stored review {} with rating {}",
                 review.id, review.rating
             )));
         }
-        return SubmitReviewResponse::Created(SubmitReviewResponseCreatedBody::Json(review));
+        return SubmitReviewResponse::Created(SubmitReviewCreatedBody::Json(review));
     }
 
     async fn get_health(&self) -> GetHealthResponse {

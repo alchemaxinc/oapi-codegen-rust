@@ -34,6 +34,15 @@ pub use crate::package::PackageDrift;
 pub use crate::package::check_package;
 pub use crate::package::write_package;
 
+/// The number of warnings this process reported, for the configuration and
+/// for the spec together.
+///
+/// A warning goes to stderr and does not fail a run. The CLI reads this count
+/// for `--deny-warnings`, which turns a warning into a failed run.
+pub fn warnings_reported() -> usize {
+    return diagnostic::reported_count();
+}
+
 /// Everything one run lowers from a spec, ready for either output layout.
 enum Lowered {
     /// The run emits models, and optionally server-URL constants, only.
@@ -66,9 +75,9 @@ fn lower_spec(spec_path: &Path, config: &Config) -> Result<Lowered> {
     if config.generate.embedded_spec {
         return Err(Error::Unimplemented("embedded-spec".to_owned()));
     }
-    let mut spec = Spec::load(spec_path)?;
-    spec.apply_filters(&config.output_options);
     let want_server = config.generate.std_http_server;
+    let mut spec = Spec::load_for(spec_path, want_server, &config.output_options)?;
+    spec.apply_filters(&config.output_options);
     let want_client = config.generate.client;
     let server_urls = if config.generate.server_urls {
         lower::lower_server_urls(&spec)?
@@ -351,6 +360,280 @@ mod tests {
     impl Drop for TestDir {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// A one-member `allOf` exists to put a keyword beside a `$ref`. It must
+    /// generate what the bare `$ref` generates, with the description added. A
+    /// marked target is the case that once differed: the wrapped form lost the
+    /// mark, so the model did not split by direction. A description written
+    /// beside the `$ref` itself must give the same output as the wrapped form.
+    #[test]
+    fn a_wrapped_reference_generates_what_the_bare_reference_generates() {
+        const NOTE: &str = "the note beside the reference";
+        let spec = |property: &str| {
+            return format!(
+                "openapi: 3.0.3
+info: {{title: Demo, version: 1.0.0}}
+paths:
+  /holders:
+    post:
+      operationId: putHolder
+      requestBody:
+        required: true
+        content: {{application/json: {{schema: {{$ref: '#/components/schemas/Holder'}}}}}}
+      responses:
+        '200':
+          description: ok
+          content: {{application/json: {{schema: {{$ref: '#/components/schemas/Holder'}}}}}}
+components:
+  schemas:
+    Plain: {{type: string, maxLength: 3}}
+    Served: {{type: string, readOnly: true}}
+    Sent: {{type: string, writeOnly: true}}
+    Holder:
+      type: object
+      required: [plain, served]
+      properties:
+        plain: {}
+        served: {}
+        sent: {}
+",
+                property.replace("NAME", "Plain"),
+                property.replace("NAME", "Served"),
+                property.replace("NAME", "Sent"),
+            );
+        };
+        let dir = TestDir::new("wrapped-reference");
+        std::fs::write(
+            dir.join("config.yaml"),
+            "package: demo\ngenerate: {models: true, std-http-server: true, client: true}\n",
+        )
+        .expect("write the configuration");
+        let config = Config::load(&dir.join("config.yaml")).expect("valid configuration");
+        let generate_from = |property: &str| {
+            std::fs::write(dir.join("spec.yaml"), spec(property)).expect("write the spec");
+            return generate(&dir.join("spec.yaml"), &config).expect("the spec generates");
+        };
+
+        let bare = generate_from("{$ref: '#/components/schemas/NAME'}");
+        let wrapped = generate_from(&format!(
+            "{{allOf: [{{$ref: '#/components/schemas/NAME'}}], description: {NOTE}}}"
+        ));
+
+        assert!(bare.contains("HolderRequest"), "the marked targets split the model");
+        let without_notes: Vec<&str> = wrapped.lines().filter(|line| return !line.contains(NOTE)).collect();
+        assert_eq!(without_notes, bare.lines().collect::<Vec<&str>>());
+        assert!(wrapped.contains(NOTE), "the description reaches the output");
+
+        // A description beside the bare `$ref` is kept the same way.
+        let beside = generate_from(&format!("{{$ref: '#/components/schemas/NAME', description: {NOTE}}}"));
+        assert_eq!(beside, wrapped);
+    }
+
+    /// The two places that read a property on their own path, and not through
+    /// the field lowering: an `allOf` that merges two members which both declare
+    /// the property, and a multipart form field. A description beside the `$ref`
+    /// must change neither.
+    #[test]
+    fn a_described_reference_merges_and_uploads_like_the_bare_reference() {
+        const NOTE: &str = "the note beside the reference";
+        const TARGET_NOTE: &str = "The kinds there are.";
+        let spec = |property: &str, kind: &str| {
+            // A nullable wrapper is written in full on both sides, and the note
+            // beside the property is the only difference between the two forms.
+            let wrapper_note = if property.contains(NOTE) {
+                format!(", description: {NOTE}")
+            } else {
+                String::new()
+            };
+            return format!(
+                "openapi: 3.0.3
+info: {{title: Demo, version: 1.0.0}}
+paths:
+  /uploads:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: {property}
+                file: {{type: string, format: binary}}
+      responses:
+        '200':
+          description: ok
+          content: {{application/json: {{schema: {{$ref: '#/components/schemas/Merged'}}}}}}
+        '201':
+          description: made
+          content: {{application/json: {{schema: {{$ref: '#/components/schemas/Both'}}}}}}
+        '202':
+          description: queued
+          content: {{application/json: {{schema: {{$ref: '#/components/schemas/Across'}}}}}}
+components:
+  schemas:
+    Kind: {kind}
+    SameKind: {{$ref: '#/components/schemas/Kind'}}
+    Plain: {{type: string}}
+    Base: {{type: object, properties: {{kind: {{$ref: '#/components/schemas/Kind'}}, other: {{$ref: '#/components/schemas/SameKind'}}, maybe: {{allOf: [{{$ref: '#/components/schemas/Plain'}}], nullable: true}}}}}}
+    Extra: {{type: object, properties: {{kind: {property}, other: {property}, maybe: {{allOf: [{{$ref: '#/components/schemas/Plain'}}], nullable: true{wrapper_note}}}}}}}
+    Third: {{type: object, properties: {{other: {{$ref: '#/components/schemas/Kind'}}}}}}
+    Half: {{type: object, properties: {{h: {{type: string}}}}}}
+    Pair: {{allOf: [{{$ref: '#/components/schemas/Half'}}, {{$ref: '#/components/schemas/Half'}}]}}
+    Left: {{type: object, properties: {{pair: {{$ref: '#/components/schemas/Pair'}}}}}}
+    Right: {{type: object, properties: {{pair: {{allOf: [{{$ref: '#/components/schemas/Half'}}, {{$ref: '#/components/schemas/Half'}}]{wrapper_note}}}}}}}
+    Both: {{allOf: [{{$ref: '#/components/schemas/Left'}}, {{$ref: '#/components/schemas/Right'}}]}}
+    CompA: {{allOf: [{{type: object, properties: {{p: {{$ref: '#/components/schemas/Kind'}}}}}}, {{$ref: '#/components/schemas/Half'}}]}}
+    CompB: {{allOf: [{{type: object, properties: {{p: {property}}}}}, {{$ref: '#/components/schemas/Half'}}]}}
+    Up: {{type: object, properties: {{comp: {{$ref: '#/components/schemas/CompA'}}}}}}
+    Down: {{type: object, properties: {{comp: {{$ref: '#/components/schemas/CompB'}}}}}}
+    Across: {{allOf: [{{$ref: '#/components/schemas/Up'}}, {{$ref: '#/components/schemas/Down'}}]}}
+    Merged: {{allOf: [{{$ref: '#/components/schemas/Base'}}, {{$ref: '#/components/schemas/Extra'}}, {{$ref: '#/components/schemas/Third'}}]}}
+"
+            );
+        };
+        let dir = TestDir::new("described-reference");
+        std::fs::write(
+            dir.join("config.yaml"),
+            "package: demo\ngenerate: {models: true, std-http-server: true}\n",
+        )
+        .expect("write the configuration");
+        let config = Config::load(&dir.join("config.yaml")).expect("valid configuration");
+        let generate_from = |property: &str, kind: &str| {
+            std::fs::write(dir.join("spec.yaml"), spec(property, kind)).expect("write the spec");
+            return generate(&dir.join("spec.yaml"), &config).expect("the spec generates");
+        };
+        let bare_ref = "{$ref: '#/components/schemas/Kind'}";
+        let described_ref = format!("{{$ref: '#/components/schemas/Kind', description: {NOTE}}}");
+
+        let plain_kind = "{type: string, enum: [a, b]}";
+        let bare = generate_from(bare_ref, plain_kind);
+        let described = generate_from(&described_ref, plain_kind);
+
+        assert!(bare.contains("pub struct Merged"), "the overlap merges");
+        let without_notes: Vec<&str> = described.lines().filter(|line| return !line.contains(NOTE)).collect();
+        assert_eq!(without_notes, bare.lines().collect::<Vec<&str>>());
+        // Three times on `Merged`: for the overlap on one name, for the overlap
+        // through an alias, and for the overlap of two nullable wrappers; once on
+        // the enum that the alias overlap merges into, where it survives the
+        // third member; and once on `Both`, where a documented inline composite
+        // overlaps a `$ref` to the same composite. A multipart part carries no
+        // doc comment, and `Extra` and `Right` reach no operation, so they are
+        // pruned.
+        assert_eq!(described.matches(NOTE).count(), 5, "{described}");
+        // `Across` overlaps two composites that differ only in a note beside a
+        // nested `$ref`, and it keeps the first composite's name.
+        assert!(described.contains("pub comp: Option<CompA>"), "{described}");
+
+        // When `Kind` has a description of its own, the note beside the
+        // property wins on the field, as it does on a plain field.
+        let described_kind = format!("{{type: string, enum: [a, b], description: {TARGET_NOTE}}}");
+        let documented = generate_from(&described_ref, &described_kind);
+        assert!(
+            documented.contains(&format!(
+                "    /// {NOTE}\n    #[serde(skip_serializing_if = \"Option::is_none\")]\n    pub other"
+            )),
+            "{documented}"
+        );
+        assert!(
+            !documented.contains(&format!(
+                "    /// {TARGET_NOTE}\n    #[serde(skip_serializing_if = \"Option::is_none\")]\n    pub other"
+            )),
+            "{documented}"
+        );
+    }
+
+    /// A wrapper around a multipart field's `$ref` keeps its own marks. A
+    /// required field that a `readOnly` wrapper marks travels in no request, so
+    /// the server reads no part for it.
+    #[test]
+    fn a_read_only_wrapper_keeps_a_multipart_field_out_of_the_request() {
+        let dir = TestDir::new("multipart-wrapper-mark");
+        std::fs::write(
+            dir.join("spec.yaml"),
+            "openapi: 3.0.3
+info: {title: Demo, version: 1.0.0}
+paths:
+  /uploads:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [served, sent, elsewhere]
+              properties:
+                served: {allOf: [{$ref: '#/components/schemas/Plain'}], readOnly: true}
+                sent: {allOf: [{$ref: '#/components/schemas/Plain'}], description: a note}
+                elsewhere: {allOf: [{$ref: 'other.yaml#/components/schemas/Plain'}], readOnly: true}
+      responses:
+        '204': {description: ok}
+components:
+  schemas:
+    Plain: {type: string}
+",
+        )
+        .expect("write the spec");
+        // A part that is never sent is settled by its own mark, so the target
+        // in another file, which no multipart field could read, is never reached.
+        std::fs::write(
+            dir.join("other.yaml"),
+            "openapi: 3.0.3\ninfo: {title: Other, version: 1.0.0}\npaths: {}\ncomponents:\n  schemas:\n    Plain: {type: string}\n",
+        )
+        .expect("write the other document");
+        std::fs::write(
+            dir.join("config.yaml"),
+            "package: demo\ngenerate: {models: true, std-http-server: true}\n",
+        )
+        .expect("write the configuration");
+        let config = Config::load(&dir.join("config.yaml")).expect("valid configuration");
+
+        let code = generate(&dir.join("spec.yaml"), &config).expect("the spec generates");
+
+        assert!(code.contains("\"sent\""), "the plain field is a part: {code}");
+        assert!(!code.contains("\"served\""), "the read-only field is no part: {code}");
+        assert!(
+            !code.contains("\"elsewhere\""),
+            "the read-only cross-file field is no part: {code}"
+        );
+
+        // A wrapper mark and a target mark that leave no direction are an error
+        // here, as they are on any field, whichever side carries which.
+        for (wrapper, target) in [("readOnly", "writeOnly"), ("writeOnly", "readOnly")] {
+            std::fs::write(
+                dir.join("spec.yaml"),
+                format!(
+                    "openapi: 3.0.3
+info: {{title: Demo, version: 1.0.0}}
+paths:
+  /uploads:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                torn: {{allOf: [{{$ref: '#/components/schemas/Marked'}}], {wrapper}: true}}
+      responses:
+        '204': {{description: ok}}
+components:
+  schemas:
+    Marked: {{type: string, {target}: true}}
+"
+                ),
+            )
+            .expect("write the spec");
+            let error = generate(&dir.join("spec.yaml"), &config).expect_err("both marks leave no direction");
+            assert!(error.to_string().contains("readOnly"), "{wrapper} on {target}: {error}");
         }
     }
 
