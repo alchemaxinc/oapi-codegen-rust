@@ -273,17 +273,26 @@ fn intersect(
         let left_described = matches!(left, ReferenceOr::Item(schema) if schema.schema_data.description.is_some());
         return Ok(if left_described { left.clone() } else { right.clone() });
     }
+    // The description of an inline operand documents the field, and a `$ref`
+    // carries none, so it goes back on whichever side the branches below pick.
+    let inline_description = [left, right].into_iter().find_map(|property| {
+        return match property {
+            ReferenceOr::Item(schema) => schema.schema_data.description.clone(),
+            ReferenceOr::Reference { .. } => None,
+        };
+    });
     let resolved_left = resolve_reference(spec, left)?;
     let resolved_right = resolve_reference(spec, right)?;
     if matches!(&resolved_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
         && without_description(&ReferenceOr::Item(Box::new(resolved_left.clone())))
             == without_description(&ReferenceOr::Item(Box::new(resolved_right.clone())))
     {
-        return Ok(match (left, right) {
+        let chosen = match (left, right) {
             (ReferenceOr::Reference { .. }, _) => left.clone(),
             (_, ReferenceOr::Reference { .. }) => right.clone(),
             _ => left.clone(),
-        });
+        };
+        return Ok(describe(chosen, inline_description));
     }
     let normalized_left = resolve(spec, path, left, depth)?;
     let normalized_right = resolve(spec, path, right, depth)?;
@@ -294,11 +303,12 @@ fn intersect(
             == without_description(&ReferenceOr::Item(Box::new(normalized_right.clone())))
             && matches!(&normalized_left.schema_kind, SchemaKind::AllOf { all_of } if !all_of.is_empty())
         {
-            return Ok(match (left, right) {
+            let chosen = match (left, right) {
                 (ReferenceOr::Reference { .. }, _) => left.clone(),
                 (_, ReferenceOr::Reference { .. }) => right.clone(),
                 _ => ReferenceOr::Item(Box::new(normalized_left)),
-            });
+            };
+            return Ok(describe(chosen, inline_description));
         }
         return Err(unsupported(path, "overlapping composed properties are not supported"));
     }

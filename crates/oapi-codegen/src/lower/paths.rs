@@ -1300,11 +1300,18 @@ impl Lowerer<'_> {
                 }),
                 ReferenceOr::Reference { .. } => None,
             };
-            // The wrapper's own keywords still apply on top of the target's.
+            // The wrapper's own keywords still apply on top of the target's. A
+            // wrapper that marks the part as not sent settles it alone, before
+            // the target is read.
             let wrapper = match (&wrapped, property) {
                 (Some(_), ReferenceOr::Item(schema)) => Some(&schema.schema_data),
                 _ => None,
             };
+            if let Some(wrapper) = wrapper
+                && !multipart_part_is_sent(wrapper, path, method, wire_name)?
+            {
+                continue;
+            }
             let (kind, nullable) = match wrapped.as_ref().unwrap_or(property) {
                 ReferenceOr::Item(schema) => {
                     if !multipart_part_is_sent(&schema.schema_data, path, method, wire_name)? {

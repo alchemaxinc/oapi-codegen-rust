@@ -468,6 +468,9 @@ paths:
         '200':
           description: ok
           content: {{application/json: {{schema: {{$ref: '#/components/schemas/Merged'}}}}}}
+        '201':
+          description: made
+          content: {{application/json: {{schema: {{$ref: '#/components/schemas/Both'}}}}}}
 components:
   schemas:
     Kind: {kind}
@@ -476,6 +479,11 @@ components:
     Base: {{type: object, properties: {{kind: {{$ref: '#/components/schemas/Kind'}}, other: {{$ref: '#/components/schemas/SameKind'}}, maybe: {{allOf: [{{$ref: '#/components/schemas/Plain'}}], nullable: true}}}}}}
     Extra: {{type: object, properties: {{kind: {property}, other: {property}, maybe: {{allOf: [{{$ref: '#/components/schemas/Plain'}}], nullable: true{wrapper_note}}}}}}}
     Third: {{type: object, properties: {{other: {{$ref: '#/components/schemas/Kind'}}}}}}
+    Half: {{type: object, properties: {{h: {{type: string}}}}}}
+    Pair: {{allOf: [{{$ref: '#/components/schemas/Half'}}, {{$ref: '#/components/schemas/Half'}}]}}
+    Left: {{type: object, properties: {{pair: {{$ref: '#/components/schemas/Pair'}}}}}}
+    Right: {{type: object, properties: {{pair: {{allOf: [{{$ref: '#/components/schemas/Half'}}, {{$ref: '#/components/schemas/Half'}}]{wrapper_note}}}}}}}
+    Both: {{allOf: [{{$ref: '#/components/schemas/Left'}}, {{$ref: '#/components/schemas/Right'}}]}}
     Merged: {{allOf: [{{$ref: '#/components/schemas/Base'}}, {{$ref: '#/components/schemas/Extra'}}, {{$ref: '#/components/schemas/Third'}}]}}
 "
             );
@@ -502,11 +510,13 @@ components:
         let without_notes: Vec<&str> = described.lines().filter(|line| return !line.contains(NOTE)).collect();
         assert_eq!(without_notes, bare.lines().collect::<Vec<&str>>());
         // Three times on `Merged`: for the overlap on one name, for the overlap
-        // through an alias, and for the overlap of two nullable wrappers; and
-        // once on the enum that the alias overlap merges into, where it survives
-        // the third member. A multipart part carries no doc comment, and `Extra`
-        // reaches no operation, so it is pruned.
-        assert_eq!(described.matches(NOTE).count(), 4, "{described}");
+        // through an alias, and for the overlap of two nullable wrappers; once on
+        // the enum that the alias overlap merges into, where it survives the
+        // third member; and once on `Both`, where a documented inline composite
+        // overlaps a `$ref` to the same composite. A multipart part carries no
+        // doc comment, and `Extra` and `Right` reach no operation, so they are
+        // pruned.
+        assert_eq!(described.matches(NOTE).count(), 5, "{described}");
 
         // When `Kind` has a description of its own, the note beside the
         // property wins on the field, as it does on a plain field.
@@ -546,10 +556,11 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [served, sent]
+              required: [served, sent, elsewhere]
               properties:
                 served: {allOf: [{$ref: '#/components/schemas/Plain'}], readOnly: true}
                 sent: {allOf: [{$ref: '#/components/schemas/Plain'}], description: a note}
+                elsewhere: {allOf: [{$ref: 'other.yaml#/components/schemas/Plain'}], readOnly: true}
       responses:
         '204': {description: ok}
 components:
@@ -558,6 +569,13 @@ components:
 ",
         )
         .expect("write the spec");
+        // A part that is never sent is settled by its own mark, so the target
+        // in another file, which no multipart field could read, is never reached.
+        std::fs::write(
+            dir.join("other.yaml"),
+            "openapi: 3.0.3\ninfo: {title: Other, version: 1.0.0}\npaths: {}\ncomponents:\n  schemas:\n    Plain: {type: string}\n",
+        )
+        .expect("write the other document");
         std::fs::write(
             dir.join("config.yaml"),
             "package: demo\ngenerate: {models: true, std-http-server: true}\n",
@@ -569,6 +587,10 @@ components:
 
         assert!(code.contains("\"sent\""), "the plain field is a part: {code}");
         assert!(!code.contains("\"served\""), "the read-only field is no part: {code}");
+        assert!(
+            !code.contains("\"elsewhere\""),
+            "the read-only cross-file field is no part: {code}"
+        );
     }
 
     #[test]
