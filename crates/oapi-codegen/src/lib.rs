@@ -34,6 +34,15 @@ pub use crate::package::PackageDrift;
 pub use crate::package::check_package;
 pub use crate::package::write_package;
 
+/// The number of warnings this process reported, for the configuration and
+/// for the spec together.
+///
+/// A warning goes to stderr and does not fail a run. The CLI reads this count
+/// for `--deny-warnings`, which turns a warning into a failed run.
+pub fn warnings_reported() -> usize {
+    return diagnostic::reported_count();
+}
+
 /// Everything one run lowers from a spec, ready for either output layout.
 enum Lowered {
     /// The run emits models, and optionally server-URL constants, only.

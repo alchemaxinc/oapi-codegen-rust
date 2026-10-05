@@ -42,6 +42,12 @@ enum CliFailure {
         /// What the configuration requested.
         generate: Generate,
     },
+    /// `--deny-warnings` is set and the run reported a warning. Nothing was
+    /// written or compared.
+    DeniedWarnings {
+        /// How many warnings the run reported.
+        count: usize,
+    },
     /// `--check` found the output file missing or out of date. Nothing was
     /// written, because the flag asks for a comparison only.
     Drift {
@@ -67,6 +73,9 @@ impl CliFailure {
             }
             CliFailure::EmptyOutput { spec, stats, generate } => {
                 console::report_empty_output(spec, stats, generate);
+            }
+            CliFailure::DeniedWarnings { count } => {
+                console::report_denied_warnings(*count);
             }
             CliFailure::Drift { path, kind } => {
                 console::report_drift(path, *kind);
@@ -125,6 +134,13 @@ fn run(cli: &Cli) -> std::result::Result<(), CliFailure> {
             stats,
             generate: config.generate.clone(),
         });
+    }
+
+    // Every warning is out by now: loading the configuration and lowering the
+    // spec report them, and both are complete.
+    let warnings = oapi_codegen::warnings_reported();
+    if cli.deny_warnings && warnings > 0 {
+        return Err(CliFailure::DeniedWarnings { count: warnings });
     }
 
     if cli.check {

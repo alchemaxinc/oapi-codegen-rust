@@ -313,8 +313,9 @@ The catalogue is not a complete OpenAPI value validator. Lowering still applies
 its own value and combination checks.
 
 Warnings go to stderr for library calls and CLI commands, including `--check`.
-A warning alone does not change the exit code. Drift and generation errors still
-make `--check` fail.
+A warning alone does not change the exit code, unless the command line sets
+`--deny-warnings`. With that flag, a run that reports a warning exits with code 1
+and writes nothing. Drift and generation errors still make `--check` fail.
 
 Configuration diagnostics use the serialized shape of `Config::default()`.
 This keeps recognized configuration keys in the Rust types rather than in a
