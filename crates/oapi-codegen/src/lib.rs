@@ -75,9 +75,9 @@ fn lower_spec(spec_path: &Path, config: &Config) -> Result<Lowered> {
     if config.generate.embedded_spec {
         return Err(Error::Unimplemented("embedded-spec".to_owned()));
     }
-    let mut spec = Spec::load(spec_path)?;
-    spec.apply_filters(&config.output_options);
     let want_server = config.generate.std_http_server;
+    let mut spec = Spec::load_for(spec_path, want_server, &config.output_options)?;
+    spec.apply_filters(&config.output_options);
     let want_client = config.generate.client;
     let server_urls = if config.generate.server_urls {
         lower::lower_server_urls(&spec)?
