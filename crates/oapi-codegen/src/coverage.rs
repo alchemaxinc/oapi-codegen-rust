@@ -10,6 +10,57 @@ use crate::error::Result;
 use crate::lower::validate::Diagnostics;
 
 const MAX_DEPTH: usize = 128;
+/// The component schemas that a parameter names through `$ref`, as the paths
+/// of those schemas. A parameter may itself be a `$ref` to a component
+/// parameter, which is followed one step. The parameter lowering resolves the
+/// reference and maps the type, so the component is read by type there even
+/// when a model names it too.
+fn parameter_targets(document: &Value) -> Vec<String> {
+    let component_parameter = |reference: &str| {
+        let name = reference.strip_prefix("#/components/parameters/")?;
+        return document.get("components")?.get("parameters")?.get(name);
+    };
+    let schema_target = |parameter: &Value| {
+        let parameter = match parameter.get("$ref").and_then(Value::as_str) {
+            Some(reference) => component_parameter(reference)?,
+            None => parameter,
+        };
+        let reference = parameter.get("schema")?.get("$ref")?.as_str()?;
+        let name = reference.strip_prefix("#/components/schemas/")?;
+        return Some(pointer("/components/schemas", name));
+    };
+    let mut targets = Vec::new();
+    let mut collect = |parameters: Option<&Value>| {
+        for parameter in parameters.and_then(Value::as_sequence).into_iter().flatten() {
+            targets.extend(schema_target(parameter));
+        }
+    };
+    for item in document
+        .get("paths")
+        .and_then(Value::as_mapping)
+        .into_iter()
+        .flat_map(|paths| return paths.values())
+    {
+        collect(item.get("parameters"));
+        for method in OPERATION_KEYS {
+            collect(
+                item.get(*method)
+                    .and_then(|operation| return operation.get("parameters")),
+            );
+        }
+    }
+    for parameter in document
+        .get("components")
+        .and_then(|components| return components.get("parameters"))
+        .and_then(Value::as_mapping)
+        .into_iter()
+        .flat_map(|parameters| return parameters.values())
+    {
+        targets.extend(schema_target(parameter));
+    }
+    return targets;
+}
+
 /// The keys of a path item that hold an operation.
 const OPERATION_KEYS: &[&str] = &["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 
@@ -387,10 +438,15 @@ struct Sweep<'a> {
     /// the server is generated, its query struct checks the constraints of such
     /// a schema, so the note about unchecked constraints does not apply to it.
     query_schemas: Vec<String>,
-    /// The paths of the schemas that sit directly in a parameter, of any kind.
-    /// The parameter lowering reads the type and not `x-rust-type`, so such a
-    /// schema replaces nothing even when it carries the extension.
-    parameter_schemas: Vec<String>,
+    /// The paths of the schemas that the parameter lowering and the inline
+    /// body lowering read by type: the schema of a parameter, the inline schema
+    /// of a media type, and a component schema that a parameter names. Those
+    /// lowerings map a scalar, an array, and a map by type and do not read
+    /// `x-rust-type`, so such a schema, and what it reaches through `items` and
+    /// `additionalProperties`, replaces nothing even when it carries the
+    /// extension. An object with properties below one is hoisted and lowered
+    /// as a model, which reads the extension again.
+    read_by_type: Vec<String>,
     /// The paths of the property schemas that hold a same-document `$ref` and
     /// a `description` beside it. See [`wrap_described_refs`].
     described_refs: Vec<String>,
@@ -470,7 +526,7 @@ fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
         removed_at: None,
         replaced_at: None,
         query_schemas: Vec::new(),
-        parameter_schemas: Vec::new(),
+        read_by_type: parameter_targets(value),
         described_refs: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
@@ -515,13 +571,13 @@ impl Sweep<'_> {
         if removed_here {
             self.removed_at = Some(depth);
         }
-        if context == Context::Parameter {
-            self.parameter_schemas.push(pointer(path, "schema"));
+        if matches!(context, Context::Parameter | Context::MediaType) {
+            self.read_by_type.push(pointer(path, "schema"));
         }
         let replaces_here = matches!(context, Context::Schema | Context::PropertySchema)
             && value.get("x-rust-type").is_some()
             && self.replaced_at.is_none()
-            && !self.parameter_schemas.iter().any(|schema| return schema == path);
+            && !self.is_read_by_type(path);
         if replaces_here {
             self.replaced_at = Some(depth);
         }
@@ -602,6 +658,21 @@ impl Sweep<'_> {
         if removed_here {
             self.removed_at = None;
         }
+    }
+
+    /// Whether the lowering reads the schema at `path` by type and not through
+    /// `x-rust-type`: the schema is one of `read_by_type`, or lies below one
+    /// through `items` and `additionalProperties` only.
+    fn is_read_by_type(&self, path: &str) -> bool {
+        return self.read_by_type.iter().any(|root| {
+            let Some(rest) = path.strip_prefix(root.as_str()) else {
+                return false;
+            };
+            return rest
+                .split('/')
+                .skip(1)
+                .all(|segment| return matches!(segment, "" | "items" | "additionalProperties"));
+        });
     }
 
     /// Whether the run's filters remove this operation.
@@ -1389,13 +1460,30 @@ security: [{arbitrary: [custom]}]
             ),
             // The parameter lowering reads the type and not the extension, so a
             // query schema with `x-rust-type` replaces nothing, and its items
-            // keep their note.
+            // keep their note. The same holds through a `$ref`, and for the
+            // inline schema of a body.
             (
                 parameter(
                     "query",
                     "{x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}",
                 ),
                 true,
+            ),
+            (
+                format!(
+                    "{}\ncomponents: {{schemas: {{Stamp: {{x-rust-type: 'crate::Stamp', type: array, items: {{type: string, maxLength: 3}}}}}}}}",
+                    parameter("query", "{$ref: '#/components/schemas/Stamp'}")
+                ),
+                true,
+            ),
+            (
+                "paths: {/a: {post: {requestBody: {content: {application/json: {schema: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}}}}, responses: {}}}}".to_owned(),
+                true,
+            ),
+            // A model property reads the extension, so below it the note is quiet.
+            (
+                component("{type: object, properties: {stamp: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}}}"),
+                false,
             ),
         ] {
             let sweep = inspect_yaml(&yaml);
