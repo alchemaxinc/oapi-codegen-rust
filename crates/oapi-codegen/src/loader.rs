@@ -71,20 +71,30 @@ pub struct Spec {
 
 impl Spec {
     /// Load and parse an OpenAPI document from a YAML or JSON file, for a run
-    /// that generates no server and filters nothing.
+    /// that generates models only and filters nothing.
     pub fn load(path: &Path) -> Result<Self> {
-        return Self::load_for(path, false, &crate::config::OutputOptions::default());
+        return Self::load_for(
+            path,
+            &crate::config::Generate::default(),
+            &crate::config::OutputOptions::default(),
+        );
     }
 
     /// Load and parse an OpenAPI document from a YAML or JSON file.
     ///
-    /// `server` states whether the run generates the server, and `options`
-    /// holds the filters the run applies. A server checks a query parameter's
-    /// constraints in the generated query struct, so for an operation the run
-    /// keeps the inspection reports no unchecked constraint there.
-    pub fn load_for(path: &Path, server: bool, options: &crate::config::OutputOptions) -> Result<Self> {
+    /// `generate` states what the run generates, and `options` holds the
+    /// filters it applies. The inspection reads both: a server checks a query
+    /// parameter's constraints in the generated query struct, and a run that
+    /// lowers operations reads their parameters and bodies by type.
+    pub fn load_for(
+        path: &Path,
+        generate: &crate::config::Generate,
+        options: &crate::config::OutputOptions,
+    ) -> Result<Self> {
         let run = crate::coverage::Run {
-            server,
+            server: generate.std_http_server,
+            operations: generate.std_http_server || generate.client,
+            referenced: false,
             filters: options.clone(),
         };
         let text = std::fs::read_to_string(path).map_err(|source| {
@@ -164,7 +174,13 @@ impl Spec {
         // before the typed parse for the same reason.
         check_spec_version(file, &value)?;
         check_top_level_keys(&value)?;
-        let described = crate::coverage::check(file, &value, &self.run)?;
+        // Another document's operations name this document's components, so
+        // the inspection reads those components as used.
+        let run = crate::coverage::Run {
+            referenced: true,
+            ..self.run.clone()
+        };
+        let described = crate::coverage::check(file, &value, &run)?;
         let mut value = value;
         crate::coverage::wrap_described_refs(&mut value, &described);
         let parsed: OpenAPI = serde_yaml::from_value(value).map_err(|source| {

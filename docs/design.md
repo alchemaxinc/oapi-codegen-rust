@@ -606,14 +606,20 @@ warning. A schema below an `x-rust-type` produces none, because the custom type
 reads the whole value and no generated code could check it there; the same
 holds for the other notes about what the lowering would not enforce. The
 exception is a schema that the parameter lowering, the inline body lowering, or
-the multipart lowering reads by type: a parameter's schema, a component a
-parameter or a multipart body names, through any alias chain and any chain of
-component parameters or request bodies, and the inline schema of a body,
+the multipart lowering reads by type. The inspection finds those from what the
+run lowers: for each operation the run keeps, its parameters, including the
+path item's own unless the operation overrides them, its request body, and its
+responses, each followed through any chain of component references. A
+parameter's schema counts, a component a parameter or a multipart body names
+counts through any alias chain, and an inline body or response schema counts,
 together with what they reach through `items`, `additionalProperties`, a
-one-member `allOf`, and, for a multipart body, each property. Only an operation
-the run keeps counts. Those lowerings do not read the extension, so the notes
-stay there. A form-encoded body reuses the named model, which reads the
-extension, so it is not an exception. A type alias, an array item, and an inline body schema are examples.
+one-member `allOf`, and, for a multipart body, each property. Those lowerings
+do not read the extension, so the notes stay there. A body or response that
+names a model reuses it, and the model reads the extension, so it is not an
+exception; nor is a form-encoded body. A models-only run lowers no operation
+and reads nothing by type. In a document that another document references, every
+component parameter, request body, and response counts, because the other
+document's operations name them. A type alias, an array item, and an inline body schema are examples.
 Two uses produce no warning. When the run generates the server, the schema of a
 query parameter in an operation the run keeps becomes a field of the query
 struct, which checks it; a client only writes a query, so a run with no server

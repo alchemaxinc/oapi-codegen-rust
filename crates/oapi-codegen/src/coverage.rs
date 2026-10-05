@@ -10,42 +10,81 @@ use crate::error::Result;
 use crate::lower::validate::Diagnostics;
 
 const MAX_DEPTH: usize = 128;
-/// The component schemas that a parameter or a multipart body names through
-/// `$ref`, as the paths of those schemas, each with the segments the lowering
-/// follows below it by type.
+/// The schemas that the lowering reads by type, found from what the run
+/// lowers: the parameters, request bodies, and responses of each operation the
+/// run keeps, and, in a referenced document, every component parameter,
+/// request body, and response, because another document's operations name
+/// them.
 ///
-/// Only an operation the run keeps is read: the filters remove the others
-/// before anything is lowered, and a path item's own parameters are read only
-/// while one of its operations stays. A parameter that is a `$ref` to a
-/// component parameter, and a request body that is a `$ref` to a component
-/// request body, are followed the way the resolver follows them. A component
-/// schema that is itself a `$ref` is an alias, and the lowering resolves an
-/// alias chain, so every name on the chain is collected. The lowering of a
-/// parameter and of a multipart body reads the component by type even when a
+/// A path item's own parameters count for an operation unless it declares a
+/// parameter of the same name and location, as the lowering overrides them. A
+/// `$ref` to a component parameter, request body, or response is followed the
+/// way the resolver follows it. A component schema that is itself a `$ref` is
+/// an alias, and the lowering resolves an alias chain, so every name on the
+/// chain is collected. The lowering reads such a component by type even when a
 /// model names it too, so the model use does not lift the mark.
-fn referenced_by_type(document: &Value, run: &Run) -> Vec<ReadByType> {
-    let mut targets = Vec::new();
-    let paths = document
-        .get("paths")
-        .and_then(Value::as_mapping)
-        .into_iter()
-        .flat_map(|paths| return paths.values());
-    for item in paths {
-        let kept: Vec<&Value> = OPERATION_KEYS
-            .iter()
-            .filter_map(|method| return item.get(*method))
-            .filter(|operation| return !run_removes(run, operation))
-            .collect();
-        if kept.is_empty() {
-            continue;
-        }
-        targets.extend(parameter_targets(document, item.get("parameters")));
-        for operation in kept {
-            targets.extend(parameter_targets(document, operation.get("parameters")));
-            targets.extend(multipart_body_targets(document, operation.get("requestBody")));
+///
+/// A run that lowers no operation reads nothing by type: a models-only run
+/// turns a custom type schema into an alias and nothing else.
+fn read_by_type(document: &Value, run: &Run) -> Vec<ReadByType> {
+    let mut found = Vec::new();
+    if run.referenced {
+        for (kind, read) in [
+            ("parameters", Use::Parameter),
+            ("requestBodies", Use::Body),
+            ("responses", Use::Response),
+        ] {
+            let components = document
+                .get("components")
+                .and_then(|components| return components.get(kind))
+                .and_then(Value::as_mapping);
+            for (name, value) in components.into_iter().flatten() {
+                if let Some(name) = name.as_str() {
+                    read.collect(
+                        document,
+                        &pointer(&pointer("/components", kind), name),
+                        value,
+                        &mut found,
+                    );
+                }
+            }
         }
     }
-    return targets;
+    if !run.operations {
+        return found;
+    }
+    let paths = document.get("paths").and_then(Value::as_mapping);
+    for (route, item) in paths.into_iter().flatten() {
+        let Some(route) = route.as_str() else {
+            continue;
+        };
+        let item_path = pointer("/paths", route);
+        let kept: Vec<(&str, &Value)> = OPERATION_KEYS
+            .iter()
+            .filter_map(|method| return item.get(*method).map(|operation| return (*method, operation)))
+            .filter(|(_, operation)| return !run_removes(run, operation))
+            .collect();
+        for (method, operation) in kept {
+            let operation_path = pointer(&item_path, method);
+            for (path, parameter) in effective_parameters(document, &item_path, item, &operation_path, operation) {
+                Use::Parameter.collect(document, &path, parameter, &mut found);
+            }
+            if let Some(body) = operation.get("requestBody") {
+                Use::Body.collect(document, &pointer(&operation_path, "requestBody"), body, &mut found);
+            }
+            let responses = operation.get("responses").and_then(Value::as_mapping);
+            for (code, response) in responses.into_iter().flatten() {
+                let code = match code {
+                    Value::String(code) => code.clone(),
+                    Value::Number(code) => code.to_string(),
+                    _ => continue,
+                };
+                let path = pointer(&pointer(&operation_path, "responses"), &code);
+                Use::Response.collect(document, &path, response, &mut found);
+            }
+        }
+    }
+    return found;
 }
 
 /// Whether the filters of `run` remove `operation`.
@@ -59,65 +98,114 @@ fn run_removes(run: &Run, operation: &Value) -> bool {
     return crate::filter::removes_operation(&run.filters, &tags, id);
 }
 
-/// The schemas the parameters in `parameters` name, each read through its
-/// collections. A parameter that is a `$ref` to a component parameter is
-/// followed the way the resolver follows it.
-fn parameter_targets(document: &Value, parameters: Option<&Value>) -> Vec<ReadByType> {
-    let mut targets = Vec::new();
-    for parameter in parameters.and_then(Value::as_sequence).into_iter().flatten() {
-        let parameter = follow_component_references(document, "parameters", parameter);
-        if let Some(reference) = schema_reference(parameter) {
-            targets.extend(alias_chain(document, reference).map(ReadByType::through_collections));
+/// The parameters an operation reads, with the path of each: its own, and the
+/// path item's own except where the operation declares the same name and
+/// location.
+fn effective_parameters<'a>(
+    document: &'a Value,
+    item_path: &str,
+    item: &'a Value,
+    operation_path: &str,
+    operation: &'a Value,
+) -> Vec<(String, &'a Value)> {
+    let listed = |owner: &'a Value, owner_path: &str| {
+        let parameters = owner.get("parameters").and_then(Value::as_sequence);
+        let list = pointer(owner_path, "parameters");
+        return parameters
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .map(|(index, parameter)| return (pointer(&list, &index.to_string()), parameter))
+            .collect::<Vec<_>>();
+    };
+    let identity = |parameter: &Value| {
+        let parameter =
+            follow_references(document, "parameters", "", parameter).map(|(_, parameter)| return parameter)?;
+        let name = parameter.get("name")?.as_str()?.to_owned();
+        let location = parameter.get("in")?.as_str()?.to_owned();
+        return Some((name, location));
+    };
+    let own = listed(operation, operation_path);
+    let declared: Vec<_> = own
+        .iter()
+        .filter_map(|(_, parameter)| return identity(parameter))
+        .collect();
+    let inherited = listed(item, item_path)
+        .into_iter()
+        .filter(|(_, parameter)| return identity(parameter).is_none_or(|key| return !declared.contains(&key)));
+    return inherited.chain(own).collect();
+}
+
+/// One kind of use the lowering reads by type.
+#[derive(Debug, Clone, Copy)]
+enum Use {
+    /// A parameter: its schema is read through its collections. The parameter
+    /// lowering resolves a `$ref` and maps the type, so a named component is
+    /// read the same way.
+    Parameter,
+    /// A request body: an inline schema is read through its collections, and a
+    /// multipart one through its properties. A named component is read by
+    /// type only for a multipart body; the other bodies reuse the model, which
+    /// reads `x-rust-type`.
+    Body,
+    /// A response: an inline schema is read through its collections. A named
+    /// component reuses the model.
+    Response,
+}
+
+impl Use {
+    fn collect(self, document: &Value, path: &str, value: &Value, found: &mut Vec<ReadByType>) {
+        let kind = match self {
+            Use::Parameter => "parameters",
+            Use::Body => "requestBodies",
+            Use::Response => "responses",
+        };
+        let Some((path, value)) = follow_references(document, kind, path, value) else {
+            return;
+        };
+        if let Use::Parameter = self {
+            let schema = pointer(&path, "schema");
+            match schema_reference(Some(value)) {
+                Some(reference) => found.extend(alias_chain(document, reference).map(ReadByType::through_collections)),
+                None => found.push(ReadByType::through_collections(schema)),
+            }
+            return;
+        }
+        let content = value.get("content").and_then(Value::as_mapping);
+        for (name, media) in content.into_iter().flatten() {
+            let Some(name) = name.as_str() else {
+                continue;
+            };
+            let multipart = matches!(self, Use::Body) && is_multipart(name);
+            let read = if multipart {
+                ReadByType::through_properties
+            } else {
+                ReadByType::through_collections
+            };
+            match schema_reference(Some(media)) {
+                Some(reference) if multipart => found.extend(alias_chain(document, reference).map(read)),
+                Some(_) => {}
+                None => found.push(read(pointer(&pointer(&pointer(&path, "content"), name), "schema"))),
+            }
         }
     }
-    return targets;
 }
 
-/// The schema a multipart body names, read through its properties. A body
-/// that is a `$ref` to a component request body is followed the way the
-/// resolver follows it. A form-encoded body is not included: that lowering
-/// reuses the named model, which reads `x-rust-type`.
-fn multipart_body_targets(document: &Value, body: Option<&Value>) -> Vec<ReadByType> {
-    let body = body.and_then(|body| return follow_component_references(document, "requestBodies", body));
-    // The body lowering reads the first entry whose media type is multipart,
-    // whatever its case and parameters.
-    let media = body
-        .and_then(|body| return body.get("content"))
-        .and_then(Value::as_mapping)
-        .and_then(|content| {
-            return content
-                .iter()
-                .find(|(name, _)| return name.as_str().is_some_and(is_multipart))
-                .map(|(_, media)| return media);
-        });
-    return schema_reference(media)
-        .map(|reference| {
-            return alias_chain(document, reference)
-                .map(ReadByType::through_properties)
-                .collect();
-        })
-        .unwrap_or_default();
-}
-
-/// `value`, or the component of `kind` it names when it is a `$ref`, following
-/// a chain of such references the way the resolver does, up to its depth.
-fn follow_component_references<'a>(document: &'a Value, kind: &str, value: &'a Value) -> Option<&'a Value> {
-    let mut current = value;
+/// `value` with its `path`, or the component of `kind` it names when it is a
+/// `$ref`, following a chain of such references the way the resolver does, up
+/// to its depth. The last lookup may reach the value itself, as the resolver's
+/// last step does; one more reference is one too many.
+fn follow_references<'a>(document: &'a Value, kind: &str, path: &str, value: &'a Value) -> Option<(String, &'a Value)> {
+    let mut current = (path.to_owned(), value);
     for _ in 0..crate::loader::MAX_REF_DEPTH {
-        let Some(reference) = current.get("$ref").and_then(Value::as_str) else {
+        let Some(reference) = current.1.get("$ref").and_then(Value::as_str) else {
             return Some(current);
         };
-        current = component(document, kind, reference)?;
+        let name = reference.strip_prefix(&format!("#/components/{kind}/"))?;
+        let component = document.get("components")?.get(kind)?.get(name)?;
+        current = (pointer(&pointer("/components", kind), name), component);
     }
-    // The last lookup may have reached the value itself, as the resolver's
-    // last step does; one more reference is one too many.
-    return current.get("$ref").is_none().then_some(current);
-}
-
-/// The component of `kind` that a same-document `reference` names.
-fn component<'a>(document: &'a Value, kind: &str, reference: &str) -> Option<&'a Value> {
-    let name = reference.strip_prefix(&format!("#/components/{kind}/"))?;
-    return document.get("components")?.get(kind)?.get(name);
+    return current.1.get("$ref").is_none().then_some(current);
 }
 
 /// The `$ref` in the `schema` of `holder`, when it has one.
@@ -134,7 +222,10 @@ fn alias_chain<'a>(document: &'a Value, reference: &str) -> impl Iterator<Item =
     return std::iter::from_fn(move || {
         let name = current.take()?;
         budget = budget.checked_sub(1)?;
-        current = component(document, "schemas", &format!("#/components/schemas/{name}"))
+        current = document
+            .get("components")
+            .and_then(|components| return components.get("schemas"))
+            .and_then(|schemas| return schemas.get(&name))
             .and_then(|schema| return schema.get("$ref"))
             .and_then(Value::as_str)
             .and_then(|next| return next.strip_prefix("#/components/schemas/"))
@@ -145,7 +236,7 @@ fn alias_chain<'a>(document: &'a Value, reference: &str) -> impl Iterator<Item =
 
 /// Whether `name` is the media type whose body the multipart lowering reads
 /// field by field, by type, read the way that lowering reads it: without case
-/// and without parameters. A form-encoded body reuses the named model instead.
+/// and without parameters.
 fn is_multipart(name: &str) -> bool {
     let base = name.split(';').next().unwrap_or(name).trim().to_ascii_lowercase();
     return base == "multipart/form-data";
@@ -554,6 +645,12 @@ pub(crate) struct Run {
     /// Whether the run generates the server. Only the server reads a query
     /// parameter, so only it checks the constraints of one.
     pub(crate) server: bool,
+    /// Whether the run lowers operations at all, for a server or a client. A
+    /// models-only run reads no parameter and no body.
+    pub(crate) operations: bool,
+    /// Whether the document is one that another document references. Its
+    /// components exist to be named from that document's operations.
+    pub(crate) referenced: bool,
     /// The filters the run applies. An operation they remove generates no
     /// query struct, so nothing checks its parameters.
     pub(crate) filters: crate::config::OutputOptions,
@@ -575,14 +672,10 @@ struct Sweep<'a> {
     /// the server is generated, its query struct checks the constraints of such
     /// a schema, so the note about unchecked constraints does not apply to it.
     query_schemas: Vec<String>,
-    /// The schemas that the parameter lowering, the inline body lowering, and
-    /// the form lowering read by type: the schema of a parameter, the inline
-    /// schema of a media type, and a component schema that a parameter or a
-    /// form body names. Those lowerings map a scalar, an array, and a map by
-    /// type and do not read `x-rust-type`, so such a schema, and what it
-    /// reaches along that read, replaces nothing even when it carries the
-    /// extension. An object with properties that a model reads is lowered as a
-    /// model, which reads the extension again.
+    /// The schemas that the lowering reads by type, from [`read_by_type`].
+    /// Such a schema, and what it reaches along that read, replaces nothing
+    /// even when it carries `x-rust-type`. An object with properties that a
+    /// model reads is lowered as a model, which reads the extension again.
     read_by_type: Vec<ReadByType>,
     /// The paths of the property schemas that hold a same-document `$ref` and
     /// a `description` beside it. See [`wrap_described_refs`].
@@ -663,7 +756,7 @@ fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
         removed_at: None,
         replaced_at: None,
         query_schemas: Vec::new(),
-        read_by_type: referenced_by_type(value, run),
+        read_by_type: read_by_type(value, run),
         described_refs: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
@@ -707,24 +800,6 @@ impl Sweep<'_> {
             };
         if removed_here {
             self.removed_at = Some(depth);
-        }
-        if context == Context::Parameter {
-            self.read_by_type
-                .push(ReadByType::through_collections(pointer(path, "schema")));
-        }
-        if context == Context::MediaType {
-            let name = path
-                .rsplit('/')
-                .next()
-                .unwrap_or("")
-                .replace("~1", "/")
-                .replace("~0", "~");
-            let form = is_multipart(&name);
-            self.read_by_type.push(if form {
-                ReadByType::through_properties(pointer(path, "schema"))
-            } else {
-                ReadByType::through_collections(pointer(path, "schema"))
-            });
         }
         let replaces_here = matches!(context, Context::Schema | Context::PropertySchema)
             && value.get("x-rust-type").is_some()
@@ -920,13 +995,13 @@ impl Sweep<'_> {
                         "two members of this oneOf are the same schema, so no value of that shape matches exactly one of them as the document requires",
                     );
                 }
-                "default" if value.is_null() => {
+                "default" if value.is_null() && self.replaced_at.is_none() => {
                     self.warn(
                         path,
                         "the parser discards a null default, so an absent property does not receive explicit null",
                     );
                 }
-                "default" if context == Context::Schema => {
+                "default" if context == Context::Schema && self.replaced_at.is_none() => {
                     self.warn(
                         path,
                         "defaults are applied only at supported property and query-parameter uses",
@@ -980,7 +1055,7 @@ impl Sweep<'_> {
                     "nullable values have no supported null representation in this wire format",
                 );
             }
-            if crate::lower::default::unsupported_nullable_default(&schema) {
+            if lowered && crate::lower::default::unsupported_nullable_default(&schema) {
                 self.warn(
                     &pointer(path, "default"),
                     "this nullable default has no supported Rust literal and is ignored",
@@ -1019,7 +1094,7 @@ impl Sweep<'_> {
                 "x-rust-derive requires x-rust-type and is otherwise ignored",
             );
         }
-        if matches!(kind, Some("number" | "boolean")) && value.get("enum").is_some() {
+        if lowered && matches!(kind, Some("number" | "boolean")) && value.get("enum").is_some() {
             self.warn(
                 &pointer(path, "enum"),
                 "number and boolean enum restrictions are not enforced",
@@ -1032,7 +1107,7 @@ impl Sweep<'_> {
                 Some("number") => matches!(format, "float" | "double"),
                 _ => false,
             };
-            if !handled {
+            if lowered && !handled {
                 self.warn(
                     &pointer(path, "format"),
                     "this format is not implemented and the base type is used",
@@ -1141,9 +1216,20 @@ mod tests {
     }
 
     fn inspect_yaml_for(yaml: &str, server: bool, filters: OutputOptions) -> Sweep<'static> {
+        return inspect_yaml_run(
+            yaml,
+            Run {
+                server,
+                operations: true,
+                referenced: false,
+                filters,
+            },
+        );
+    }
+
+    fn inspect_yaml_run(yaml: &str, run: Run) -> Sweep<'static> {
         let value = serde_yaml::from_str(yaml).expect("valid YAML");
-        let run = Box::leak(Box::new(Run { server, filters }));
-        return inspect("spec.yaml", &value, run);
+        return inspect("spec.yaml", &value, Box::leak(Box::new(run)));
     }
 
     #[test]
@@ -1439,6 +1525,18 @@ security: [{arbitrary: [custom]}]
             (
                 "{x-rust-type: 'crate::Inner', allOf: [{type: string, maxLength: 3}]}",
                 "constraints inherited through allOf are not enforced for x-rust-type",
+            ),
+            (
+                "{type: boolean, enum: [true]}",
+                "number and boolean enum restrictions are not enforced",
+            ),
+            (
+                "{type: string, format: custom}",
+                "this format is not implemented and the base type is used",
+            ),
+            (
+                "{type: string, nullable: true, default: null}",
+                "the parser discards a null default",
             ),
         ] {
             let below = inspect_yaml(&format!(
@@ -1802,6 +1900,63 @@ security: [{arbitrary: [custom]}]
         let referenced = "paths: {/a: {get: {operationId: getA, tags: [internal], parameters: [{name: n, in: query, schema: {$ref: '#/components/schemas/Stamp'}}], responses: {}}}}\ncomponents: {schemas: {Stamp: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}}}";
         assert!(filtered(referenced, OutputOptions::default()));
         assert!(!filtered(referenced, exclude));
+    }
+
+    /// What the lowering reads by type follows from what the run lowers, not
+    /// from where a schema sits in the document.
+    #[test]
+    fn a_schema_is_read_by_type_only_where_a_lowered_operation_reads_it() {
+        const NOTE: &str = "constraints are enforced only at supported field uses";
+        let stamp = "{x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}";
+        let noted = |yaml: &str, run: Run| {
+            return inspect_yaml_run(yaml, run)
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE));
+        };
+        let operations = Run {
+            operations: true,
+            ..Run::default()
+        };
+        let models_only = Run::default();
+        let referenced = Run {
+            referenced: true,
+            ..Run::default()
+        };
+
+        // A models-only run lowers no parameter, so the custom type is an alias
+        // and nothing else.
+        let query = format!(
+            "paths: {{/a: {{get: {{parameters: [{{name: n, in: query, schema: {stamp}}}], responses: {{}}}}}}}}"
+        );
+        assert!(noted(&query, operations.clone()));
+        assert!(!noted(&query, models_only.clone()));
+
+        // A path item's parameter that the operation overrides is not read.
+        let overridden = format!(
+            "paths: {{/a: {{parameters: [{{name: n, in: query, schema: {stamp}}}], get: {{parameters: [{{name: n, in: query, schema: {{type: string}}}}], responses: {{}}}}}}}}"
+        );
+        let inherited = format!(
+            "paths: {{/a: {{parameters: [{{name: n, in: query, schema: {stamp}}}], get: {{parameters: [{{name: n, in: header, schema: {{type: string}}}}], responses: {{}}}}}}}}"
+        );
+        assert!(!noted(&overridden, operations.clone()));
+        assert!(noted(&inherited, operations.clone()));
+
+        // A component parameter is read only when a kept operation names it,
+        // or when the document is one that another document references.
+        let unused = format!("paths: {{}}\ncomponents: {{parameters: {{N: {{name: n, in: query, schema: {stamp}}}}}}}");
+        let named = format!(
+            "paths: {{/a: {{get: {{parameters: [{{$ref: '#/components/parameters/N'}}], responses: {{}}}}}}}}\ncomponents: {{parameters: {{N: {{name: n, in: query, schema: {stamp}}}}}}}"
+        );
+        assert!(!noted(&unused, operations.clone()));
+        assert!(noted(&unused, referenced));
+        assert!(noted(&named, operations.clone()));
+
+        // An inline response body is read by type as an inline request body is.
+        let response = format!(
+            "paths: {{/a: {{get: {{responses: {{'200': {{description: ok, content: {{application/json: {{schema: {stamp}}}}}}}}}}}}}}}"
+        );
+        assert!(noted(&response, operations));
     }
 
     #[test]
