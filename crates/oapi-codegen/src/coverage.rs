@@ -677,11 +677,13 @@ impl Sweep<'_> {
             match key {
                 // A `oneOf` asks for exactly one match. Two members that read the
                 // same, apart from their descriptions, match the same values, so
-                // such a value matches two and the union refuses it.
+                // the document admits no value of that shape. This is a fact
+                // about the document, so it holds under `x-rust-type` too, where
+                // the custom type and not generated code reads the value.
                 "oneOf" if value.as_sequence().is_some_and(repeats_a_member) => {
                     self.warn(
                         path,
-                        "two members of this oneOf are the same schema, so a value of that shape matches both and is refused",
+                        "two members of this oneOf are the same schema, so no value of that shape matches exactly one of them as the document requires",
                     );
                 }
                 "default" if value.is_null() => {
@@ -838,9 +840,7 @@ fn repeats_a_member(members: &serde_yaml::Sequence) -> bool {
         .iter()
         .map(|member| {
             let mut shape = member.clone();
-            if let Some(mapping) = shape.as_mapping_mut() {
-                mapping.remove("description");
-            }
+            strip_descriptions(&mut shape);
             return shape;
         })
         .collect();
@@ -848,6 +848,35 @@ fn repeats_a_member(members: &serde_yaml::Sequence) -> bool {
         .iter()
         .enumerate()
         .any(|(index, shape)| return shapes.iter().take(index).any(|earlier| return earlier == shape));
+}
+
+/// The keys of a schema whose value is one schema.
+const SCHEMA_KEYS: &[&str] = &["items", "additionalProperties", "not"];
+/// The keys of a schema whose value is a list of schemas.
+const SCHEMA_LIST_KEYS: &[&str] = &["allOf", "oneOf", "anyOf"];
+
+/// Remove the description of `schema` and of each schema written inside it.
+/// A property name is data and may read `description`, and so may a key inside
+/// `example`, `default`, or an `enum` value, so only the places that hold a
+/// schema are entered.
+fn strip_descriptions(schema: &mut Value) {
+    let Some(mapping) = schema.as_mapping_mut() else {
+        return;
+    };
+    mapping.remove("description");
+    for key in SCHEMA_KEYS {
+        if let Some(inner) = mapping.get_mut(*key) {
+            strip_descriptions(inner);
+        }
+    }
+    for key in SCHEMA_LIST_KEYS {
+        if let Some(Value::Sequence(members)) = mapping.get_mut(*key) {
+            members.iter_mut().for_each(strip_descriptions);
+        }
+    }
+    if let Some(Value::Mapping(properties)) = mapping.get_mut("properties") {
+        properties.values_mut().for_each(strip_descriptions);
+    }
 }
 
 fn response_key(key: &str) -> bool {
@@ -1187,7 +1216,29 @@ security: [{arbitrary: [custom]}]
                 "{oneOf: [{type: string, format: date}, {type: string, format: date-time}, {type: string, format: date-time}]}",
                 true,
             ),
-            // A description does not tell two members apart.
+            // A description does not tell two members apart, at any depth.
+            (
+                "{oneOf: [{type: array, items: {type: string, description: a}}, {type: array, items: {type: string, description: b}}]}",
+                true,
+            ),
+            (
+                "{oneOf: [{type: object, properties: {p: {type: string, description: a}}}, {type: object, properties: {p: {type: string}}}]}",
+                true,
+            ),
+            // A property named `description` is data, and so is an example.
+            (
+                "{oneOf: [{type: object, properties: {description: {type: string}}}, {type: object, properties: {description: {type: integer}}}]}",
+                false,
+            ),
+            (
+                "{oneOf: [{type: string, example: a}, {type: string, example: b}]}",
+                false,
+            ),
+            // The fact holds whichever type reads the value.
+            (
+                "{x-rust-type: 'crate::Stamp', oneOf: [{type: string}, {type: string}]}",
+                true,
+            ),
             (
                 "{oneOf: [{type: string, description: a}, {type: string, description: b}]}",
                 true,

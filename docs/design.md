@@ -492,7 +492,7 @@ An accessor name that conflicts with another method produces a generation error.
 ### Deliberate limits
 
 Constraints affect matching only where the Rust representation enforces them. There is no separate schema validation engine.
-A constraint that no generated code checks produces a warning at its own position, and that warning is the one signal of a match count the document would not give. A union produces no warning of its own, with one exception: a `oneOf` whose two members are the same schema, apart from their descriptions, refuses every value of that shape, and that is reported.
+A constraint that no generated code checks produces a warning at its own position, and that warning is the one signal of a match count the document would not give. A union produces no warning of its own, with one exception: a `oneOf` whose two members are the same schema, apart from their descriptions at any depth, admits no value of that shape, and that is reported whichever type reads the value.
 
 Two schemas with disjoint numeric bounds can lower to aliases of the same Rust type.
 Both aliases accept the same values, so their `oneOf` rejects those values as ambiguous.
