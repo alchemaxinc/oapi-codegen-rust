@@ -10,55 +10,166 @@ use crate::error::Result;
 use crate::lower::validate::Diagnostics;
 
 const MAX_DEPTH: usize = 128;
-/// The component schemas that a parameter names through `$ref`, as the paths
-/// of those schemas. A parameter may itself be a `$ref` to a component
-/// parameter, which is followed one step. The parameter lowering resolves the
-/// reference and maps the type, so the component is read by type there even
-/// when a model names it too.
-fn parameter_targets(document: &Value) -> Vec<String> {
-    let component_parameter = |reference: &str| {
-        let name = reference.strip_prefix("#/components/parameters/")?;
-        return document.get("components")?.get("parameters")?.get(name);
-    };
-    let schema_target = |parameter: &Value| {
-        let parameter = match parameter.get("$ref").and_then(Value::as_str) {
-            Some(reference) => component_parameter(reference)?,
-            None => parameter,
-        };
-        let reference = parameter.get("schema")?.get("$ref")?.as_str()?;
-        let name = reference.strip_prefix("#/components/schemas/")?;
-        return Some(pointer("/components/schemas", name));
-    };
+/// The component schemas that a parameter or a form body names through `$ref`,
+/// as the paths of those schemas, each with the segments the lowering follows
+/// below it by type.
+///
+/// A parameter may itself be a `$ref` to a component parameter, and a request
+/// body a `$ref` to a component request body; each is followed one step. A
+/// component schema that is itself a `$ref` is an alias, and the lowering
+/// resolves an alias chain, so every name on the chain is collected. The
+/// lowering of a parameter and of a form body reads the component by type even
+/// when a model names it too, so the model use does not lift the mark.
+fn referenced_by_type(document: &Value) -> Vec<ReadByType> {
     let mut targets = Vec::new();
-    let mut collect = |parameters: Option<&Value>| {
-        for parameter in parameters.and_then(Value::as_sequence).into_iter().flatten() {
-            targets.extend(schema_target(parameter));
-        }
-    };
-    for item in document
+    let paths = document
         .get("paths")
         .and_then(Value::as_mapping)
         .into_iter()
-        .flat_map(|paths| return paths.values())
-    {
-        collect(item.get("parameters"));
+        .flat_map(|paths| return paths.values());
+    for item in paths {
+        targets.extend(parameter_targets(document, item.get("parameters")));
         for method in OPERATION_KEYS {
-            collect(
-                item.get(*method)
-                    .and_then(|operation| return operation.get("parameters")),
-            );
+            let operation = item.get(*method);
+            targets.extend(parameter_targets(
+                document,
+                operation.and_then(|operation| return operation.get("parameters")),
+            ));
+            targets.extend(form_body_targets(
+                document,
+                operation.and_then(|operation| return operation.get("requestBody")),
+            ));
         }
     }
-    for parameter in document
-        .get("components")
-        .and_then(|components| return components.get("parameters"))
-        .and_then(Value::as_mapping)
+    let component_parameters = component_map(document, "parameters")
         .into_iter()
-        .flat_map(|parameters| return parameters.values())
-    {
-        targets.extend(schema_target(parameter));
+        .flat_map(|parameters| return parameters.values());
+    for parameter in component_parameters {
+        if let Some(reference) = schema_reference(Some(parameter)) {
+            targets.extend(alias_chain(document, reference).map(ReadByType::through_collections));
+        }
     }
     return targets;
+}
+
+/// The schemas the parameters in `parameters` name, each read through its
+/// collections. A parameter that is a `$ref` to a component parameter is
+/// followed one step.
+fn parameter_targets(document: &Value, parameters: Option<&Value>) -> Vec<ReadByType> {
+    let mut targets = Vec::new();
+    for parameter in parameters.and_then(Value::as_sequence).into_iter().flatten() {
+        let parameter = match parameter.get("$ref").and_then(Value::as_str) {
+            Some(reference) => component(document, "parameters", reference),
+            None => Some(parameter),
+        };
+        if let Some(reference) = schema_reference(parameter) {
+            targets.extend(alias_chain(document, reference).map(ReadByType::through_collections));
+        }
+    }
+    return targets;
+}
+
+/// The schemas a form body names, each read through its properties. A body
+/// that is a `$ref` to a component request body is followed one step.
+fn form_body_targets(document: &Value, body: Option<&Value>) -> Vec<ReadByType> {
+    let body = match body.and_then(|body| return body.get("$ref")).and_then(Value::as_str) {
+        Some(reference) => component(document, "requestBodies", reference),
+        None => body,
+    };
+    let mut targets = Vec::new();
+    for media in FORM_MEDIA_TYPES {
+        let media = body
+            .and_then(|body| return body.get("content"))
+            .and_then(|content| return content.get(*media));
+        if let Some(reference) = schema_reference(media) {
+            targets.extend(alias_chain(document, reference).map(ReadByType::through_properties));
+        }
+    }
+    return targets;
+}
+
+/// The `components.<kind>` map of the document.
+fn component_map<'a>(document: &'a Value, kind: &str) -> Option<&'a serde_yaml::Mapping> {
+    return document.get("components")?.get(kind)?.as_mapping();
+}
+
+/// The component of `kind` that a same-document `reference` names.
+fn component<'a>(document: &'a Value, kind: &str, reference: &str) -> Option<&'a Value> {
+    let name = reference.strip_prefix(&format!("#/components/{kind}/"))?;
+    return document.get("components")?.get(kind)?.get(name);
+}
+
+/// The `$ref` in the `schema` of `holder`, when it has one.
+fn schema_reference(holder: Option<&Value>) -> Option<&str> {
+    return holder?.get("schema")?.get("$ref")?.as_str();
+}
+
+/// The paths of every component schema on the alias chain that starts at
+/// `reference`, in the order the resolver follows them and up to the depth it
+/// follows. A component schema that is itself a `$ref` is an alias.
+fn alias_chain<'a>(document: &'a Value, reference: &str) -> impl Iterator<Item = String> + 'a {
+    let mut current = reference.strip_prefix("#/components/schemas/").map(str::to_owned);
+    let mut budget = crate::loader::MAX_REF_DEPTH;
+    return std::iter::from_fn(move || {
+        let name = current.take()?;
+        budget = budget.checked_sub(1)?;
+        current = component(document, "schemas", &format!("#/components/schemas/{name}"))
+            .and_then(|schema| return schema.get("$ref"))
+            .and_then(Value::as_str)
+            .and_then(|next| return next.strip_prefix("#/components/schemas/"))
+            .map(str::to_owned);
+        return Some(pointer("/components/schemas", &name));
+    });
+}
+
+/// The media types whose body the form lowering reads field by field, by type.
+const FORM_MEDIA_TYPES: &[&str] = &["multipart/form-data", "application/x-www-form-urlencoded"];
+
+/// A schema the lowering reads by type, and how far below it that read goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadByType {
+    /// The path of the schema.
+    root: String,
+    /// Whether the read also enters each property, as the form lowering does.
+    /// The other reads enter only `items`, `additionalProperties`, and a
+    /// one-member `allOf`.
+    through_properties: bool,
+}
+
+impl ReadByType {
+    fn through_collections(root: String) -> Self {
+        return Self {
+            root,
+            through_properties: false,
+        };
+    }
+
+    fn through_properties(root: String) -> Self {
+        return Self {
+            root,
+            through_properties: true,
+        };
+    }
+
+    /// Whether `path` is this schema or lies below it along the read.
+    fn covers(&self, path: &str) -> bool {
+        let Some(rest) = path.strip_prefix(self.root.as_str()) else {
+            return false;
+        };
+        if !rest.is_empty() && !rest.starts_with('/') {
+            return false;
+        }
+        let mut segments = rest.split('/').skip(1).peekable();
+        while let Some(segment) = segments.next() {
+            match segment {
+                "items" | "additionalProperties" => {}
+                "allOf" if segments.next_if_eq(&"0").is_some() => {}
+                "properties" if self.through_properties && segments.next().is_some() => {}
+                _ => return false,
+            }
+        }
+        return true;
+    }
 }
 
 /// The keys of a path item that hold an operation.
@@ -438,15 +549,15 @@ struct Sweep<'a> {
     /// the server is generated, its query struct checks the constraints of such
     /// a schema, so the note about unchecked constraints does not apply to it.
     query_schemas: Vec<String>,
-    /// The paths of the schemas that the parameter lowering and the inline
-    /// body lowering read by type: the schema of a parameter, the inline schema
-    /// of a media type, and a component schema that a parameter names. Those
-    /// lowerings map a scalar, an array, and a map by type and do not read
-    /// `x-rust-type`, so such a schema, and what it reaches through `items` and
-    /// `additionalProperties`, replaces nothing even when it carries the
-    /// extension. An object with properties below one is hoisted and lowered
-    /// as a model, which reads the extension again.
-    read_by_type: Vec<String>,
+    /// The schemas that the parameter lowering, the inline body lowering, and
+    /// the form lowering read by type: the schema of a parameter, the inline
+    /// schema of a media type, and a component schema that a parameter or a
+    /// form body names. Those lowerings map a scalar, an array, and a map by
+    /// type and do not read `x-rust-type`, so such a schema, and what it
+    /// reaches along that read, replaces nothing even when it carries the
+    /// extension. An object with properties that a model reads is lowered as a
+    /// model, which reads the extension again.
+    read_by_type: Vec<ReadByType>,
     /// The paths of the property schemas that hold a same-document `$ref` and
     /// a `description` beside it. See [`wrap_described_refs`].
     described_refs: Vec<String>,
@@ -526,7 +637,7 @@ fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
         removed_at: None,
         replaced_at: None,
         query_schemas: Vec::new(),
-        read_by_type: parameter_targets(value),
+        read_by_type: referenced_by_type(value),
         described_refs: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
@@ -571,8 +682,19 @@ impl Sweep<'_> {
         if removed_here {
             self.removed_at = Some(depth);
         }
-        if matches!(context, Context::Parameter | Context::MediaType) {
-            self.read_by_type.push(pointer(path, "schema"));
+        if context == Context::Parameter {
+            self.read_by_type
+                .push(ReadByType::through_collections(pointer(path, "schema")));
+        }
+        if context == Context::MediaType {
+            let form = FORM_MEDIA_TYPES
+                .iter()
+                .any(|media| return path.ends_with(&pointer("", media)));
+            self.read_by_type.push(if form {
+                ReadByType::through_properties(pointer(path, "schema"))
+            } else {
+                ReadByType::through_collections(pointer(path, "schema"))
+            });
         }
         let replaces_here = matches!(context, Context::Schema | Context::PropertySchema)
             && value.get("x-rust-type").is_some()
@@ -662,17 +784,9 @@ impl Sweep<'_> {
 
     /// Whether the lowering reads the schema at `path` by type and not through
     /// `x-rust-type`: the schema is one of `read_by_type`, or lies below one
-    /// through `items` and `additionalProperties` only.
+    /// along the segments that read follows.
     fn is_read_by_type(&self, path: &str) -> bool {
-        return self.read_by_type.iter().any(|root| {
-            let Some(rest) = path.strip_prefix(root.as_str()) else {
-                return false;
-            };
-            return rest
-                .split('/')
-                .skip(1)
-                .all(|segment| return matches!(segment, "" | "items" | "additionalProperties"));
-        });
+        return self.read_by_type.iter().any(|read| return read.covers(path));
     }
 
     /// Whether the run's filters remove this operation.
@@ -1315,6 +1429,18 @@ security: [{arbitrary: [custom]}]
                 "{item}: {:?}",
                 below.warnings
             );
+            // A form body reads the component and its properties by type, so
+            // the note stays there even under the extension.
+            let form = inspect_yaml(&format!(
+                "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{multipart/form-data: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{schemas: {{Form: {{x-rust-type: 'crate::Form', type: object, properties: {{field: {item}}}}}}}}}"
+            ));
+            assert!(
+                form.warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                form.warnings
+            );
             // The same item under a plain array is lowered, so it keeps the note.
             let lowered = inspect_yaml(&format!(
                 "components: {{schemas: {{Stamps: {{type: array, items: {item}}}}}}}"
@@ -1479,6 +1605,28 @@ security: [{arbitrary: [custom]}]
             (
                 "paths: {/a: {post: {requestBody: {content: {application/json: {schema: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}}}}, responses: {}}}}".to_owned(),
                 true,
+            ),
+            // The chain through an alias, a form body, and a one-member `allOf`
+            // in a body is read by type too.
+            (
+                format!(
+                    "{}\ncomponents: {{schemas: {{Alias: {{$ref: '#/components/schemas/Stamp'}}, Stamp: {{x-rust-type: 'crate::Stamp', type: array, items: {{type: string, maxLength: 3}}}}}}}}",
+                    parameter("query", "{$ref: '#/components/schemas/Alias'}")
+                ),
+                true,
+            ),
+            (
+                "paths: {/a: {post: {requestBody: {content: {application/json: {schema: {allOf: [{x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}]}}}}, responses: {}}}}".to_owned(),
+                true,
+            ),
+            // A sibling component whose name starts the same is not below the
+            // parameter's schema.
+            (
+                format!(
+                    "{}\ncomponents: {{schemas: {{Stamp: {{type: string}}, StampExtra: {{x-rust-type: 'crate::Extra', type: array, items: {{type: string, maxLength: 3}}}}}}}}",
+                    parameter("query", "{$ref: '#/components/schemas/Stamp'}")
+                ),
+                false,
             ),
             // A model property reads the extension, so below it the note is quiet.
             (

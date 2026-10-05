@@ -20,7 +20,7 @@ use crate::lower::direction::REQUEST_SUFFIX;
 use crate::lower::direction::RESPONSE_SUFFIX;
 
 /// Maximum `$ref` chain length before bailing out (cycle guard).
-const MAX_REF_DEPTH: usize = 32;
+pub(crate) const MAX_REF_DEPTH: usize = 32;
 
 /// The OpenAPI minor versions the generator reads. Every parsed document must
 /// declare a patch release of one of them.

@@ -605,11 +605,12 @@ A constraint on a schema that no field holds has no check, and it produces a
 warning. A schema below an `x-rust-type` produces none, because the custom type
 reads the whole value and no generated code could check it there; the same
 holds for the other notes about what the lowering would not enforce. The
-exception is a schema that the parameter lowering or the inline body lowering
-reads by type: a parameter's schema, a component a parameter names, and the
-inline schema of a body, together with what they reach through `items` and
-`additionalProperties`. Those lowerings do not read the extension, so the
-notes stay there. A type alias, an array item, and an inline body schema are examples.
+exception is a schema that the parameter lowering, the inline body lowering, or
+the form lowering reads by type: a parameter's schema, a component a parameter
+or a form body names, through any alias chain, and the inline schema of a body,
+together with what they reach through `items`, `additionalProperties`, a
+one-member `allOf`, and, for a form, each property. Those lowerings do not read
+the extension, so the notes stay there. A type alias, an array item, and an inline body schema are examples.
 Two uses produce no warning. When the run generates the server, the schema of a
 query parameter in an operation the run keeps becomes a field of the query
 struct, which checks it; a client only writes a query, so a run with no server
