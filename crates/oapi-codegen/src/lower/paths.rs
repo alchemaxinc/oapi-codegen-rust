@@ -1289,7 +1289,33 @@ impl Lowerer<'_> {
             let required = object.required.iter().any(|name| {
                 return name == wire_name;
             });
-            let (kind, nullable) = match property {
+            // A one-member `allOf` around a `$ref` names the schema the `$ref`
+            // names. The wrapper adds a keyword such as `description` or
+            // `nullable` and nothing else, so the field reads the target.
+            let wrapped = match property {
+                ReferenceOr::Item(schema) => crate::loader::single_ref_member(schema).map(|reference| {
+                    return ReferenceOr::Reference {
+                        reference: reference.to_owned(),
+                    };
+                }),
+                ReferenceOr::Reference { .. } => None,
+            };
+            // The wrapper's own keywords still apply on top of the target's. A
+            // target in another file cannot be read here, so for one the wrapper's
+            // mark settles the part alone; a same-document target is read and
+            // its marks combine with the wrapper's below, so a conflict between
+            // the two is reported as it is on any field.
+            let wrapper = match (&wrapped, property) {
+                (Some(_), ReferenceOr::Item(schema)) => Some(&schema.schema_data),
+                _ => None,
+            };
+            if let (Some(wrapper), Some(ReferenceOr::Reference { reference })) = (wrapper, &wrapped)
+                && ref_file_part(reference).is_some()
+                && !multipart_part_is_sent(wrapper, path, method, wire_name)?
+            {
+                continue;
+            }
+            let (kind, nullable) = match wrapped.as_ref().unwrap_or(property) {
                 ReferenceOr::Item(schema) => {
                     if !multipart_part_is_sent(&schema.schema_data, path, method, wire_name)? {
                         continue;
@@ -1307,10 +1333,16 @@ impl Lowerer<'_> {
                         });
                     }
                     let resolved = self.spec.resolve_schema(None, reference)?;
-                    if !multipart_part_is_sent(&resolved.schema_data, path, method, wire_name)? {
+                    let mut data = resolved.schema_data;
+                    if let Some(wrapper) = wrapper {
+                        data.nullable |= wrapper.nullable;
+                        data.read_only |= wrapper.read_only;
+                        data.write_only |= wrapper.write_only;
+                    }
+                    if !multipart_part_is_sent(&data, path, method, wire_name)? {
                         continue;
                     }
-                    (resolved.schema_kind, resolved.schema_data.nullable)
+                    (resolved.schema_kind, data.nullable)
                 }
             };
             let ty = scalar_type(&kind).ok_or_else(|| {

@@ -386,16 +386,74 @@ struct Sweep<'a> {
     /// The depth of the schema that `x-rust-type` replaces, while the walk is
     /// inside it. No generated code matches a union below such a schema.
     replaced_at: Option<usize>,
+    /// The paths of the property schemas that hold a same-document `$ref` and
+    /// a `description` beside it. See [`wrap_described_refs`].
+    described_refs: Vec<String>,
 }
 
 /// Check `value` against what the generator reads, and report every warning.
 ///
 /// `run` states what the run generates and keeps, which decides whether a
 /// query parameter's constraints are checked.
-pub(crate) fn check(document: &str, value: &Value, run: &Run) -> Result<()> {
+///
+/// The paths this returns are for [`wrap_described_refs`].
+pub(crate) fn check(document: &str, value: &Value, run: &Run) -> Result<Vec<String>> {
     let sweep = inspect(document, value, run);
     report_warnings(document, &sweep.warnings);
-    return sweep.problems.into_result();
+    sweep.problems.into_result()?;
+    return Ok(sweep.described_refs);
+}
+
+/// Keep the `description` that sits beside a property's `$ref`.
+///
+/// OpenAPI 3.0 ignores every keyword beside a `$ref`, and the typed parse drops
+/// them. A description changes no value and no type, and its loss leaves a
+/// generated field with no documentation. So each such property becomes the
+/// form OpenAPI 3.0 gives for this, a one-member `allOf` with the description
+/// beside it. Any other keyword beside the `$ref` stays ignored.
+///
+/// `paths` comes from [`check`] on the same `value`.
+pub(crate) fn wrap_described_refs(value: &mut Value, paths: &[String]) {
+    for path in paths {
+        let Some(node) = node_at(value, path) else {
+            continue;
+        };
+        let (Some(reference), Some(description)) = (node.get("$ref").cloned(), node.get("description").cloned()) else {
+            continue;
+        };
+        let mut member = serde_yaml::Mapping::new();
+        member.insert(Value::from("$ref"), reference);
+        let mut wrapper = serde_yaml::Mapping::new();
+        wrapper.insert(Value::from("allOf"), Value::Sequence(vec![Value::Mapping(member)]));
+        wrapper.insert(Value::from("description"), description);
+        *node = Value::Mapping(wrapper);
+    }
+}
+
+/// The node a path from this sweep names.
+///
+/// A key is looked up by its text. The sweep writes a numeric response code as
+/// text too, and YAML reads `200:` as a number, so a token that no text key
+/// holds is tried as the text of a number key.
+fn node_at<'a>(value: &'a mut Value, path: &str) -> Option<&'a mut Value> {
+    let mut node = value;
+    for token in path.split('/').skip(1) {
+        let token = token.replace("~1", "/").replace("~0", "~");
+        node = match node {
+            Value::Mapping(mapping) => {
+                if mapping.contains_key(token.as_str()) {
+                    mapping.get_mut(token.as_str())?
+                } else {
+                    mapping.iter_mut().find_map(|(key, child)| {
+                        return matches!(key, Value::Number(key) if key.to_string() == token).then_some(child);
+                    })?
+                }
+            }
+            Value::Sequence(sequence) => sequence.get_mut(token.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
+    }
+    return Some(node);
 }
 
 fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
@@ -407,6 +465,7 @@ fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
         removed_at: None,
         query_schemas: Vec::new(),
         replaced_at: None,
+        described_refs: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
     return sweep;
@@ -465,6 +524,19 @@ impl Sweep<'_> {
         if replaces_here {
             self.replaced_at = Some(depth);
         }
+        // The loader keeps this description, so it is not an ignored sibling.
+        // A cross-file `$ref` does not resolve at a property, so nothing is kept
+        // for one.
+        let described = reference
+            && context == Context::PropertySchema
+            && value.get("description").is_some_and(Value::is_string)
+            && value
+                .get("$ref")
+                .and_then(Value::as_str)
+                .is_some_and(|target| return target.starts_with("#/"));
+        if described {
+            self.described_refs.push(path.to_owned());
+        }
         for (key, child) in mapping {
             let key = match key {
                 Value::String(key) => key.clone(),
@@ -481,7 +553,7 @@ impl Sweep<'_> {
                 }
                 continue;
             }
-            if reference && context != Context::PathItem {
+            if reference && context != Context::PathItem && !(described && key == "description") {
                 self.warn(&at, "siblings of $ref are ignored in OpenAPI 3.0");
             }
             if key.starts_with("x-") {
@@ -957,6 +1029,75 @@ security: [{arbitrary: [custom]}]
         let invalid =
             inspect_yaml("components: {schemas: {Widget: {$ref: '#/components/schemas/Other', requird: [id]}}}");
         assert!(!invalid.problems.is_empty());
+    }
+
+    #[test]
+    fn a_description_beside_a_property_reference_is_kept_and_not_reported() {
+        const HOLDER: &str = "/components/schemas/Holder/properties/a";
+        let holder = |property: &str| {
+            return format!("components: {{schemas: {{Holder: {{type: object, properties: {{a: {property}}}}}}}}}");
+        };
+        for (yaml, kept, ignored) in [
+            (
+                holder("{$ref: '#/components/schemas/Other', description: note}"),
+                true,
+                vec![],
+            ),
+            // Any other keyword beside the `$ref` stays ignored.
+            (
+                holder("{$ref: '#/components/schemas/Other', description: note, nullable: true}"),
+                true,
+                vec!["nullable"],
+            ),
+            (
+                holder("{$ref: '#/components/schemas/Other', nullable: true}"),
+                false,
+                vec!["nullable"],
+            ),
+            // A cross-file `$ref` does not resolve at a property.
+            (
+                holder("{$ref: 'other.yaml#/components/schemas/Other', description: note}"),
+                false,
+                vec!["description"],
+            ),
+            (holder("{$ref: '#/components/schemas/Other'}"), false, vec![]),
+        ] {
+            let mut value: Value = serde_yaml::from_str(&yaml).expect("yaml");
+            let run = Run::default();
+            let sweep = inspect("openapi.yaml", &value, &run);
+            assert!(sweep.problems.is_empty(), "{yaml}");
+            let reported: Vec<String> = sweep
+                .warnings
+                .iter()
+                .map(|warning| return warning.path.clone())
+                .collect();
+            let expected: Vec<String> = ignored.iter().map(|key| return pointer(HOLDER, key)).collect();
+            assert_eq!(reported, expected, "{yaml}");
+
+            wrap_described_refs(&mut value, &sweep.described_refs);
+            let property = node_at(&mut value, HOLDER).expect("the property");
+            assert_eq!(property.get("allOf").is_some(), kept, "{yaml}");
+            if kept {
+                let wrapped: Value =
+                    serde_yaml::from_str("{allOf: [{$ref: '#/components/schemas/Other'}], description: note}")
+                        .expect("yaml");
+                assert_eq!(*property, wrapped, "{yaml}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_path_through_a_numeric_response_code_and_an_array_finds_its_node() {
+        let mut value: Value = serde_yaml::from_str(
+            "paths: {/a~b: {get: {responses: {200: {content: {application/json: {schema: {allOf: [{type: string}]}}}}}}}}",
+        )
+        .expect("yaml");
+        let path = "/paths/~1a~0b/get/responses/200/content/application~1json/schema/allOf/0/type";
+        assert_eq!(
+            node_at(&mut value, path).and_then(|node| return node.as_str()),
+            Some("string")
+        );
+        assert!(node_at(&mut value, "/paths/missing").is_none());
     }
 
     #[test]
