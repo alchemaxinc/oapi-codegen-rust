@@ -379,6 +379,10 @@ struct Sweep<'a> {
     /// The depth of the operation, or path item, that the run's filters remove,
     /// while the walk is inside it.
     removed_at: Option<usize>,
+    /// The depth of the schema that `x-rust-type` replaces, while the walk is
+    /// inside it. The custom type reads everything below that schema, so no
+    /// generated code checks a constraint there.
+    replaced_at: Option<usize>,
     /// The paths of the schemas that sit directly in a query parameter. When
     /// the server is generated, its query struct checks the constraints of such
     /// a schema, so the note about unchecked constraints does not apply to it.
@@ -460,6 +464,7 @@ fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
         problems: Diagnostics::new(),
         run,
         removed_at: None,
+        replaced_at: None,
         query_schemas: Vec::new(),
         described_refs: Vec::new(),
     };
@@ -504,6 +509,12 @@ impl Sweep<'_> {
             };
         if removed_here {
             self.removed_at = Some(depth);
+        }
+        let replaces_here = matches!(context, Context::Schema | Context::PropertySchema)
+            && value.get("x-rust-type").is_some()
+            && self.replaced_at.is_none();
+        if replaces_here {
+            self.replaced_at = Some(depth);
         }
         if context == Context::Parameter
             && value.get("in").and_then(Value::as_str) == Some("query")
@@ -570,6 +581,11 @@ impl Sweep<'_> {
                 self.value_notes(context, &key, child, &at);
             }
             self.walk(child, field.traversal, &at, depth + 1);
+        }
+        // The replacing schema's own notes still apply: a constraint written on
+        // it reaches no type, and the lowering reports that as an error.
+        if replaces_here {
+            self.replaced_at = None;
         }
         if !reference {
             self.object_notes(value, context, path);
@@ -764,6 +780,7 @@ impl Sweep<'_> {
             );
         }
         if context == Context::Schema
+            && self.replaced_at.is_none()
             && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some())
             && !self.checked_query_schema(value, path)
             && !unsigned_type_holds_the_bound(value)
@@ -1303,6 +1320,20 @@ security: [{arbitrary: [custom]}]
             (component("{type: integer, minimum: 0, maximum: 9}"), true),
             (component("{type: number, minimum: 0}"), true),
             (component("{type: string, pattern: '^a$'}"), true),
+            // Below a custom type no code is generated, so no check is missing;
+            // a constraint on the replacing schema itself keeps its note.
+            (
+                component("{x-rust-type: 'crate::Stamp', oneOf: [{type: string, pattern: '^a$'}, {type: integer}]}"),
+                false,
+            ),
+            (
+                component("{x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}"),
+                false,
+            ),
+            (
+                component("{x-rust-type: 'crate::Stamp', type: string, pattern: '^a$'}"),
+                true,
+            ),
         ] {
             let sweep = inspect_yaml(&yaml);
             assert!(sweep.problems.is_empty(), "{yaml}: {:?}", sweep.problems);
