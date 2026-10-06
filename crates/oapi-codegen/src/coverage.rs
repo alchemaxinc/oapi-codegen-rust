@@ -53,6 +53,8 @@ fn read_by_type(document: &Value, run: &Run) -> Vec<ReadByType> {
                 }
             }
         }
+        // The run lowers the root document's operations only.
+        return found;
     }
     let paths = document.get("paths").and_then(Value::as_mapping);
     for (route, item) in paths.into_iter().flatten() {
@@ -122,8 +124,14 @@ fn effective_parameters<'a>(
     let identity = |parameter: &Value| {
         let parameter =
             follow_references(document, "parameters", "", parameter).map(|(_, parameter)| return parameter)?;
-        let name = parameter.get("name")?.as_str()?.to_owned();
         let location = parameter.get("in")?.as_str()?.to_owned();
+        // A header name has no case, and the lowering overrides it without one.
+        let name = parameter.get("name")?.as_str()?;
+        let name = if location == "header" {
+            name.to_ascii_lowercase()
+        } else {
+            name.to_owned()
+        };
         return Some((name, location));
     };
     let own = listed(operation, operation_path);
@@ -165,11 +173,17 @@ impl Use {
             return;
         };
         if let Use::Parameter = self {
-            let schema = pointer(&path, "schema");
-            match schema_reference(Some(value)) {
-                Some(reference) => found.extend(alias_chain(document, reference).map(ReadByType::through_collections)),
-                None => found.push(ReadByType::through_collections(schema)),
+            // The header lowering skips the headers the framework owns.
+            let reserved = value.get("in").and_then(Value::as_str) == Some("header")
+                && value.get("name").and_then(Value::as_str).is_some_and(|name| {
+                    return crate::lower::paths::IGNORED_HEADER_NAMES
+                        .iter()
+                        .any(|ignored| return ignored.eq_ignore_ascii_case(name));
+                });
+            if reserved {
+                return;
             }
+            schema_marks(document, &pointer(&path, "schema"), value.get("schema"), found);
             return;
         }
         let content = value.get("content").and_then(Value::as_mapping);
@@ -177,18 +191,79 @@ impl Use {
             let Some(name) = name.as_str() else {
                 continue;
             };
-            let multipart = matches!(self, Use::Body) && is_multipart(name);
-            let read = if multipart {
-                ReadByType::through_properties
+            let schema_path = pointer(&pointer(&pointer(&path, "content"), name), "schema");
+            let schema = media.get("schema");
+            if matches!(self, Use::Body) && is_multipart(name) {
+                multipart_marks(document, &schema_path, schema, found);
+            } else if schema_reference(Some(media)).is_none() {
+                // An inline body or response is read by type.
+                found.push(ReadByType::new(schema_path));
             } else {
-                ReadByType::through_collections
-            };
-            match schema_reference(Some(media)) {
-                Some(reference) if multipart => found.extend(alias_chain(document, reference).map(read)),
-                Some(_) => {}
-                None => found.push(read(pointer(&pointer(&pointer(&path, "content"), name), "schema"))),
+                // A named body or response reuses the model, which reads the
+                // extension.
             }
         }
+    }
+}
+
+/// Mark `schema` at `path` as read by type, following an alias chain when it
+/// is a `$ref`.
+fn schema_marks(document: &Value, path: &str, schema: Option<&Value>, found: &mut Vec<ReadByType>) {
+    match schema
+        .and_then(|schema| return schema.get("$ref"))
+        .and_then(Value::as_str)
+    {
+        Some(reference) => found.extend(alias_chain(document, reference).map(ReadByType::new)),
+        None => found.push(ReadByType::new(path.to_owned())),
+    }
+}
+
+/// Mark a multipart body schema the way the multipart lowering reads it: each
+/// property the request sends, by type. The object itself is not marked: a
+/// `readOnly` property travels in no request, so the lowering skips it before
+/// it reads the type, and when the object carries `x-rust-type` that property
+/// stays below the replacement while the sent ones are read through it.
+fn multipart_marks(document: &Value, path: &str, schema: Option<&Value>, found: &mut Vec<ReadByType>) {
+    let Some(schema) = schema else {
+        return;
+    };
+    // The chain of aliases ends at the object the fields are read from.
+    let (object_path, object) = match schema.get("$ref").and_then(Value::as_str) {
+        Some(reference) => {
+            let Some(last) = alias_chain(document, reference).last() else {
+                return;
+            };
+            let name = last
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                .replace("~1", "/")
+                .replace("~0", "~");
+            let Some(object) = document
+                .get("components")
+                .and_then(|components| return components.get("schemas"))
+                .and_then(|schemas| return schemas.get(name.as_str()))
+            else {
+                return;
+            };
+            (last, object)
+        }
+        None => (path.to_owned(), schema),
+    };
+    let properties = object.get("properties").and_then(Value::as_mapping);
+    for (name, property) in properties.into_iter().flatten() {
+        let Some(name) = name.as_str() else {
+            continue;
+        };
+        if property.get("readOnly").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        schema_marks(
+            document,
+            &pointer(&pointer(&object_path, "properties"), name),
+            Some(property),
+            found,
+        );
     }
 }
 
@@ -243,30 +318,18 @@ fn is_multipart(name: &str) -> bool {
     return base == "multipart/form-data";
 }
 
-/// A schema the lowering reads by type, and how far below it that read goes.
+/// A schema the lowering reads by type. The read enters `items`,
+/// `additionalProperties`, and a one-member `allOf`, and stops at an object
+/// with properties, which is lowered as a model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReadByType {
     /// The path of the schema.
     root: String,
-    /// Whether the read also enters each property, as the multipart lowering does.
-    /// The other reads enter only `items`, `additionalProperties`, and a
-    /// one-member `allOf`.
-    through_properties: bool,
 }
 
 impl ReadByType {
-    fn through_collections(root: String) -> Self {
-        return Self {
-            root,
-            through_properties: false,
-        };
-    }
-
-    fn through_properties(root: String) -> Self {
-        return Self {
-            root,
-            through_properties: true,
-        };
+    fn new(root: String) -> Self {
+        return Self { root };
     }
 
     /// Whether `path` is this schema or lies below it along the read.
@@ -282,7 +345,6 @@ impl ReadByType {
             match segment {
                 "items" | "additionalProperties" => {}
                 "allOf" if segments.next_if_eq(&"0").is_some() => {}
-                "properties" if self.through_properties && segments.next().is_some() => {}
                 _ => return false,
             }
         }
@@ -809,6 +871,10 @@ impl Sweep<'_> {
         if replaces_here {
             self.replaced_at = Some(depth);
         }
+        // This schema's own notes still apply when it is the replacing one;
+        // only what lies below a replacing schema is unlowered, and even there
+        // a schema the lowering reads by type is lowered.
+        let below_replacement = self.replaced_at.is_some_and(|at| return at < depth) && !self.is_read_by_type(path);
         if context == Context::Parameter
             && value.get("in").and_then(Value::as_str) == Some("query")
             && self.removed_at.is_none()
@@ -871,7 +937,7 @@ impl Sweep<'_> {
                 {
                     self.warn(&at, reason);
                 }
-                self.value_notes(context, &key, child, &at);
+                self.value_notes(context, &key, child, &at, below_replacement);
             }
             self.walk(child, field.traversal, &at, depth + 1);
         }
@@ -965,7 +1031,7 @@ impl Sweep<'_> {
         }
     }
 
-    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str) {
+    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str, below_replacement: bool) {
         if matches!(context, Context::Document | Context::Operation)
             && key == "security"
             && let Some(requirements) = value.as_sequence()
@@ -996,13 +1062,13 @@ impl Sweep<'_> {
                         "two members of this oneOf are the same schema, so no value of that shape matches exactly one of them as the document requires",
                     );
                 }
-                "default" if value.is_null() && self.replaced_at.is_none() => {
+                "default" if value.is_null() && !below_replacement => {
                     self.warn(
                         path,
                         "the parser discards a null default, so an absent property does not receive explicit null",
                     );
                 }
-                "default" if context == Context::Schema && self.replaced_at.is_none() => {
+                "default" if context == Context::Schema && !below_replacement => {
                     self.warn(
                         path,
                         "defaults are applied only at supported property and query-parameter uses",
@@ -1032,8 +1098,9 @@ impl Sweep<'_> {
     fn schema_notes(&mut self, value: &Value, context: Context, path: &str) {
         // Below a replaced schema nothing is lowered, so a note about what the
         // lowering would not enforce there would mislead. The replacing schema's
-        // own notes stay.
-        let lowered = self.replaced_at.is_none();
+        // own notes stay, and so do those of a schema the lowering reads by type
+        // through the replacement, as a multipart lowering reads a sent field.
+        let lowered = self.replaced_at.is_none() || self.is_read_by_type(path);
         if lowered && value.get("x-rust-type").is_some() && value.get("allOf").is_some() {
             self.warn(
                 path,
@@ -1079,7 +1146,7 @@ impl Sweep<'_> {
             );
         }
         if context == Context::Schema
-            && self.replaced_at.is_none()
+            && lowered
             && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some())
             && !self.checked_query_schema(value, path)
             && !unsigned_type_holds_the_bound(value)
@@ -1966,7 +2033,66 @@ security: [{arbitrary: [custom]}]
         let response = format!(
             "paths: {{/a: {{get: {{responses: {{'200': {{description: ok, content: {{application/json: {{schema: {stamp}}}}}}}}}}}}}}}"
         );
-        assert!(noted(&response, operations));
+        assert!(noted(&response, operations.clone()));
+
+        // A referenced document's own operations are not lowered by the run.
+        let referenced_run = Run {
+            referenced: true,
+            operations: true,
+            ..Run::default()
+        };
+        assert!(!noted(&query, referenced_run));
+
+        // A header is overridden without case, and the headers the framework
+        // owns are never read.
+        let header_override = format!(
+            "paths: {{/a: {{parameters: [{{name: X-Token, in: header, schema: {stamp}}}], get: {{parameters: [{{name: x-token, in: header, schema: {{type: string}}}}], responses: {{}}}}}}}}"
+        );
+        let reserved = format!(
+            "paths: {{/a: {{get: {{parameters: [{{name: Authorization, in: header, schema: {stamp}}}], responses: {{}}}}}}}}"
+        );
+        let plain_header = format!(
+            "paths: {{/a: {{get: {{parameters: [{{name: X-Token, in: header, schema: {stamp}}}], responses: {{}}}}}}}}"
+        );
+        assert!(!noted(&header_override, operations.clone()));
+        assert!(!noted(&reserved, operations.clone()));
+        assert!(noted(&plain_header, operations.clone()));
+
+        // A multipart body reads the properties the request sends, and a
+        // `readOnly` one is skipped before its type is read.
+        let multipart = |read_only: &str| {
+            return format!(
+                "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{multipart/form-data: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{schemas: {{Form: {{x-rust-type: 'crate::Form', type: object, properties: {{tags: {{{read_only}type: array, items: {{type: string, maxLength: 3}}}}}}}}}}}}"
+            );
+        };
+        assert!(noted(&multipart(""), operations.clone()));
+        assert!(!noted(&multipart("readOnly: true, "), operations));
+    }
+
+    /// The replacing schema is lowered, so its own notes stay, those on its
+    /// keys included. Only what lies below it is unlowered.
+    #[test]
+    fn the_replacing_schema_keeps_the_notes_on_its_own_keys() {
+        const NOTE: &str = "the parser discards a null default";
+        let own = inspect_yaml(
+            "components: {schemas: {Holder: {type: object, properties: {stamp: {x-rust-type: String, type: string, nullable: true, default: null}}}}}",
+        );
+        assert!(
+            own.warnings.iter().any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            own.warnings
+        );
+        let below = inspect_yaml(
+            "components: {schemas: {Stamp: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, nullable: true, default: null}}}}",
+        );
+        assert!(
+            !below
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            below.warnings
+        );
     }
 
     #[test]

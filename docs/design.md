@@ -608,18 +608,20 @@ holds for the other notes about what the lowering would not enforce. The
 exception is a schema that the parameter lowering, the inline body lowering, or
 the multipart lowering reads by type. The inspection finds those from what the
 run lowers: for each operation the run keeps, its parameters, including the
-path item's own unless the operation overrides them, its request body, and its
-responses, each followed through any chain of component references. A
-parameter's schema counts, a component a parameter or a multipart body names
-counts through any alias chain, and an inline body or response schema counts,
-together with what they reach through `items`, `additionalProperties`, a
-one-member `allOf`, and, for a multipart body, each property. Those lowerings
-do not read the extension, so the notes stay there. A body or response that
-names a model reuses it, and the model reads the extension, so it is not an
-exception; nor is a form-encoded body. A models-only run lowers no operation
-and reads nothing by type. In a document that another document references, every
-component parameter, request body, and response counts, because the other
-document's operations name them.
+path item's own unless the operation overrides them, a header without case,
+its request body, and its responses, each followed through any chain of
+component references. A parameter's schema counts, except for the headers the
+framework owns; a component a parameter names counts through any alias chain;
+an inline body or response schema counts; and the fields a multipart body
+sends count, a `readOnly` one not among them. Each counts together with what it
+reaches through `items`, `additionalProperties`, and a one-member `allOf`.
+Those lowerings do not read the extension, so the notes stay there, even below
+a replaced schema. A body or response that names a model reuses it, and the
+model reads the extension, so it is not an exception; nor is a form-encoded
+body. A models-only run lowers no operation and reads nothing by type. In a
+document that another document references, every component parameter, request
+body, and response counts, because the other document's operations name them,
+and its own paths do not, because the run lowers the root document's only.
 
 A type alias, an array item, and an inline body schema are examples of a
 schema that no field holds. Two uses produce no warning. When the run generates

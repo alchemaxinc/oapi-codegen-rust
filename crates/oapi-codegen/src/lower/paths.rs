@@ -97,7 +97,7 @@ use crate::naming::to_ident;
 /// Header parameter names that OpenAPI mandates be ignored when declared with
 /// `in: header`, since they are governed by content negotiation / security
 /// mechanisms rather than the parameter object (compared case-insensitively).
-const IGNORED_HEADER_NAMES: [&str; 3] = ["accept", "content-type", "authorization"];
+pub(crate) const IGNORED_HEADER_NAMES: [&str; 3] = ["accept", "content-type", "authorization"];
 
 /// Content-type selection priority for request bodies. `multipart/form-data` is
 /// only offered here (not for responses): axum has a multipart *extractor* but
