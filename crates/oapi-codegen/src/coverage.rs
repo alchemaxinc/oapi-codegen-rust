@@ -24,10 +24,14 @@ const MAX_DEPTH: usize = 128;
 /// chain is collected. The lowering reads such a component by type even when a
 /// model names it too, so the model use does not lift the mark.
 ///
-/// A run that lowers no operation reads nothing by type: a models-only run
-/// turns a custom type schema into an alias and nothing else.
+/// A run that lowers no operation reads nothing by type, in the referenced
+/// documents as well: a models-only run turns a custom type schema into an
+/// alias and nothing else.
 fn read_by_type(document: &Value, run: &Run) -> Vec<ReadByType> {
     let mut found = Vec::new();
+    if !run.operations {
+        return found;
+    }
     if run.referenced {
         for (kind, read) in [
             ("parameters", Use::Parameter),
@@ -49,9 +53,6 @@ fn read_by_type(document: &Value, run: &Run) -> Vec<ReadByType> {
                 }
             }
         }
-    }
-    if !run.operations {
-        return found;
     }
     let paths = document.get("paths").and_then(Value::as_mapping);
     for (route, item) in paths.into_iter().flatten() {
@@ -126,7 +127,7 @@ fn effective_parameters<'a>(
         return Some((name, location));
     };
     let own = listed(operation, operation_path);
-    let declared: Vec<_> = own
+    let declared: std::collections::HashSet<_> = own
         .iter()
         .filter_map(|(_, parameter)| return identity(parameter))
         .collect();
@@ -1921,6 +1922,7 @@ security: [{arbitrary: [custom]}]
         let models_only = Run::default();
         let referenced = Run {
             referenced: true,
+            operations: true,
             ..Run::default()
         };
 
@@ -1950,6 +1952,14 @@ security: [{arbitrary: [custom]}]
         );
         assert!(!noted(&unused, operations.clone()));
         assert!(noted(&unused, referenced));
+        assert!(!noted(
+            &unused,
+            Run {
+                referenced: true,
+                operations: false,
+                ..Run::default()
+            }
+        ));
         assert!(noted(&named, operations.clone()));
 
         // An inline response body is read by type as an inline request body is.

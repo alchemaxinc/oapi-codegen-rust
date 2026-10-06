@@ -619,13 +619,15 @@ names a model reuses it, and the model reads the extension, so it is not an
 exception; nor is a form-encoded body. A models-only run lowers no operation
 and reads nothing by type. In a document that another document references, every
 component parameter, request body, and response counts, because the other
-document's operations name them. A type alias, an array item, and an inline body schema are examples.
-Two uses produce no warning. When the run generates the server, the schema of a
-query parameter in an operation the run keeps becomes a field of the query
-struct, which checks it; a client only writes a query, so a run with no server
-keeps the warning, and so does an operation the filters remove. An integer whose
-only constraint is `minimum: 0` becomes an unsigned type, which refuses a
-negative value at every use.
+document's operations name them.
+
+A type alias, an array item, and an inline body schema are examples of a
+schema that no field holds. Two uses produce no warning. When the run generates
+the server, the schema of a query parameter in an operation the run keeps
+becomes a field of the query struct, which checks it; a client only writes a
+query, so a run with no server keeps the warning, and so does an operation the
+filters remove. An integer whose only constraint is `minimum: 0` becomes an
+unsigned type, which refuses a negative value at every use.
 
 A rule that cannot reach its type is an error, not a silence. A `format` of
 `date`, `date-time`, `uuid`, or `binary` names a type that is no longer a string,
