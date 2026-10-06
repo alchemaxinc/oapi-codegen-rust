@@ -624,6 +624,10 @@ exception; nor is a form-encoded body. A models-only run lowers no operation
 and reads nothing by type. A `$ref` into another document is carried to the
 inspection of that document, which reads the components so reached and nothing
 else of its own, because the run lowers the root document's operations only.
+Those uses are settled across every document before any of them is inspected,
+so the order in which the documents are read changes nothing, and a parameter's
+identity for an override is read across documents the way the resolver reads
+it.
 
 A type alias, an array item, and an inline body schema are examples of a
 schema that no field holds. Two uses produce no warning. When the run generates

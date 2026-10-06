@@ -27,7 +27,7 @@ const MAX_DEPTH: usize = 128;
 /// A run that lowers no operation reads nothing by type, in the referenced
 /// documents as well: a models-only run turns a custom type schema into an
 /// alias and nothing else.
-fn read_by_type(document: &Value, run: &Run) -> ByType {
+fn read_by_type(document: &Value, run: &Run, lookup: &dyn Lookup) -> ByType {
     let mut found = ByType::default();
     if !run.operations {
         return found;
@@ -63,7 +63,9 @@ fn read_by_type(document: &Value, run: &Run) -> ByType {
             .collect();
         for (method, operation) in kept {
             let operation_path = pointer(&item_path, method);
-            for (path, parameter) in effective_parameters(document, &item_path, item, &operation_path, operation) {
+            for (path, parameter) in
+                effective_parameters(document, lookup, &item_path, item, &operation_path, operation)
+            {
                 Use::Parameter.collect(document, &path, parameter, &mut found);
             }
             if let Some(body) = operation.get("requestBody") {
@@ -82,6 +84,32 @@ fn read_by_type(document: &Value, run: &Run) -> ByType {
         }
     }
     return found;
+}
+
+/// A way to read a component of another document without inspecting that
+/// document: the inspection resolves a parameter's identity across files the
+/// way the lowering does, and settles cross-file uses before it reports.
+pub(crate) trait Lookup {
+    /// The component of `kind` named `name` in `file`, read as it is written.
+    fn component(&self, file: &str, kind: &str, name: &str) -> Option<Value>;
+}
+
+/// A lookup that reads no other document.
+#[cfg(test)]
+pub(crate) struct NoLookup;
+
+#[cfg(test)]
+impl Lookup for NoLookup {
+    fn component(&self, _file: &str, _kind: &str, _name: &str) -> Option<Value> {
+        return None;
+    }
+}
+
+/// The components of other documents that `document` reaches by type, given
+/// the uses that reach into it. The loader settles the uses of every document
+/// with this before any of them is inspected.
+pub(crate) fn external_uses(document: &Value, run: &Run, lookup: &dyn Lookup) -> Vec<(String, String)> {
+    return read_by_type(document, run, lookup).external;
 }
 
 /// What the lowering reads by type: the schemas of this document, and the
@@ -116,6 +144,7 @@ fn run_removes(run: &Run, operation: &Value) -> bool {
 /// location.
 fn effective_parameters<'a>(
     document: &'a Value,
+    lookup: &dyn Lookup,
     item_path: &str,
     item: &'a Value,
     operation_path: &str,
@@ -132,9 +161,7 @@ fn effective_parameters<'a>(
             .collect::<Vec<_>>();
     };
     let identity = |parameter: &Value| {
-        let Followed::Here(_, parameter) = follow_references(document, "parameters", "", parameter) else {
-            return None;
-        };
+        let parameter = resolve_parameter(document, lookup, parameter)?;
         let location = parameter.get("in")?.as_str()?.to_owned();
         // A header name has no case, and the lowering overrides it without one.
         let name = parameter.get("name")?.as_str()?;
@@ -154,6 +181,33 @@ fn effective_parameters<'a>(
         .into_iter()
         .filter(|(_, parameter)| return identity(parameter).is_none_or(|key| return !declared.contains(&key)));
     return inherited.chain(own).collect();
+}
+
+/// The parameter a `$ref` chain names, in this document or in another one,
+/// followed the way the resolver follows it and up to its depth. The lowering
+/// resolves a parameter before it decides an override, so the identity must
+/// come from the resolved parameter wherever it is written.
+fn resolve_parameter(document: &Value, lookup: &dyn Lookup, parameter: &Value) -> Option<Value> {
+    let mut current = parameter.clone();
+    let mut file: Option<String> = None;
+    for _ in 0..crate::loader::MAX_REF_DEPTH {
+        let Some(reference) = current.get("$ref").and_then(Value::as_str).map(str::to_owned) else {
+            return Some(current);
+        };
+        let name = crate::loader::ref_component_name(&reference, "parameters")?.to_owned();
+        if let Some(next) = crate::loader::ref_file_part(&reference) {
+            file = Some(next.to_owned());
+        }
+        current = match &file {
+            Some(file) => lookup.component(file, "parameters", &name)?,
+            None => document
+                .get("components")?
+                .get("parameters")?
+                .get(name.as_str())?
+                .clone(),
+        };
+    }
+    return current.get("$ref").is_none().then_some(current);
 }
 
 /// One kind of use the lowering reads by type.
@@ -848,8 +902,8 @@ struct Sweep<'a> {
 /// query parameter's constraints are checked.
 ///
 /// The paths this returns are for [`wrap_described_refs`].
-pub(crate) fn check(document: &str, value: &Value, run: &Run) -> Result<Inspected> {
-    let sweep = inspect(document, value, run);
+pub(crate) fn check(document: &str, value: &Value, run: &Run, lookup: &dyn Lookup) -> Result<Inspected> {
+    let sweep = inspect(document, value, run, lookup);
     report_warnings(document, &sweep.warnings);
     sweep.problems.into_result()?;
     return Ok(Inspected {
@@ -921,8 +975,8 @@ fn node_at<'a>(value: &'a mut Value, path: &str) -> Option<&'a mut Value> {
     return Some(node);
 }
 
-fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
-    let by_type = read_by_type(value, run);
+fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run, lookup: &dyn Lookup) -> Sweep<'a> {
+    let by_type = read_by_type(value, run, lookup);
     let mut sweep = Sweep {
         document,
         external: by_type.external,
@@ -1228,7 +1282,8 @@ impl Sweep<'_> {
             && let Ok(schema) = serde_yaml::from_value::<openapiv3::Schema>(value.clone())
         {
             let location = path.split("/schema/").next().unwrap_or(path);
-            if !location.starts_with("/components/schemas/")
+            if lowered
+                && !location.starts_with("/components/schemas/")
                 && (location.contains("/parameters/")
                     || location.contains("/headers/")
                     || location.contains("/content/multipart~1form-data/")
@@ -1273,7 +1328,7 @@ impl Sweep<'_> {
                 "constraints are enforced only at supported field uses, not on type aliases or array items",
             );
         }
-        if value.get("x-rust-derive").is_some() && value.get("x-rust-type").is_none() {
+        if lowered && value.get("x-rust-derive").is_some() && value.get("x-rust-type").is_none() {
             self.warn(
                 &pointer(path, "x-rust-derive"),
                 "x-rust-derive requires x-rust-type and is otherwise ignored",
@@ -1415,7 +1470,7 @@ mod tests {
 
     fn inspect_yaml_run(yaml: &str, run: Run) -> Sweep<'static> {
         let value = serde_yaml::from_str(yaml).expect("valid YAML");
-        return inspect("spec.yaml", &value, Box::leak(Box::new(run)));
+        return inspect("spec.yaml", &value, Box::leak(Box::new(run)), &NoLookup);
     }
 
     #[test]
@@ -1613,7 +1668,7 @@ security: [{arbitrary: [custom]}]
         ] {
             let mut value: Value = serde_yaml::from_str(&yaml).expect("yaml");
             let run = Run::default();
-            let sweep = inspect("openapi.yaml", &value, &run);
+            let sweep = inspect("openapi.yaml", &value, &run, &NoLookup);
             assert!(sweep.problems.is_empty(), "{yaml}");
             let reported: Vec<String> = sweep
                 .warnings
@@ -1719,6 +1774,10 @@ security: [{arbitrary: [custom]}]
             (
                 "{type: string, xml: {name: item}}",
                 "XML serialization is not implemented",
+            ),
+            (
+                "{type: string, x-rust-derive: [Hash]}",
+                "x-rust-derive requires x-rust-type and is otherwise ignored",
             ),
             (
                 "{type: string, format: custom}",
@@ -2173,6 +2232,39 @@ security: [{arbitrary: [custom]}]
         };
         assert!(!noted(&query, referenced_run));
 
+        // An operation parameter written in another document overrides an
+        // inherited one the same way, read through the lookup.
+        struct OneParameter;
+        impl Lookup for OneParameter {
+            fn component(&self, file: &str, kind: &str, name: &str) -> Option<Value> {
+                return (file == "params.yaml" && kind == "parameters" && name == "N").then(|| {
+                    return serde_yaml::from_str("{name: n, in: query, schema: {type: string}}").expect("yaml");
+                });
+            }
+        }
+        let external_override = format!(
+            "paths: {{/a: {{parameters: [{{name: n, in: query, schema: {stamp}}}], get: {{parameters: [{{$ref: 'params.yaml#/components/parameters/N'}}], responses: {{}}}}}}}}"
+        );
+        let value: Value = serde_yaml::from_str(&external_override).expect("yaml");
+        let with_lookup = inspect("spec.yaml", &value, &operations, &OneParameter);
+        assert!(
+            !with_lookup
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            with_lookup.warnings
+        );
+        let without_lookup = inspect("spec.yaml", &value, &operations, &NoLookup);
+        assert!(
+            without_lookup
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            without_lookup.warnings
+        );
+
         // A header is overridden without case, and the headers the framework
         // owns are never read.
         let header_override = format!(
@@ -2228,10 +2320,44 @@ security: [{arbitrary: [custom]}]
             )
             .expect("yaml"),
             &operations,
+            &NoLookup,
         );
         assert_eq!(
             external.external,
             vec![("shared.yaml".to_owned(), "/components/parameters/N".to_owned())]
+        );
+    }
+
+    /// The wire-format note on a nullable parameter value is about the
+    /// lowering too, so a models-only run, which lowers no parameter, gives
+    /// none below a custom type.
+    #[test]
+    fn the_wire_format_note_is_quiet_where_no_parameter_is_lowered() {
+        const NOTE: &str = "nullable values have no supported null representation";
+        let yaml = "paths: {/a: {get: {parameters: [{name: n, in: query, schema: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, nullable: true}}}], responses: {}}}}";
+        let lowered = inspect_yaml_run(
+            yaml,
+            Run {
+                operations: true,
+                ..Run::default()
+            },
+        );
+        assert!(
+            lowered
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            lowered.warnings
+        );
+        let models_only = inspect_yaml_run(yaml, Run::default());
+        assert!(
+            !models_only
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            models_only.warnings
         );
     }
 
