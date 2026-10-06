@@ -102,13 +102,14 @@ pub(crate) const IGNORED_HEADER_NAMES: [&str; 3] = ["accept", "content-type", "a
 /// Content-type selection priority for request bodies. `multipart/form-data` is
 /// only offered here (not for responses): axum has a multipart *extractor* but
 /// no multipart *response* writer.
-const REQUEST_BODY_PRIORITY: [BodyKind; 4] = [BodyKind::Json, BodyKind::Form, BodyKind::Multipart, BodyKind::Text];
+pub(crate) const REQUEST_BODY_PRIORITY: [BodyKind; 4] =
+    [BodyKind::Json, BodyKind::Form, BodyKind::Multipart, BodyKind::Text];
 
 /// Content-type selection priority for response bodies. Multipart is excluded:
 /// axum has a multipart *extractor* but no multipart *response* writer. A
 /// multipart-only response is therefore rejected, as any response whose every
 /// content type is unsupported is.
-const RESPONSE_BODY_PRIORITY: [BodyKind; 3] = [BodyKind::Json, BodyKind::Form, BodyKind::Text];
+pub(crate) const RESPONSE_BODY_PRIORITY: [BodyKind; 3] = [BodyKind::Json, BodyKind::Form, BodyKind::Text];
 
 /// A lowered response body before it is named. A single content type yields a
 /// [`Body`]. several yield the per-representation variants, which the caller
@@ -1026,7 +1027,7 @@ fn declared_content_types(content: &indexmap::IndexMap<String, openapiv3::MediaT
 /// Classify a media type string into a supported [`BodyKind`], or `None`.
 /// Parameters after `;` (for example `; charset=utf-8`) are ignored. JSON matches
 /// broadly: `application/json` or any `+json`-suffixed type.
-fn media_type_kind(name: &str) -> Option<BodyKind> {
+pub(crate) fn media_type_kind(name: &str) -> Option<BodyKind> {
     let base = name.split(';').next().unwrap_or(name).trim().to_ascii_lowercase();
     if base == "application/json" || base.ends_with("+json") {
         return Some(BodyKind::Json);

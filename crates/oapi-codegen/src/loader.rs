@@ -67,17 +67,32 @@ pub struct Spec {
     /// each document reads this to decide which constraint notes apply: only a
     /// server checks a query parameter, and only for an operation it keeps.
     run: crate::coverage::Run,
+    /// The components of other documents that the kept operations reach, each
+    /// as the file and the component's path in it. A document that is read for
+    /// a `$ref` is inspected with the uses that reach into it.
+    external_uses: RefCell<Vec<(String, String)>>,
 }
 
 impl Spec {
     /// Load and parse an OpenAPI document from a YAML or JSON file, for a run
     /// that generates models only and filters nothing.
     pub fn load(path: &Path) -> Result<Self> {
-        return Self::load_for(
+        return Self::load_with(
             path,
             &crate::config::Generate::default(),
             &crate::config::OutputOptions::default(),
         );
+    }
+
+    /// Load and parse an OpenAPI document from a YAML or JSON file, for a run
+    /// that generates the server when `server` is set and nothing else beside
+    /// the models. [`Spec::load_with`] states the run in full.
+    pub fn load_for(path: &Path, server: bool, options: &crate::config::OutputOptions) -> Result<Self> {
+        let generate = crate::config::Generate {
+            std_http_server: server,
+            ..crate::config::Generate::default()
+        };
+        return Self::load_with(path, &generate, options);
     }
 
     /// Load and parse an OpenAPI document from a YAML or JSON file.
@@ -86,7 +101,7 @@ impl Spec {
     /// filters it applies. The inspection reads both: a server checks a query
     /// parameter's constraints in the generated query struct, and a run that
     /// lowers operations reads their parameters and bodies by type.
-    pub fn load_for(
+    pub fn load_with(
         path: &Path,
         generate: &crate::config::Generate,
         options: &crate::config::OutputOptions,
@@ -95,6 +110,7 @@ impl Spec {
             server: generate.std_http_server,
             operations: generate.std_http_server || generate.client,
             referenced: false,
+            referenced_uses: Vec::new(),
             filters: options.clone(),
         };
         let text = std::fs::read_to_string(path).map_err(|source| {
@@ -119,9 +135,9 @@ impl Spec {
         // with a message that names a YAML shape and not a version.
         check_spec_version(&document, &value)?;
         check_top_level_keys(&value)?;
-        let described = crate::coverage::check(&document, &value, &run)?;
+        let inspected = crate::coverage::check(&document, &value, &run)?;
         let mut value = value;
-        crate::coverage::wrap_described_refs(&mut value, &described);
+        crate::coverage::wrap_described_refs(&mut value, &inspected.described_refs);
         let inner: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseSpec {
                 path: document.clone(),
@@ -133,6 +149,7 @@ impl Spec {
             source: path.to_path_buf(),
             docs: RefCell::new(HashMap::new()),
             run,
+            external_uses: RefCell::new(inspected.external_uses),
         });
     }
 
@@ -143,6 +160,7 @@ impl Spec {
             source,
             docs: RefCell::new(HashMap::new()),
             run: crate::coverage::Run::default(),
+            external_uses: RefCell::new(Vec::new()),
         };
     }
 
@@ -174,15 +192,25 @@ impl Spec {
         // before the typed parse for the same reason.
         check_spec_version(file, &value)?;
         check_top_level_keys(&value)?;
-        // Another document's operations name this document's components, so
-        // the inspection reads those components as used.
+        // The root document's operations reach into this document, so the
+        // inspection reads the components they reach as used, and nothing
+        // else. What this document reaches in a third one is carried on.
+        let referenced_uses = self
+            .external_uses
+            .borrow()
+            .iter()
+            .filter(|(from, _)| return from == file)
+            .map(|(_, path)| return path.clone())
+            .collect();
         let run = crate::coverage::Run {
             referenced: true,
+            referenced_uses,
             ..self.run.clone()
         };
-        let described = crate::coverage::check(file, &value, &run)?;
+        let inspected = crate::coverage::check(file, &value, &run)?;
+        self.external_uses.borrow_mut().extend(inspected.external_uses);
         let mut value = value;
-        crate::coverage::wrap_described_refs(&mut value, &described);
+        crate::coverage::wrap_described_refs(&mut value, &inspected.described_refs);
         let parsed: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseRefFile {
                 file: file.to_owned(),
