@@ -82,7 +82,7 @@ pub struct Spec {
 #[derive(Debug)]
 struct RawDocuments {
     base: PathBuf,
-    read: RefCell<HashMap<String, Option<Rc<serde_yaml::Value>>>>,
+    read: RefCell<HashMap<PathBuf, Option<Rc<serde_yaml::Value>>>>,
 }
 
 impl RawDocuments {
@@ -94,18 +94,39 @@ impl RawDocuments {
         };
     }
 
+    /// The path of `file`, as the resolver's cache names it. Two spellings of
+    /// one file, such as `a.yaml` and `./a.yaml`, name the same path.
+    fn path_of(&self, file: &str) -> PathBuf {
+        return self.base.join(file);
+    }
+
+    /// Whether `file` and `other` name the same document.
+    fn same_document(&self, file: &str, other: &str) -> bool {
+        return self.path_of(file) == self.path_of(other);
+    }
+
     /// The document in `file`, or `None` when it cannot be read or parsed. The
     /// resolver reports such a file with its own error when it reaches it.
     fn document(&self, file: &str) -> Option<Rc<serde_yaml::Value>> {
-        if let Some(known) = self.read.borrow().get(file) {
+        let path = self.path_of(file);
+        if let Some(known) = self.read.borrow().get(&path) {
             return known.clone();
         }
-        let value = std::fs::read_to_string(self.base.join(file))
+        let value = std::fs::read_to_string(&path)
             .ok()
             .and_then(|text| return serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
             .map(Rc::new);
-        self.read.borrow_mut().insert(file.to_owned(), value.clone());
+        self.read.borrow_mut().insert(path, value.clone());
         return value;
+    }
+
+    /// The component paths in `uses` that name `file`, under any spelling.
+    fn uses_of(&self, uses: &[(String, String)], file: &str) -> Vec<String> {
+        return uses
+            .iter()
+            .filter(|(from, _)| return self.same_document(from, file))
+            .map(|(_, path)| return path.clone())
+            .collect();
     }
 }
 
@@ -132,15 +153,15 @@ fn settle_external_uses(
             };
             let run = crate::coverage::Run {
                 referenced: true,
-                referenced_uses: uses
-                    .iter()
-                    .filter(|(from, _)| return *from == file)
-                    .map(|(_, path)| return path.clone())
-                    .collect(),
+                referenced_uses: raw.uses_of(&uses, &file),
                 ..run.clone()
             };
             for found in crate::coverage::external_uses(&document, &run, raw) {
-                if !uses.contains(&found) {
+                // A use is the same use under another spelling of its file.
+                let known = uses
+                    .iter()
+                    .any(|(from, path)| return *path == found.1 && raw.same_document(from, &found.0));
+                if !known {
                     uses.push(found);
                     grew = true;
                 }
@@ -281,12 +302,7 @@ impl Spec {
         // or through other documents, so the inspection reads the components
         // they reach as used, and nothing else. The uses were settled when the
         // root loaded, so a document read later changes nothing here.
-        let referenced_uses = self
-            .external_uses
-            .iter()
-            .filter(|(from, _)| return from == file)
-            .map(|(_, path)| return path.clone())
-            .collect();
+        let referenced_uses = self.raw.uses_of(&self.external_uses, file);
         let run = crate::coverage::Run {
             referenced: true,
             referenced_uses,
@@ -1235,6 +1251,45 @@ mod tests {
                 ("b.yaml".to_owned(), "/components/parameters/M".to_owned()),
             ]
         );
+    }
+
+    /// Two spellings of one file name one document in the resolver's cache, so
+    /// the uses under either spelling reach that document's inspection,
+    /// whichever spelling the resolver meets first.
+    #[test]
+    fn uses_under_two_spellings_of_a_file_reach_its_inspection() {
+        for first in ["shared.yaml", "./shared.yaml"] {
+            let second = if first == "shared.yaml" {
+                "./shared.yaml"
+            } else {
+                "shared.yaml"
+            };
+            let dir = TestDir::new("spellings");
+            let main = dir.write(
+                "main.yaml",
+                &format!(
+                    "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths:\n  /a:\n    get:\n      parameters:\n        - $ref: '{first}#/components/parameters/N'\n        - $ref: '{second}#/components/parameters/M'\n      responses: {{}}\n"
+                ),
+            );
+            dir.write(
+                "shared.yaml",
+                "openapi: 3.0.3\ninfo:\n  title: s\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    N:\n      name: n\n      in: query\n      schema:\n        type: string\n    M:\n      name: m\n      in: query\n      schema:\n        type: string\n",
+            );
+            let generate = crate::config::Generate {
+                std_http_server: true,
+                ..crate::config::Generate::default()
+            };
+
+            let spec = Spec::load_with(&main, &generate, &crate::config::OutputOptions::default()).expect("load");
+
+            let mut uses = spec.raw.uses_of(&spec.external_uses, first);
+            uses.sort();
+            assert_eq!(
+                uses,
+                vec!["/components/parameters/M", "/components/parameters/N"],
+                "{first}"
+            );
+        }
     }
 
     #[test]
