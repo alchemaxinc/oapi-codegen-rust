@@ -20,7 +20,7 @@ use crate::lower::direction::REQUEST_SUFFIX;
 use crate::lower::direction::RESPONSE_SUFFIX;
 
 /// Maximum `$ref` chain length before bailing out (cycle guard).
-const MAX_REF_DEPTH: usize = 32;
+pub(crate) const MAX_REF_DEPTH: usize = 32;
 
 /// The OpenAPI minor versions the generator reads. Every parsed document must
 /// declare a patch release of one of them.
@@ -67,24 +67,151 @@ pub struct Spec {
     /// each document reads this to decide which constraint notes apply: only a
     /// server checks a query parameter, and only for an operation it keeps.
     run: crate::coverage::Run,
+    /// The components of other documents that the kept operations reach, each
+    /// as the file and the component's path in it, settled across every
+    /// document before any of them is inspected. A document that is read for a
+    /// `$ref` is inspected with the uses that reach into it.
+    external_uses: Vec<(String, String)>,
+    /// The other documents as written, read for the inspection's lookups.
+    raw: RawDocuments,
+}
+
+/// The documents next to the root, as written, read on demand and kept. The
+/// inspection reads a parameter's identity across files through this, and the
+/// loader settles cross-file uses with it, without inspecting those documents.
+#[derive(Debug)]
+struct RawDocuments {
+    base: PathBuf,
+    read: RefCell<HashMap<PathBuf, Option<Rc<serde_yaml::Value>>>>,
+}
+
+impl RawDocuments {
+    fn new(source: &Path) -> Self {
+        let base = source.parent().unwrap_or_else(|| return Path::new(".")).to_path_buf();
+        return Self {
+            base,
+            read: RefCell::new(HashMap::new()),
+        };
+    }
+
+    /// The path of `file`, as the resolver's cache names it. Two spellings of
+    /// one file, such as `a.yaml` and `./a.yaml`, name the same path.
+    fn path_of(&self, file: &str) -> PathBuf {
+        return self.base.join(file);
+    }
+
+    /// Whether `file` and `other` name the same document.
+    fn same_document(&self, file: &str, other: &str) -> bool {
+        return self.path_of(file) == self.path_of(other);
+    }
+
+    /// The document in `file`, or `None` when it cannot be read or parsed. The
+    /// resolver reports such a file with its own error when it reaches it.
+    fn document(&self, file: &str) -> Option<Rc<serde_yaml::Value>> {
+        let path = self.path_of(file);
+        if let Some(known) = self.read.borrow().get(&path) {
+            return known.clone();
+        }
+        let value = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| return serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
+            .map(Rc::new);
+        self.read.borrow_mut().insert(path, value.clone());
+        return value;
+    }
+
+    /// The component paths in `uses` that name `file`, under any spelling.
+    fn uses_of(&self, uses: &[(String, String)], file: &str) -> Vec<String> {
+        return uses
+            .iter()
+            .filter(|(from, _)| return self.same_document(from, file))
+            .map(|(_, path)| return path.clone())
+            .collect();
+    }
+}
+
+impl crate::coverage::Lookup for RawDocuments {
+    fn component(&self, file: &str, kind: &str, name: &str) -> Option<serde_yaml::Value> {
+        return self.document(file)?.get("components")?.get(kind)?.get(name).cloned();
+    }
+}
+
+/// Every cross-file use that `root` reaches, directly and through the other
+/// documents, settled to a fixed point. The uses of a document decide what its
+/// inspection reads by type, so they must be complete before it runs.
+fn settle_external_uses(
+    mut uses: Vec<(String, String)>,
+    run: &crate::coverage::Run,
+    raw: &RawDocuments,
+) -> Vec<(String, String)> {
+    for _ in 0..MAX_REF_DEPTH {
+        let mut grew = false;
+        let files: std::collections::BTreeSet<String> = uses.iter().map(|(file, _)| return file.clone()).collect();
+        for file in files {
+            let Some(document) = raw.document(&file) else {
+                continue;
+            };
+            let run = crate::coverage::Run {
+                referenced: true,
+                referenced_uses: raw.uses_of(&uses, &file),
+                ..run.clone()
+            };
+            for found in crate::coverage::external_uses(&document, &run, raw) {
+                // A use is the same use under another spelling of its file.
+                let known = uses
+                    .iter()
+                    .any(|(from, path)| return *path == found.1 && raw.same_document(from, &found.0));
+                if !known {
+                    uses.push(found);
+                    grew = true;
+                }
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+    return uses;
 }
 
 impl Spec {
     /// Load and parse an OpenAPI document from a YAML or JSON file, for a run
-    /// that generates no server and filters nothing.
+    /// that generates models only and filters nothing.
     pub fn load(path: &Path) -> Result<Self> {
-        return Self::load_for(path, false, &crate::config::OutputOptions::default());
+        return Self::load_with(
+            path,
+            &crate::config::Generate::default(),
+            &crate::config::OutputOptions::default(),
+        );
+    }
+
+    /// Load and parse an OpenAPI document from a YAML or JSON file, for a run
+    /// that generates the server when `server` is set and nothing else beside
+    /// the models. [`Spec::load_with`] states the run in full.
+    pub fn load_for(path: &Path, server: bool, options: &crate::config::OutputOptions) -> Result<Self> {
+        let generate = crate::config::Generate {
+            std_http_server: server,
+            ..crate::config::Generate::default()
+        };
+        return Self::load_with(path, &generate, options);
     }
 
     /// Load and parse an OpenAPI document from a YAML or JSON file.
     ///
-    /// `server` states whether the run generates the server, and `options`
-    /// holds the filters the run applies. A server checks a query parameter's
-    /// constraints in the generated query struct, so for an operation the run
-    /// keeps the inspection reports no unchecked constraint there.
-    pub fn load_for(path: &Path, server: bool, options: &crate::config::OutputOptions) -> Result<Self> {
+    /// `generate` states what the run generates, and `options` holds the
+    /// filters it applies. The inspection reads both: a server checks a query
+    /// parameter's constraints in the generated query struct, and a run that
+    /// lowers operations reads their parameters and bodies by type.
+    pub fn load_with(
+        path: &Path,
+        generate: &crate::config::Generate,
+        options: &crate::config::OutputOptions,
+    ) -> Result<Self> {
         let run = crate::coverage::Run {
-            server,
+            server: generate.std_http_server,
+            operations: generate.std_http_server || generate.client,
+            referenced: false,
+            referenced_uses: Vec::new(),
             filters: options.clone(),
         };
         let text = std::fs::read_to_string(path).map_err(|source| {
@@ -109,9 +236,11 @@ impl Spec {
         // with a message that names a YAML shape and not a version.
         check_spec_version(&document, &value)?;
         check_top_level_keys(&value)?;
-        let described = crate::coverage::check(&document, &value, &run)?;
+        let raw = RawDocuments::new(path);
+        let inspected = crate::coverage::check(&document, &value, &run, &raw)?;
+        let external_uses = settle_external_uses(inspected.external_uses, &run, &raw);
         let mut value = value;
-        crate::coverage::wrap_described_refs(&mut value, &described);
+        crate::coverage::wrap_described_refs(&mut value, &inspected.described_refs);
         let inner: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseSpec {
                 path: document.clone(),
@@ -123,16 +252,21 @@ impl Spec {
             source: path.to_path_buf(),
             docs: RefCell::new(HashMap::new()),
             run,
+            external_uses,
+            raw,
         });
     }
 
     /// Construct a spec directly from an already-parsed document (test helper).
     pub fn from_parts(inner: OpenAPI, source: PathBuf) -> Self {
+        let raw = RawDocuments::new(&source);
         return Spec {
             inner,
             source,
             docs: RefCell::new(HashMap::new()),
             run: crate::coverage::Run::default(),
+            external_uses: Vec::new(),
+            raw,
         };
     }
 
@@ -164,9 +298,19 @@ impl Spec {
         // before the typed parse for the same reason.
         check_spec_version(file, &value)?;
         check_top_level_keys(&value)?;
-        let described = crate::coverage::check(file, &value, &self.run)?;
+        // The root document's operations reach into this document, directly
+        // or through other documents, so the inspection reads the components
+        // they reach as used, and nothing else. The uses were settled when the
+        // root loaded, so a document read later changes nothing here.
+        let referenced_uses = self.raw.uses_of(&self.external_uses, file);
+        let run = crate::coverage::Run {
+            referenced: true,
+            referenced_uses,
+            ..self.run.clone()
+        };
+        let inspected = crate::coverage::check(file, &value, &run, &self.raw)?;
         let mut value = value;
-        crate::coverage::wrap_described_refs(&mut value, &described);
+        crate::coverage::wrap_described_refs(&mut value, &inspected.described_refs);
         let parsed: OpenAPI = serde_yaml::from_value(value).map_err(|source| {
             return Error::ParseRefFile {
                 file: file.to_owned(),
@@ -1071,6 +1215,81 @@ mod tests {
         assert_eq!(second.origin.as_deref(), Some("shared.yaml"));
         assert_query_parameter_name(&second.value, "pageSize");
         assert_eq!(spec.docs.borrow().len(), 1);
+    }
+
+    /// A use that reaches a document only through another document is known
+    /// before either document is inspected, whichever is read first.
+    #[test]
+    fn external_uses_settle_across_documents_before_inspection() {
+        let dir = TestDir::new("settled-uses");
+        let main = dir.write(
+            "main.yaml",
+            "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths:\n  /a:\n    get:\n      parameters:\n        - $ref: 'a.yaml#/components/parameters/N'\n        - $ref: 'b.yaml#/components/parameters/M'\n      responses: {}\n",
+        );
+        dir.write(
+            "a.yaml",
+            "openapi: 3.0.3\ninfo:\n  title: a\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    N:\n      name: n\n      in: query\n      schema:\n        type: string\n    K:\n      name: k\n      in: query\n      schema:\n        type: string\n",
+        );
+        dir.write(
+            "b.yaml",
+            "openapi: 3.0.3\ninfo:\n  title: b\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    M:\n      $ref: 'a.yaml#/components/parameters/K'\n",
+        );
+        let generate = crate::config::Generate {
+            std_http_server: true,
+            ..crate::config::Generate::default()
+        };
+
+        let spec = Spec::load_with(&main, &generate, &crate::config::OutputOptions::default()).expect("load main spec");
+
+        let mut uses = spec.external_uses.clone();
+        uses.sort();
+        assert_eq!(
+            uses,
+            vec![
+                ("a.yaml".to_owned(), "/components/parameters/K".to_owned()),
+                ("a.yaml".to_owned(), "/components/parameters/N".to_owned()),
+                ("b.yaml".to_owned(), "/components/parameters/M".to_owned()),
+            ]
+        );
+    }
+
+    /// Two spellings of one file name one document in the resolver's cache, so
+    /// the uses under either spelling reach that document's inspection,
+    /// whichever spelling the resolver meets first.
+    #[test]
+    fn uses_under_two_spellings_of_a_file_reach_its_inspection() {
+        for first in ["shared.yaml", "./shared.yaml"] {
+            let second = if first == "shared.yaml" {
+                "./shared.yaml"
+            } else {
+                "shared.yaml"
+            };
+            let dir = TestDir::new("spellings");
+            let main = dir.write(
+                "main.yaml",
+                &format!(
+                    "openapi: 3.0.3\ninfo:\n  title: t\n  version: '1'\npaths:\n  /a:\n    get:\n      parameters:\n        - $ref: '{first}#/components/parameters/N'\n        - $ref: '{second}#/components/parameters/M'\n      responses: {{}}\n"
+                ),
+            );
+            dir.write(
+                "shared.yaml",
+                "openapi: 3.0.3\ninfo:\n  title: s\n  version: '1'\npaths: {}\ncomponents:\n  parameters:\n    N:\n      name: n\n      in: query\n      schema:\n        type: string\n    M:\n      name: m\n      in: query\n      schema:\n        type: string\n",
+            );
+            let generate = crate::config::Generate {
+                std_http_server: true,
+                ..crate::config::Generate::default()
+            };
+
+            let spec = Spec::load_with(&main, &generate, &crate::config::OutputOptions::default()).expect("load");
+
+            let mut uses = spec.raw.uses_of(&spec.external_uses, first);
+            uses.sort();
+            assert_eq!(
+                uses,
+                vec!["/components/parameters/M", "/components/parameters/N"],
+                "{first}"
+            );
+        }
     }
 
     #[test]

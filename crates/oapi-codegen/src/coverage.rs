@@ -10,6 +10,493 @@ use crate::error::Result;
 use crate::lower::validate::Diagnostics;
 
 const MAX_DEPTH: usize = 128;
+/// The schemas that the lowering reads by type, found from what the run
+/// lowers: the parameters, request bodies, and responses of each operation the
+/// run keeps, and, in a referenced document, every component parameter,
+/// request body, and response, because another document's operations name
+/// them.
+///
+/// A path item's own parameters count for an operation unless it declares a
+/// parameter of the same name and location, as the lowering overrides them. A
+/// `$ref` to a component parameter, request body, or response is followed the
+/// way the resolver follows it. A component schema that is itself a `$ref` is
+/// an alias, and the lowering resolves an alias chain, so every name on the
+/// chain is collected. The lowering reads such a component by type even when a
+/// model names it too, so the model use does not lift the mark.
+///
+/// A run that lowers no operation reads nothing by type, in the referenced
+/// documents as well: a models-only run turns a custom type schema into an
+/// alias and nothing else.
+fn read_by_type(document: &Value, run: &Run, lookup: &dyn Lookup) -> ByType {
+    let mut found = ByType::default();
+    if !run.operations {
+        return found;
+    }
+    if run.referenced {
+        // The run lowers the root document's operations only, so this document
+        // is read where the root's operations reach into it.
+        for path in &run.referenced_uses {
+            let Some((kind, name)) = component_path_parts(path) else {
+                continue;
+            };
+            let name = name.replace("~1", "/").replace("~0", "~");
+            let value = document
+                .get("components")
+                .and_then(|components| return components.get(kind))
+                .and_then(|values| return values.get(name.as_str()));
+            if let (Some(value), Some(read)) = (value, Use::for_kind(kind)) {
+                read.collect(document, path, value, &mut found);
+            }
+        }
+        return found;
+    }
+    let paths = document.get("paths").and_then(Value::as_mapping);
+    for (route, item) in paths.into_iter().flatten() {
+        let Some(route) = route.as_str() else {
+            continue;
+        };
+        let item_path = pointer("/paths", route);
+        let kept: Vec<(&str, &Value)> = OPERATION_KEYS
+            .iter()
+            .filter_map(|method| return item.get(*method).map(|operation| return (*method, operation)))
+            .filter(|(_, operation)| return !run_removes(run, operation))
+            .collect();
+        for (method, operation) in kept {
+            let operation_path = pointer(&item_path, method);
+            for (path, parameter) in
+                effective_parameters(document, lookup, &item_path, item, &operation_path, operation)
+            {
+                Use::Parameter.collect(document, &path, parameter, &mut found);
+            }
+            if let Some(body) = operation.get("requestBody") {
+                Use::Body.collect(document, &pointer(&operation_path, "requestBody"), body, &mut found);
+            }
+            let responses = operation.get("responses").and_then(Value::as_mapping);
+            for (code, response) in responses.into_iter().flatten() {
+                let code = match code {
+                    Value::String(code) => code.clone(),
+                    Value::Number(code) => code.to_string(),
+                    _ => continue,
+                };
+                let path = pointer(&pointer(&operation_path, "responses"), &code);
+                Use::Response.collect(document, &path, response, &mut found);
+            }
+        }
+    }
+    return found;
+}
+
+/// A way to read a component of another document without inspecting that
+/// document: the inspection resolves a parameter's identity across files the
+/// way the lowering does, and settles cross-file uses before it reports.
+pub(crate) trait Lookup {
+    /// The component of `kind` named `name` in `file`, read as it is written.
+    fn component(&self, file: &str, kind: &str, name: &str) -> Option<Value>;
+}
+
+/// A lookup that reads no other document.
+#[cfg(test)]
+pub(crate) struct NoLookup;
+
+#[cfg(test)]
+impl Lookup for NoLookup {
+    fn component(&self, _file: &str, _kind: &str, _name: &str) -> Option<Value> {
+        return None;
+    }
+}
+
+/// The components of other documents that `document` reaches by type, given
+/// the uses that reach into it. The loader settles the uses of every document
+/// with this before any of them is inspected.
+pub(crate) fn external_uses(document: &Value, run: &Run, lookup: &dyn Lookup) -> Vec<(String, String)> {
+    return read_by_type(document, run, lookup).external;
+}
+
+/// What the lowering reads by type: the schemas of this document, and the
+/// components of other documents that the kept operations reach through a
+/// cross-file `$ref`, each as the file and the component's path in it.
+#[derive(Debug, Default)]
+pub(crate) struct ByType {
+    schemas: Vec<ReadByType>,
+    pub(crate) external: Vec<(String, String)>,
+}
+
+/// The kind and name in a component path such as `/components/parameters/N`.
+fn component_path_parts(path: &str) -> Option<(&str, &str)> {
+    let rest = path.strip_prefix("/components/")?;
+    let (kind, name) = rest.split_once('/')?;
+    return (!name.contains('/')).then_some((kind, name));
+}
+
+/// Whether the filters of `run` remove `operation`.
+fn run_removes(run: &Run, operation: &Value) -> bool {
+    let tags: Vec<String> = operation
+        .get("tags")
+        .and_then(Value::as_sequence)
+        .map(|tags| return tags.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .unwrap_or_default();
+    let id = operation.get("operationId").and_then(Value::as_str);
+    return crate::filter::removes_operation(&run.filters, &tags, id);
+}
+
+/// The parameters an operation reads, with the path of each: its own, and the
+/// path item's own except where the operation declares the same name and
+/// location.
+fn effective_parameters<'a>(
+    document: &'a Value,
+    lookup: &dyn Lookup,
+    item_path: &str,
+    item: &'a Value,
+    operation_path: &str,
+    operation: &'a Value,
+) -> Vec<(String, &'a Value)> {
+    let listed = |owner: &'a Value, owner_path: &str| {
+        let parameters = owner.get("parameters").and_then(Value::as_sequence);
+        let list = pointer(owner_path, "parameters");
+        return parameters
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .map(|(index, parameter)| return (pointer(&list, &index.to_string()), parameter))
+            .collect::<Vec<_>>();
+    };
+    let identity = |parameter: &Value| {
+        let parameter = resolve_parameter(document, lookup, parameter)?;
+        let location = parameter.get("in")?.as_str()?.to_owned();
+        // A header name has no case, and the lowering overrides it without one.
+        let name = parameter.get("name")?.as_str()?;
+        let name = if location == "header" {
+            name.to_ascii_lowercase()
+        } else {
+            name.to_owned()
+        };
+        return Some((name, location));
+    };
+    let own = listed(operation, operation_path);
+    let declared: std::collections::HashSet<_> = own
+        .iter()
+        .filter_map(|(_, parameter)| return identity(parameter))
+        .collect();
+    let inherited = listed(item, item_path)
+        .into_iter()
+        .filter(|(_, parameter)| return identity(parameter).is_none_or(|key| return !declared.contains(&key)));
+    return inherited.chain(own).collect();
+}
+
+/// The parameter a `$ref` chain names, in this document or in another one,
+/// followed the way the resolver follows it and up to its depth. The lowering
+/// resolves a parameter before it decides an override, so the identity must
+/// come from the resolved parameter wherever it is written.
+fn resolve_parameter(document: &Value, lookup: &dyn Lookup, parameter: &Value) -> Option<Value> {
+    let mut current = parameter.clone();
+    let mut file: Option<String> = None;
+    for _ in 0..crate::loader::MAX_REF_DEPTH {
+        let Some(reference) = current.get("$ref").and_then(Value::as_str).map(str::to_owned) else {
+            return Some(current);
+        };
+        let name = crate::loader::ref_component_name(&reference, "parameters")?.to_owned();
+        if let Some(next) = crate::loader::ref_file_part(&reference) {
+            file = Some(next.to_owned());
+        }
+        current = match &file {
+            Some(file) => lookup.component(file, "parameters", &name)?,
+            None => document
+                .get("components")?
+                .get("parameters")?
+                .get(name.as_str())?
+                .clone(),
+        };
+    }
+    return current.get("$ref").is_none().then_some(current);
+}
+
+/// One kind of use the lowering reads by type.
+#[derive(Debug, Clone, Copy)]
+enum Use {
+    /// A parameter: its schema is read through its collections. The parameter
+    /// lowering resolves a `$ref` and maps the type, so a named component is
+    /// read the same way.
+    Parameter,
+    /// A request body: an inline schema is read through its collections, and a
+    /// multipart one through its properties. A named component is read by
+    /// type only for a multipart body; the other bodies reuse the model, which
+    /// reads `x-rust-type`.
+    Body,
+    /// A response: an inline schema is read through its collections. A named
+    /// component reuses the model.
+    Response,
+}
+
+impl Use {
+    fn kind(self) -> &'static str {
+        return match self {
+            Use::Parameter => "parameters",
+            Use::Body => "requestBodies",
+            Use::Response => "responses",
+        };
+    }
+
+    fn for_kind(kind: &str) -> Option<Self> {
+        return [Use::Parameter, Use::Body, Use::Response]
+            .into_iter()
+            .find(|read| return read.kind() == kind);
+    }
+
+    fn collect(self, document: &Value, path: &str, value: &Value, found: &mut ByType) {
+        let (path, value) = match follow_references(document, self.kind(), path, value) {
+            Followed::Here(path, value) => (path, value),
+            Followed::Elsewhere(file, path) => {
+                found.external.push((file, path));
+                return;
+            }
+            Followed::Nowhere => return,
+        };
+        let found = &mut found.schemas;
+        if let Use::Parameter = self {
+            // The header lowering skips the headers the framework owns.
+            let reserved = value.get("in").and_then(Value::as_str) == Some("header")
+                && value.get("name").and_then(Value::as_str).is_some_and(|name| {
+                    return crate::lower::paths::IGNORED_HEADER_NAMES
+                        .iter()
+                        .any(|ignored| return ignored.eq_ignore_ascii_case(name));
+                });
+            if reserved {
+                return;
+            }
+            schema_marks(document, &pointer(&path, "schema"), value.get("schema"), found);
+            return;
+        }
+        // The body lowering reads the first entry of each kind it supports, in
+        // its own order, and ignores the rest.
+        let priority: &[crate::ir::BodyKind] = match self {
+            Use::Body => &crate::lower::paths::REQUEST_BODY_PRIORITY,
+            _ => &crate::lower::paths::RESPONSE_BODY_PRIORITY,
+        };
+        let content = value.get("content").and_then(Value::as_mapping);
+        for wanted in priority {
+            let selected = content.into_iter().flatten().find(|(name, _)| {
+                return name
+                    .as_str()
+                    .is_some_and(|name| return crate::lower::paths::media_type_kind(name) == Some(*wanted));
+            });
+            let Some((name, media)) = selected else {
+                continue;
+            };
+            let Some(name) = name.as_str() else {
+                continue;
+            };
+            let schema_path = pointer(&pointer(&pointer(&path, "content"), name), "schema");
+            let schema = media.get("schema");
+            if *wanted == crate::ir::BodyKind::Multipart {
+                multipart_marks(document, &schema_path, schema, found);
+            } else if schema_reference(Some(media)).is_none() {
+                // An inline body or response is read by type.
+                found.push(ReadByType::new(schema_path));
+            } else {
+                // A named body or response reuses the model, which reads the
+                // extension.
+            }
+        }
+    }
+}
+
+/// Mark `schema` at `path` as read by type, following an alias chain when it
+/// is a `$ref`.
+fn schema_marks(document: &Value, path: &str, schema: Option<&Value>, found: &mut Vec<ReadByType>) {
+    match schema
+        .and_then(|schema| return schema.get("$ref"))
+        .and_then(Value::as_str)
+    {
+        Some(reference) => found.extend(alias_chain(document, reference).map(ReadByType::new)),
+        None => found.push(ReadByType::new(path.to_owned())),
+    }
+}
+
+/// Mark a multipart body schema the way the multipart lowering reads it: each
+/// property the request sends, by type. The object itself is not marked: a
+/// `readOnly` property travels in no request, so the lowering skips it before
+/// it reads the type, and when the object carries `x-rust-type` that property
+/// stays below the replacement while the sent ones are read through it.
+fn multipart_marks(document: &Value, path: &str, schema: Option<&Value>, found: &mut Vec<ReadByType>) {
+    let Some(schema) = schema else {
+        return;
+    };
+    // The chain of aliases ends at the object the fields are read from.
+    let (object_path, object) = match schema.get("$ref").and_then(Value::as_str) {
+        Some(reference) => {
+            let Some(last) = alias_chain(document, reference).last() else {
+                return;
+            };
+            let name = last
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                .replace("~1", "/")
+                .replace("~0", "~");
+            let Some(object) = document
+                .get("components")
+                .and_then(|components| return components.get("schemas"))
+                .and_then(|schemas| return schemas.get(name.as_str()))
+            else {
+                return;
+            };
+            (last, object)
+        }
+        None => (path.to_owned(), schema),
+    };
+    let properties = object.get("properties").and_then(Value::as_mapping);
+    for (name, property) in properties.into_iter().flatten() {
+        let Some(name) = name.as_str() else {
+            continue;
+        };
+        if is_read_only(document, property) {
+            continue;
+        }
+        schema_marks(
+            document,
+            &pointer(&pointer(&object_path, "properties"), name),
+            Some(property),
+            found,
+        );
+    }
+}
+
+/// Whether a multipart field is `readOnly`, on the property itself, on the
+/// one-member `allOf` wrapper around its `$ref`, or on the schema that its
+/// `$ref` names through any alias chain. The multipart lowering resolves the
+/// reference and skips such a field before it reads the type.
+fn is_read_only(document: &Value, property: &Value) -> bool {
+    let marked = |schema: &Value| return schema.get("readOnly").and_then(Value::as_bool) == Some(true);
+    if marked(property) {
+        return true;
+    }
+    let reference = property.get("$ref").and_then(Value::as_str).or_else(|| {
+        let members = property.get("allOf")?.as_sequence()?;
+        let [member] = members.as_slice() else {
+            return None;
+        };
+        return member.get("$ref")?.as_str();
+    });
+    let Some(reference) = reference else {
+        return false;
+    };
+    return alias_chain(document, reference).any(|path| {
+        let Some((_, name)) = component_path_parts(&path) else {
+            return false;
+        };
+        let name = name.replace("~1", "/").replace("~0", "~");
+        return document
+            .get("components")
+            .and_then(|components| return components.get("schemas"))
+            .and_then(|schemas| return schemas.get(name.as_str()))
+            .is_some_and(marked);
+    });
+}
+
+/// Where a chain of component references leads.
+enum Followed<'a> {
+    /// A value of this document, with its path.
+    Here(String, &'a Value),
+    /// A component of another document: the file, and the component's path in
+    /// it. The resolver reads that document, so the inspection of that
+    /// document reads the component as used.
+    Elsewhere(String, String),
+    /// Nothing the resolver would reach.
+    Nowhere,
+}
+
+/// `value` with its `path`, or the component of `kind` it names when it is a
+/// `$ref`, following a chain of such references the way the resolver does, up
+/// to its depth. The last lookup may reach the value itself, as the resolver's
+/// last step does; one more reference is one too many.
+fn follow_references<'a>(document: &'a Value, kind: &str, path: &str, value: &'a Value) -> Followed<'a> {
+    let mut current = (path.to_owned(), value);
+    for _ in 0..crate::loader::MAX_REF_DEPTH {
+        let Some(reference) = current.1.get("$ref").and_then(Value::as_str) else {
+            return Followed::Here(current.0, current.1);
+        };
+        let Some(name) = crate::loader::ref_component_name(reference, kind) else {
+            return Followed::Nowhere;
+        };
+        let component_path = pointer(&pointer("/components", kind), name);
+        if let Some(file) = crate::loader::ref_file_part(reference) {
+            return Followed::Elsewhere(file.to_owned(), component_path);
+        }
+        let component = document
+            .get("components")
+            .and_then(|components| return components.get(kind))
+            .and_then(|values| return values.get(name));
+        let Some(component) = component else {
+            return Followed::Nowhere;
+        };
+        current = (component_path, component);
+    }
+    return match current.1.get("$ref") {
+        None => Followed::Here(current.0, current.1),
+        Some(_) => Followed::Nowhere,
+    };
+}
+
+/// The `$ref` in the `schema` of `holder`, when it has one.
+fn schema_reference(holder: Option<&Value>) -> Option<&str> {
+    return holder?.get("schema")?.get("$ref")?.as_str();
+}
+
+/// The paths of every component schema on the alias chain that starts at
+/// `reference`, in the order the resolver follows them and up to the depth it
+/// follows. A component schema that is itself a `$ref` is an alias.
+fn alias_chain<'a>(document: &'a Value, reference: &str) -> impl Iterator<Item = String> + 'a {
+    let mut current = reference.strip_prefix("#/components/schemas/").map(str::to_owned);
+    let mut budget = crate::loader::MAX_REF_DEPTH;
+    return std::iter::from_fn(move || {
+        let name = current.take()?;
+        budget = budget.checked_sub(1)?;
+        current = document
+            .get("components")
+            .and_then(|components| return components.get("schemas"))
+            .and_then(|schemas| return schemas.get(&name))
+            .and_then(|schema| return schema.get("$ref"))
+            .and_then(Value::as_str)
+            .and_then(|next| return next.strip_prefix("#/components/schemas/"))
+            .map(str::to_owned);
+        return Some(pointer("/components/schemas", &name));
+    });
+}
+
+/// A schema the lowering reads by type. The read enters `items`,
+/// `additionalProperties`, and a one-member `allOf`, and stops at an object
+/// with properties, which is lowered as a model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadByType {
+    /// The path of the schema.
+    root: String,
+}
+
+impl ReadByType {
+    fn new(root: String) -> Self {
+        return Self { root };
+    }
+
+    /// Whether `path` is this schema or lies below it along the read.
+    fn covers(&self, path: &str) -> bool {
+        let Some(rest) = path.strip_prefix(self.root.as_str()) else {
+            return false;
+        };
+        if !rest.is_empty() && !rest.starts_with('/') {
+            return false;
+        }
+        let mut segments = rest.split('/').skip(1).peekable();
+        while let Some(segment) = segments.next() {
+            match segment {
+                "items" | "additionalProperties" => {}
+                "allOf" if segments.next_if_eq(&"0").is_some() => {}
+                _ => return false,
+            }
+        }
+        return true;
+    }
+}
+
 /// The keys of a path item that hold an operation.
 const OPERATION_KEYS: &[&str] = &["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 
@@ -366,6 +853,16 @@ pub(crate) struct Run {
     /// Whether the run generates the server. Only the server reads a query
     /// parameter, so only it checks the constraints of one.
     pub(crate) server: bool,
+    /// Whether the run lowers operations at all, for a server or a client. A
+    /// models-only run reads no parameter and no body.
+    pub(crate) operations: bool,
+    /// Whether the document is one that another document references. The run
+    /// lowers the root document's operations only, so such a document is read
+    /// through `referenced_uses` and not through its own paths.
+    pub(crate) referenced: bool,
+    /// The paths of the components in a referenced document that the root
+    /// document's kept operations reach, such as `/components/parameters/N`.
+    pub(crate) referenced_uses: Vec<String>,
     /// The filters the run applies. An operation they remove generates no
     /// query struct, so nothing checks its parameters.
     pub(crate) filters: crate::config::OutputOptions,
@@ -373,16 +870,27 @@ pub(crate) struct Run {
 
 struct Sweep<'a> {
     document: &'a str,
+    /// The components of other documents the kept operations reach.
+    external: Vec<(String, String)>,
     warnings: Vec<Warning>,
     problems: Diagnostics,
     run: &'a Run,
     /// The depth of the operation, or path item, that the run's filters remove,
     /// while the walk is inside it.
     removed_at: Option<usize>,
+    /// The depth of the schema that `x-rust-type` replaces, while the walk is
+    /// inside it. The custom type reads everything below that schema, so no
+    /// generated code checks a constraint there.
+    replaced_at: Option<usize>,
     /// The paths of the schemas that sit directly in a query parameter. When
     /// the server is generated, its query struct checks the constraints of such
     /// a schema, so the note about unchecked constraints does not apply to it.
     query_schemas: Vec<String>,
+    /// The schemas that the lowering reads by type, from [`read_by_type`].
+    /// Such a schema, and what it reaches along that read, replaces nothing
+    /// even when it carries `x-rust-type`. An object with properties that a
+    /// model reads is lowered as a model, which reads the extension again.
+    read_by_type: Vec<ReadByType>,
     /// The paths of the property schemas that hold a same-document `$ref` and
     /// a `description` beside it. See [`wrap_described_refs`].
     described_refs: Vec<String>,
@@ -394,11 +902,25 @@ struct Sweep<'a> {
 /// query parameter's constraints are checked.
 ///
 /// The paths this returns are for [`wrap_described_refs`].
-pub(crate) fn check(document: &str, value: &Value, run: &Run) -> Result<Vec<String>> {
-    let sweep = inspect(document, value, run);
+pub(crate) fn check(document: &str, value: &Value, run: &Run, lookup: &dyn Lookup) -> Result<Inspected> {
+    let sweep = inspect(document, value, run, lookup);
     report_warnings(document, &sweep.warnings);
     sweep.problems.into_result()?;
-    return Ok(sweep.described_refs);
+    return Ok(Inspected {
+        described_refs: sweep.described_refs,
+        external_uses: sweep.external,
+    });
+}
+
+/// What the loader needs from an inspection.
+pub(crate) struct Inspected {
+    /// The paths of the property schemas that hold a `$ref` and a description
+    /// beside it, for [`wrap_described_refs`].
+    pub(crate) described_refs: Vec<String>,
+    /// The components of other documents that the kept operations reach, each
+    /// as the file and the component's path in it. The inspection of such a
+    /// document reads those components as used.
+    pub(crate) external_uses: Vec<(String, String)>,
 }
 
 /// Keep the `description` that sits beside a property's `$ref`.
@@ -453,14 +975,18 @@ fn node_at<'a>(value: &'a mut Value, path: &str) -> Option<&'a mut Value> {
     return Some(node);
 }
 
-fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run) -> Sweep<'a> {
+fn inspect<'a>(document: &'a str, value: &Value, run: &'a Run, lookup: &dyn Lookup) -> Sweep<'a> {
+    let by_type = read_by_type(value, run, lookup);
     let mut sweep = Sweep {
         document,
+        external: by_type.external,
         warnings: Vec::new(),
         problems: Diagnostics::new(),
         run,
         removed_at: None,
+        replaced_at: None,
         query_schemas: Vec::new(),
+        read_by_type: by_type.schemas,
         described_refs: Vec::new(),
     };
     sweep.object(value, Context::Document, "", 0);
@@ -505,6 +1031,17 @@ impl Sweep<'_> {
         if removed_here {
             self.removed_at = Some(depth);
         }
+        let replaces_here = matches!(context, Context::Schema | Context::PropertySchema)
+            && value.get("x-rust-type").is_some()
+            && self.replaced_at.is_none()
+            && !self.is_read_by_type(path);
+        if replaces_here {
+            self.replaced_at = Some(depth);
+        }
+        // This schema's own notes still apply when it is the replacing one;
+        // only what lies below a replacing schema is unlowered, and even there
+        // a schema the lowering reads by type is lowered.
+        let below_replacement = self.replaced_at.is_some_and(|at| return at < depth) && !self.is_read_by_type(path);
         if context == Context::Parameter
             && value.get("in").and_then(Value::as_str) == Some("query")
             && self.removed_at.is_none()
@@ -562,14 +1099,23 @@ impl Sweep<'_> {
                 continue;
             };
             if !reference {
+                // Below a replaced schema no code reads the feature, so a note
+                // that it is not implemented would mislead; the key is still
+                // checked and walked.
                 if let Handling::Unsupported(reason) = field.handling
                     && child.as_bool() != Some(false)
+                    && !below_replacement
                 {
                     self.warn(&at, reason);
                 }
-                self.value_notes(context, &key, child, &at);
+                self.value_notes(context, &key, child, &at, below_replacement);
             }
             self.walk(child, field.traversal, &at, depth + 1);
+        }
+        // The replacing schema's own notes still apply: a constraint written on
+        // it reaches no type, and the lowering reports that as an error.
+        if replaces_here {
+            self.replaced_at = None;
         }
         if !reference {
             self.object_notes(value, context, path);
@@ -579,15 +1125,16 @@ impl Sweep<'_> {
         }
     }
 
+    /// Whether the lowering reads the schema at `path` by type and not through
+    /// `x-rust-type`: the schema is one of `read_by_type`, or lies below one
+    /// along the segments that read follows.
+    fn is_read_by_type(&self, path: &str) -> bool {
+        return self.read_by_type.iter().any(|read| return read.covers(path));
+    }
+
     /// Whether the run's filters remove this operation.
     fn run_removes(&self, operation: &Value) -> bool {
-        let tags: Vec<String> = operation
-            .get("tags")
-            .and_then(Value::as_sequence)
-            .map(|tags| return tags.iter().filter_map(Value::as_str).map(str::to_owned).collect())
-            .unwrap_or_default();
-        let id = operation.get("operationId").and_then(Value::as_str);
-        return crate::filter::removes_operation(&self.run.filters, &tags, id);
+        return run_removes(self.run, operation);
     }
 
     fn walk(&mut self, value: &Value, traversal: Traversal, path: &str, depth: usize) {
@@ -655,7 +1202,7 @@ impl Sweep<'_> {
         }
     }
 
-    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str) {
+    fn value_notes(&mut self, context: Context, key: &str, value: &Value, path: &str, below_replacement: bool) {
         if matches!(context, Context::Document | Context::Operation)
             && key == "security"
             && let Some(requirements) = value.as_sequence()
@@ -686,13 +1233,13 @@ impl Sweep<'_> {
                         "two members of this oneOf are the same schema, so no value of that shape matches exactly one of them as the document requires",
                     );
                 }
-                "default" if value.is_null() => {
+                "default" if value.is_null() && !below_replacement => {
                     self.warn(
                         path,
                         "the parser discards a null default, so an absent property does not receive explicit null",
                     );
                 }
-                "default" if context == Context::Schema => {
+                "default" if context == Context::Schema && !below_replacement => {
                     self.warn(
                         path,
                         "defaults are applied only at supported property and query-parameter uses",
@@ -720,7 +1267,12 @@ impl Sweep<'_> {
     }
 
     fn schema_notes(&mut self, value: &Value, context: Context, path: &str) {
-        if value.get("x-rust-type").is_some() && value.get("allOf").is_some() {
+        // Below a replaced schema nothing is lowered, so a note about what the
+        // lowering would not enforce there would mislead. The replacing schema's
+        // own notes stay, and so do those of a schema the lowering reads by type
+        // through the replacement, as a multipart lowering reads a sent field.
+        let lowered = self.replaced_at.is_none() || self.is_read_by_type(path);
+        if lowered && value.get("x-rust-type").is_some() && value.get("allOf").is_some() {
             self.warn(
                 path,
                 "constraints inherited through allOf are not enforced for x-rust-type",
@@ -730,7 +1282,8 @@ impl Sweep<'_> {
             && let Ok(schema) = serde_yaml::from_value::<openapiv3::Schema>(value.clone())
         {
             let location = path.split("/schema/").next().unwrap_or(path);
-            if !location.starts_with("/components/schemas/")
+            if lowered
+                && !location.starts_with("/components/schemas/")
                 && (location.contains("/parameters/")
                     || location.contains("/headers/")
                     || location.contains("/content/multipart~1form-data/")
@@ -742,13 +1295,14 @@ impl Sweep<'_> {
                     "nullable values have no supported null representation in this wire format",
                 );
             }
-            if crate::lower::default::unsupported_nullable_default(&schema) {
+            if lowered && crate::lower::default::unsupported_nullable_default(&schema) {
                 self.warn(
                     &pointer(path, "default"),
                     "this nullable default has no supported Rust literal and is ignored",
                 );
             }
-            if crate::lower::constraints::unsupported_nullable_constraints(&schema)
+            if lowered
+                && crate::lower::constraints::unsupported_nullable_constraints(&schema)
                 && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some())
             {
                 self.warn(path, "constraints on this nullable value type are not enforced");
@@ -764,6 +1318,7 @@ impl Sweep<'_> {
             );
         }
         if context == Context::Schema
+            && lowered
             && CONSTRAINT_KEYS.iter().any(|key| return value.get(*key).is_some())
             && !self.checked_query_schema(value, path)
             && !unsigned_type_holds_the_bound(value)
@@ -773,13 +1328,13 @@ impl Sweep<'_> {
                 "constraints are enforced only at supported field uses, not on type aliases or array items",
             );
         }
-        if value.get("x-rust-derive").is_some() && value.get("x-rust-type").is_none() {
+        if lowered && value.get("x-rust-derive").is_some() && value.get("x-rust-type").is_none() {
             self.warn(
                 &pointer(path, "x-rust-derive"),
                 "x-rust-derive requires x-rust-type and is otherwise ignored",
             );
         }
-        if matches!(kind, Some("number" | "boolean")) && value.get("enum").is_some() {
+        if lowered && matches!(kind, Some("number" | "boolean")) && value.get("enum").is_some() {
             self.warn(
                 &pointer(path, "enum"),
                 "number and boolean enum restrictions are not enforced",
@@ -792,7 +1347,7 @@ impl Sweep<'_> {
                 Some("number") => matches!(format, "float" | "double"),
                 _ => false,
             };
-            if !handled {
+            if lowered && !handled {
                 self.warn(
                     &pointer(path, "format"),
                     "this format is not implemented and the base type is used",
@@ -901,9 +1456,21 @@ mod tests {
     }
 
     fn inspect_yaml_for(yaml: &str, server: bool, filters: OutputOptions) -> Sweep<'static> {
+        return inspect_yaml_run(
+            yaml,
+            Run {
+                server,
+                operations: true,
+                referenced: false,
+                referenced_uses: Vec::new(),
+                filters,
+            },
+        );
+    }
+
+    fn inspect_yaml_run(yaml: &str, run: Run) -> Sweep<'static> {
         let value = serde_yaml::from_str(yaml).expect("valid YAML");
-        let run = Box::leak(Box::new(Run { server, filters }));
-        return inspect("spec.yaml", &value, run);
+        return inspect("spec.yaml", &value, Box::leak(Box::new(run)), &NoLookup);
     }
 
     #[test]
@@ -1101,7 +1668,7 @@ security: [{arbitrary: [custom]}]
         ] {
             let mut value: Value = serde_yaml::from_str(&yaml).expect("yaml");
             let run = Run::default();
-            let sweep = inspect("openapi.yaml", &value, &run);
+            let sweep = inspect("openapi.yaml", &value, &run, &NoLookup);
             assert!(sweep.problems.is_empty(), "{yaml}");
             let reported: Vec<String> = sweep
                 .warnings
@@ -1189,6 +1756,147 @@ security: [{arbitrary: [custom]}]
     /// A union matches by the Rust types of its members, and the notes on an
     /// unchecked constraint already name every place where that read differs
     /// from the document. So a union carries no note of its own.
+    #[test]
+    fn notes_about_the_lowering_are_quiet_below_a_replaced_schema() {
+        for (item, message) in [
+            (
+                "{type: string, format: date, nullable: true, maxLength: 3}",
+                "constraints on this nullable value type are not enforced",
+            ),
+            (
+                "{x-rust-type: 'crate::Inner', allOf: [{type: string, maxLength: 3}]}",
+                "constraints inherited through allOf are not enforced for x-rust-type",
+            ),
+            (
+                "{type: boolean, enum: [true]}",
+                "number and boolean enum restrictions are not enforced",
+            ),
+            (
+                "{type: string, xml: {name: item}}",
+                "XML serialization is not implemented",
+            ),
+            (
+                "{type: string, x-rust-derive: [Hash]}",
+                "x-rust-derive requires x-rust-type and is otherwise ignored",
+            ),
+            (
+                "{type: string, format: custom}",
+                "this format is not implemented and the base type is used",
+            ),
+            (
+                "{type: string, nullable: true, default: null}",
+                "the parser discards a null default",
+            ),
+        ] {
+            let below = inspect_yaml(&format!(
+                "components: {{schemas: {{Stamp: {{x-rust-type: 'crate::Stamp', type: array, items: {item}}}}}}}"
+            ));
+            assert!(below.problems.is_empty(), "{item}");
+            assert!(
+                !below
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                below.warnings
+            );
+            // A multipart body reads the component and its properties by type,
+            // so the note stays there even under the extension, also when the
+            // body is reached through a chain of component request bodies. A
+            // form-encoded body reuses the model, which reads the extension.
+            let schemas = format!(
+                "schemas: {{Form: {{x-rust-type: 'crate::Form', type: object, properties: {{field: {item}}}}}}}"
+            );
+            let multipart = inspect_yaml(&format!(
+                "paths: {{/a: {{post: {{requestBody: {{$ref: '#/components/requestBodies/Outer'}}, responses: {{}}}}}}}}\ncomponents: {{requestBodies: {{Outer: {{$ref: '#/components/requestBodies/Inner'}}, Inner: {{required: true, content: {{multipart/form-data: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}}}, {schemas}}}"
+            ));
+            assert!(
+                multipart
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                multipart.warnings
+            );
+            // The media type is read without case and parameters, as the body
+            // lowering reads it.
+            let spelled = inspect_yaml(&format!(
+                "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{'Multipart/Form-Data; boundary=x': {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{{schemas}}}"
+            ));
+            assert!(
+                spelled
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                spelled.warnings
+            );
+            let encoded = inspect_yaml(&format!(
+                "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{application/x-www-form-urlencoded: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{{schemas}}}"
+            ));
+            assert!(
+                !encoded
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                encoded.warnings
+            );
+            // The same item under a plain array is lowered, so it keeps the note.
+            let lowered = inspect_yaml(&format!(
+                "components: {{schemas: {{Stamps: {{type: array, items: {item}}}}}}}"
+            ));
+            assert!(
+                lowered
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(message)),
+                "{item}: {:?}",
+                lowered.warnings
+            );
+        }
+    }
+
+    /// The resolver looks up to `MAX_REF_DEPTH` components, the final one
+    /// included. A chain that needs exactly that many lookups resolves, and one
+    /// more does not, so the inspection must read the same chains. `links` is
+    /// the number of component request bodies that are themselves references;
+    /// the final body is one more lookup.
+    #[test]
+    fn a_request_body_chain_at_the_depth_limit_is_still_read_by_type() {
+        const NOTE: &str = "constraints are enforced only at supported field uses";
+        for (links, read) in [
+            (crate::loader::MAX_REF_DEPTH - 1, true),
+            (crate::loader::MAX_REF_DEPTH, false),
+        ] {
+            let mut bodies: Vec<String> = (1..=links)
+                .map(|index| {
+                    let target = if index == links {
+                        "Final".to_owned()
+                    } else {
+                        format!("Body{}", index + 1)
+                    };
+                    return format!("Body{index}: {{$ref: '#/components/requestBodies/{target}'}}");
+                })
+                .collect();
+            bodies.push("Final: {required: true, content: {multipart/form-data: {schema: {$ref: '#/components/schemas/Form'}}}}".to_owned());
+            let yaml = format!(
+                "paths: {{/a: {{post: {{requestBody: {{$ref: '#/components/requestBodies/Body1'}}, responses: {{}}}}}}}}\ncomponents: {{requestBodies: {{{}}}, schemas: {{Form: {{x-rust-type: 'crate::Form', type: object, properties: {{field: {{type: array, items: {{type: string, maxLength: 3}}}}}}}}}}}}",
+                bodies.join(", ")
+            );
+            let sweep = inspect_yaml(&yaml);
+            assert_eq!(
+                sweep
+                    .warnings
+                    .iter()
+                    .any(|warning| return warning.message.contains(NOTE)),
+                read,
+                "{links} links: {:?}",
+                sweep.warnings
+            );
+        }
+    }
+
     #[test]
     fn a_union_carries_no_note_of_its_own() {
         for schema in [
@@ -1303,6 +2011,69 @@ security: [{arbitrary: [custom]}]
             (component("{type: integer, minimum: 0, maximum: 9}"), true),
             (component("{type: number, minimum: 0}"), true),
             (component("{type: string, pattern: '^a$'}"), true),
+            // Below a custom type no code is generated, so no check is missing;
+            // a constraint on the replacing schema itself keeps its note.
+            (
+                component("{x-rust-type: 'crate::Stamp', oneOf: [{type: string, pattern: '^a$'}, {type: integer}]}"),
+                false,
+            ),
+            (
+                component("{x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}"),
+                false,
+            ),
+            (
+                component("{x-rust-type: 'crate::Stamp', type: string, pattern: '^a$'}"),
+                true,
+            ),
+            // The parameter lowering reads the type and not the extension, so a
+            // query schema with `x-rust-type` replaces nothing, and its items
+            // keep their note. The same holds through a `$ref`, and for the
+            // inline schema of a body.
+            (
+                parameter(
+                    "query",
+                    "{x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}",
+                ),
+                true,
+            ),
+            (
+                format!(
+                    "{}\ncomponents: {{schemas: {{Stamp: {{x-rust-type: 'crate::Stamp', type: array, items: {{type: string, maxLength: 3}}}}}}}}",
+                    parameter("query", "{$ref: '#/components/schemas/Stamp'}")
+                ),
+                true,
+            ),
+            (
+                "paths: {/a: {post: {requestBody: {content: {application/json: {schema: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}}}}, responses: {}}}}".to_owned(),
+                true,
+            ),
+            // The chain through an alias, a form body, and a one-member `allOf`
+            // in a body is read by type too.
+            (
+                format!(
+                    "{}\ncomponents: {{schemas: {{Alias: {{$ref: '#/components/schemas/Stamp'}}, Stamp: {{x-rust-type: 'crate::Stamp', type: array, items: {{type: string, maxLength: 3}}}}}}}}",
+                    parameter("query", "{$ref: '#/components/schemas/Alias'}")
+                ),
+                true,
+            ),
+            (
+                "paths: {/a: {post: {requestBody: {content: {application/json: {schema: {allOf: [{x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}]}}}}, responses: {}}}}".to_owned(),
+                true,
+            ),
+            // A sibling component whose name starts the same is not below the
+            // parameter's schema.
+            (
+                format!(
+                    "{}\ncomponents: {{schemas: {{Stamp: {{type: string}}, StampExtra: {{x-rust-type: 'crate::Extra', type: array, items: {{type: string, maxLength: 3}}}}}}}}",
+                    parameter("query", "{$ref: '#/components/schemas/Stamp'}")
+                ),
+                false,
+            ),
+            // A model property reads the extension, so below it the note is quiet.
+            (
+                component("{type: object, properties: {stamp: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}}}"),
+                false,
+            ),
         ] {
             let sweep = inspect_yaml(&yaml);
             assert!(sweep.problems.is_empty(), "{yaml}: {:?}", sweep.problems);
@@ -1370,8 +2141,250 @@ security: [{arbitrary: [custom]}]
         };
         assert!(!filtered(tagged, OutputOptions::default()));
         assert!(filtered(tagged, exclude.clone()));
-        assert!(!filtered(shared, exclude));
+        assert!(!filtered(shared, exclude.clone()));
         assert!(filtered(shared, exclude_both));
+
+        // A parameter in a removed operation reads nothing, so the custom type
+        // model it names keeps its replacement and loses the note.
+        let referenced = "paths: {/a: {get: {operationId: getA, tags: [internal], parameters: [{name: n, in: query, schema: {$ref: '#/components/schemas/Stamp'}}], responses: {}}}}\ncomponents: {schemas: {Stamp: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}}}";
+        assert!(filtered(referenced, OutputOptions::default()));
+        assert!(!filtered(referenced, exclude));
+    }
+
+    /// What the lowering reads by type follows from what the run lowers, not
+    /// from where a schema sits in the document.
+    #[test]
+    fn a_schema_is_read_by_type_only_where_a_lowered_operation_reads_it() {
+        const NOTE: &str = "constraints are enforced only at supported field uses";
+        let stamp = "{x-rust-type: 'crate::Stamp', type: array, items: {type: string, maxLength: 3}}";
+        let noted = |yaml: &str, run: Run| {
+            return inspect_yaml_run(yaml, run)
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE));
+        };
+        let operations = Run {
+            operations: true,
+            ..Run::default()
+        };
+        let models_only = Run::default();
+        let referenced = Run {
+            referenced: true,
+            operations: true,
+            referenced_uses: vec!["/components/parameters/N".to_owned()],
+            ..Run::default()
+        };
+        let referenced_elsewhere = Run {
+            referenced: true,
+            operations: true,
+            referenced_uses: vec!["/components/parameters/Other".to_owned()],
+            ..Run::default()
+        };
+
+        // A models-only run lowers no parameter, so the custom type is an alias
+        // and nothing else.
+        let query = format!(
+            "paths: {{/a: {{get: {{parameters: [{{name: n, in: query, schema: {stamp}}}], responses: {{}}}}}}}}"
+        );
+        assert!(noted(&query, operations.clone()));
+        assert!(!noted(&query, models_only.clone()));
+
+        // A path item's parameter that the operation overrides is not read.
+        let overridden = format!(
+            "paths: {{/a: {{parameters: [{{name: n, in: query, schema: {stamp}}}], get: {{parameters: [{{name: n, in: query, schema: {{type: string}}}}], responses: {{}}}}}}}}"
+        );
+        let inherited = format!(
+            "paths: {{/a: {{parameters: [{{name: n, in: query, schema: {stamp}}}], get: {{parameters: [{{name: n, in: header, schema: {{type: string}}}}], responses: {{}}}}}}}}"
+        );
+        assert!(!noted(&overridden, operations.clone()));
+        assert!(noted(&inherited, operations.clone()));
+
+        // A component parameter is read only when a kept operation names it,
+        // or when the document is one that another document references and
+        // that document's operations reach this very component.
+        let unused = format!("paths: {{}}\ncomponents: {{parameters: {{N: {{name: n, in: query, schema: {stamp}}}}}}}");
+        let named = format!(
+            "paths: {{/a: {{get: {{parameters: [{{$ref: '#/components/parameters/N'}}], responses: {{}}}}}}}}\ncomponents: {{parameters: {{N: {{name: n, in: query, schema: {stamp}}}}}}}"
+        );
+        assert!(!noted(&unused, operations.clone()));
+        assert!(noted(&unused, referenced.clone()));
+        assert!(!noted(&unused, referenced_elsewhere));
+        assert!(!noted(
+            &unused,
+            Run {
+                operations: false,
+                ..referenced
+            }
+        ));
+        assert!(noted(&named, operations.clone()));
+
+        // An inline response body is read by type as an inline request body is.
+        let response = format!(
+            "paths: {{/a: {{get: {{responses: {{'200': {{description: ok, content: {{application/json: {{schema: {stamp}}}}}}}}}}}}}}}"
+        );
+        assert!(noted(&response, operations.clone()));
+
+        // A referenced document's own operations are not lowered by the run.
+        let referenced_run = Run {
+            referenced: true,
+            operations: true,
+            ..Run::default()
+        };
+        assert!(!noted(&query, referenced_run));
+
+        // An operation parameter written in another document overrides an
+        // inherited one the same way, read through the lookup.
+        struct OneParameter;
+        impl Lookup for OneParameter {
+            fn component(&self, file: &str, kind: &str, name: &str) -> Option<Value> {
+                return (file == "params.yaml" && kind == "parameters" && name == "N").then(|| {
+                    return serde_yaml::from_str("{name: n, in: query, schema: {type: string}}").expect("yaml");
+                });
+            }
+        }
+        let external_override = format!(
+            "paths: {{/a: {{parameters: [{{name: n, in: query, schema: {stamp}}}], get: {{parameters: [{{$ref: 'params.yaml#/components/parameters/N'}}], responses: {{}}}}}}}}"
+        );
+        let value: Value = serde_yaml::from_str(&external_override).expect("yaml");
+        let with_lookup = inspect("spec.yaml", &value, &operations, &OneParameter);
+        assert!(
+            !with_lookup
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            with_lookup.warnings
+        );
+        let without_lookup = inspect("spec.yaml", &value, &operations, &NoLookup);
+        assert!(
+            without_lookup
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            without_lookup.warnings
+        );
+
+        // A header is overridden without case, and the headers the framework
+        // owns are never read.
+        let header_override = format!(
+            "paths: {{/a: {{parameters: [{{name: X-Token, in: header, schema: {stamp}}}], get: {{parameters: [{{name: x-token, in: header, schema: {{type: string}}}}], responses: {{}}}}}}}}"
+        );
+        let reserved = format!(
+            "paths: {{/a: {{get: {{parameters: [{{name: Authorization, in: header, schema: {stamp}}}], responses: {{}}}}}}}}"
+        );
+        let plain_header = format!(
+            "paths: {{/a: {{get: {{parameters: [{{name: X-Token, in: header, schema: {stamp}}}], responses: {{}}}}}}}}"
+        );
+        assert!(!noted(&header_override, operations.clone()));
+        assert!(!noted(&reserved, operations.clone()));
+        assert!(noted(&plain_header, operations.clone()));
+
+        // A multipart body reads the properties the request sends, and a
+        // `readOnly` one is skipped before its type is read.
+        let multipart = |read_only: &str| {
+            return format!(
+                "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{multipart/form-data: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{schemas: {{Form: {{x-rust-type: 'crate::Form', type: object, properties: {{tags: {{{read_only}type: array, items: {{type: string, maxLength: 3}}}}}}}}}}}}"
+            );
+        };
+        assert!(noted(&multipart(""), operations.clone()));
+        assert!(!noted(&multipart("readOnly: true, "), operations.clone()));
+
+        // A field that names a `readOnly` schema is skipped the same way, so a
+        // custom type array behind it keeps its replacement.
+        let through_reference = |read_only: &str| {
+            return format!(
+                "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{multipart/form-data: {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{schemas: {{Served: {{{read_only}x-rust-type: 'crate::Served', type: array, items: {{type: string, maxLength: 3}}}}, Form: {{type: object, properties: {{tags: {{$ref: '#/components/schemas/Served'}}}}}}}}}}"
+            );
+        };
+        assert!(noted(&through_reference(""), operations.clone()));
+        assert!(!noted(&through_reference("readOnly: true, "), operations.clone()));
+
+        // The body lowering reads the first entry of each kind it supports and
+        // ignores the rest, so a second multipart entry and an XML entry are
+        // not read.
+        let second_multipart = format!(
+            "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{multipart/form-data: {{schema: {{type: object}}}}, 'multipart/form-data; boundary=x': {{schema: {{$ref: '#/components/schemas/Form'}}}}}}}}, responses: {{}}}}}}}}\ncomponents: {{schemas: {{Form: {{x-rust-type: 'crate::Form', type: object, properties: {{tags: {stamp}}}}}}}}}"
+        );
+        let xml = format!(
+            "paths: {{/a: {{post: {{requestBody: {{required: true, content: {{application/json: {{schema: {{type: object}}}}, application/xml: {{schema: {stamp}}}}}}}, responses: {{}}}}}}}}"
+        );
+        assert!(!noted(&second_multipart, operations.clone()));
+        assert!(!noted(&xml, operations.clone()));
+
+        // A `$ref` into another document is handed to that document's
+        // inspection as a use, instead of being read here.
+        let external = read_by_type(
+            &serde_yaml::from_str(
+                "paths: {/a: {get: {parameters: [{$ref: 'shared.yaml#/components/parameters/N'}], responses: {}}}}",
+            )
+            .expect("yaml"),
+            &operations,
+            &NoLookup,
+        );
+        assert_eq!(
+            external.external,
+            vec![("shared.yaml".to_owned(), "/components/parameters/N".to_owned())]
+        );
+    }
+
+    /// The wire-format note on a nullable parameter value is about the
+    /// lowering too, so a models-only run, which lowers no parameter, gives
+    /// none below a custom type.
+    #[test]
+    fn the_wire_format_note_is_quiet_where_no_parameter_is_lowered() {
+        const NOTE: &str = "nullable values have no supported null representation";
+        let yaml = "paths: {/a: {get: {parameters: [{name: n, in: query, schema: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, nullable: true}}}], responses: {}}}}";
+        let lowered = inspect_yaml_run(
+            yaml,
+            Run {
+                operations: true,
+                ..Run::default()
+            },
+        );
+        assert!(
+            lowered
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            lowered.warnings
+        );
+        let models_only = inspect_yaml_run(yaml, Run::default());
+        assert!(
+            !models_only
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            models_only.warnings
+        );
+    }
+
+    /// The replacing schema is lowered, so its own notes stay, those on its
+    /// keys included. Only what lies below it is unlowered.
+    #[test]
+    fn the_replacing_schema_keeps_the_notes_on_its_own_keys() {
+        const NOTE: &str = "the parser discards a null default";
+        let own = inspect_yaml(
+            "components: {schemas: {Holder: {type: object, properties: {stamp: {x-rust-type: String, type: string, nullable: true, default: null}}}}}",
+        );
+        assert!(
+            own.warnings.iter().any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            own.warnings
+        );
+        let below = inspect_yaml(
+            "components: {schemas: {Stamp: {x-rust-type: 'crate::Stamp', type: array, items: {type: string, nullable: true, default: null}}}}",
+        );
+        assert!(
+            !below
+                .warnings
+                .iter()
+                .any(|warning| return warning.message.contains(NOTE)),
+            "{:?}",
+            below.warnings
+        );
     }
 
     #[test]
