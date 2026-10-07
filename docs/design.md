@@ -602,13 +602,40 @@ target with an `enum` or an `x-rust-type` is left alone: there the name and the
 type below it are not the same thing.
 
 A constraint on a schema that no field holds has no check, and it produces a
-warning. A type alias, an array item, and an inline body schema are examples.
-Two uses produce no warning. When the run generates the server, the schema of a
-query parameter in an operation the run keeps becomes a field of the query
-struct, which checks it; a client only writes a query, so a run with no server
-keeps the warning, and so does an operation the filters remove. An integer whose
-only constraint is `minimum: 0` becomes an unsigned type, which refuses a
-negative value at every use.
+warning. A schema below an `x-rust-type` produces none, because the custom type
+reads the whole value and no generated code could check it there; the same
+holds for the other notes about what the lowering would not enforce. The
+exception is a schema that the parameter lowering, the inline body lowering, or
+the multipart lowering reads by type. The inspection finds those from what the
+run lowers: for each operation the run keeps, its parameters, including the
+path item's own unless the operation overrides them, a header without case,
+its request body, and its responses, each followed through any chain of
+component references, and each body or response through the media entries the
+body selection keeps, the first of each supported kind. A parameter's schema
+counts, except for the headers the framework owns; a component a parameter
+names counts through any alias chain; an inline body or response schema
+counts; and the fields a multipart body sends count, a `readOnly` one not
+among them, whether the mark sits on the field or on the schema it names. Each
+counts together with what it reaches through `items`, `additionalProperties`,
+and a one-member `allOf`. Those lowerings do not read the extension, so the
+notes stay there, even below a replaced schema. A body or response that names
+a model reuses it, and the model reads the extension, so it is not an
+exception; nor is a form-encoded body. A models-only run lowers no operation
+and reads nothing by type. A `$ref` into another document is carried to the
+inspection of that document, which reads the components so reached and nothing
+else of its own, because the run lowers the root document's operations only.
+Those uses are settled across every document before any of them is inspected,
+so the order in which the documents are read changes nothing, and a parameter's
+identity for an override is read across documents the way the resolver reads
+it.
+
+A type alias, an array item, and an inline body schema are examples of a
+schema that no field holds. Two uses produce no warning. When the run generates
+the server, the schema of a query parameter in an operation the run keeps
+becomes a field of the query struct, which checks it; a client only writes a
+query, so a run with no server keeps the warning, and so does an operation the
+filters remove. An integer whose only constraint is `minimum: 0` becomes an
+unsigned type, which refuses a negative value at every use.
 
 A rule that cannot reach its type is an error, not a silence. A `format` of
 `date`, `date-time`, `uuid`, or `binary` names a type that is no longer a string,
