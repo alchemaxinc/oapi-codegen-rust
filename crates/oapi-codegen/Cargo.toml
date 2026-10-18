@@ -38,9 +38,9 @@ proc-macro2 = "1.0.107"
 quote = "1.0.47"
 regex = { version = "1.13.1", default-features = false, features = ["std", "perf", "unicode"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.152"
+serde_json = "1.0.154"
 serde_yaml = "0.9.34"
-syn = { version = "3.0.7", features = ["full"] }
+syn = { version = "3.0.9", features = ["full"] }
 
 [dev-dependencies]
 axum = { version = "0.8.9", features = ["multipart"] }
